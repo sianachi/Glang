@@ -1,0 +1,681 @@
+# Glang
+# Language Specification — v1.0
+
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [Lexical Structure](#2-lexical-structure)
+3. [Types](#3-types)
+4. [Variables & Declarations](#4-variables--declarations)
+5. [Operators](#5-operators)
+6. [Control Flow](#6-control-flow)
+7. [Functions](#7-functions)
+8. [Memory Model](#8-memory-model)
+9. [Classes](#9-classes)
+10. [Interfaces](#10-interfaces)
+11. [Scope & Lifetime](#11-scope--lifetime)
+12. [Modules](#12-modules)
+13. [Entry Point](#13-entry-point)
+14. [Memory-safety violations](#14-memory-safety-violations)
+15. [Future Work](#15-future-work)
+
+---
+
+## 1. Overview
+
+A statically-typed, manually-managed, C-style language with single inheritance and interface-based polymorphism. The runtime is intentionally minimal — no garbage collector, no exceptions, no implicit allocations. The only built-in I/O is `print` for diagnostics (§7.5); richer I/O and higher-level facilities (dynamic arrays, GC allocators, string builders, etc.) are provided by a standard library written in the language itself.
+
+**Design goals:**
+- Simple, unambiguous syntax close to C/Java
+- Explicit control over memory
+- A type system expressive enough to write a standard library
+- A small, auditable runtime
+
+---
+
+## 2. Lexical Structure
+
+### 2.1 Comments
+
+```
+// Single-line comment
+
+/* Multi-line
+   comment */
+```
+
+Block comments do not nest.
+
+### 2.2 Identifiers
+
+Identifiers start with a letter or underscore, followed by any number of letters, digits, or underscores.
+
+```
+[a-zA-Z_][a-zA-Z0-9_]*
+```
+
+### 2.3 Keywords
+
+```
+alloc     bool      break     char      class     continue
+delete    else      extends   false     float     for
+free      if        implements  import  int       interface
+new       null      return    static    string    super
+this      true      void      while
+```
+
+### 2.4 Literals
+
+| Kind    | Examples                              |
+|---------|---------------------------------------|
+| Integer | `0` `42` `-7` `0xFF` `0b1010`         |
+| Float   | `3.14` `-0.5` `1e10` `1.5e-3`         |
+| Bool    | `true` `false`                        |
+| Char    | `'a'` `'\n'` `'\t'` `'\\'` `'\xFF'`  |
+| String  | `"hello"` `"line\n"` `"say \"hi\""` |
+| Null    | `null`                                |
+
+Integer literals may use `_` as a visual separator: `1_000_000`.
+
+### 2.5 Escape sequences (char and string)
+
+| Sequence | Meaning        |
+|----------|----------------|
+| `\n`     | Newline        |
+| `\t`     | Tab            |
+| `\r`     | Carriage return|
+| `\\`     | Backslash      |
+| `\"`     | Double quote   |
+| `\'`     | Single quote   |
+| `\0`     | Null byte      |
+| `\xHH`   | Hex byte       |
+
+---
+
+## 3. Types
+
+### 3.1 Primitive types
+
+| Type     | Representation   | Notes                                      |
+|----------|------------------|--------------------------------------------|
+| `int`    | 64-bit signed    | Integer division when both operands are int|
+| `float`  | 64-bit IEEE 754  |                                            |
+| `bool`   | 1 byte           | Not an alias of int                        |
+| `char`   | 1 byte           | ASCII only                                 |
+| `string` | Heap (ptr + len) | Immutable; `+` allocates a new string      |
+| `null`   | —                | Only assignable to pointer/object types    |
+
+### 3.2 Pointer types
+
+Any type can be made into a pointer type with `*`:
+
+```
+int*       // pointer to int
+int**      // pointer to pointer to int
+Dog*       // pointer to Dog instance
+void*      // untyped pointer
+```
+
+`void*` can hold any pointer. Casting to/from `void*` is explicit.
+
+### 3.3 Array types
+
+Fixed-size arrays are declared with the size as part of the type:
+
+```
+int[10] buf;           // 10 ints on the stack
+char[256] name;
+```
+
+Array size must be a compile-time constant. Dynamic arrays are a standard library concern. Arrays are zero-indexed. Out-of-bounds access is undefined behaviour.
+
+### 3.4 Type casting
+
+All casts are explicit:
+
+```
+float f = 3.9;
+int i = (int) f;       // truncates to 3
+
+void* p = (void*) myPtr;
+Dog* d = (Dog*) p;
+```
+
+No implicit numeric widening or narrowing. No implicit bool/int conversion.
+
+---
+
+## 4. Variables & Declarations
+
+### 4.1 Local variables
+
+```
+int x = 5;
+float pi = 3.14;
+bool flag = true;
+string name = "Rex";
+```
+
+Type is required. Initialiser is required — uninitialized variables are a compile error.
+
+### 4.2 Multiple declarations
+
+One variable per declaration statement. No `int x = 1, y = 2;`.
+
+### 4.3 Constants
+
+```
+// No const keyword in v1.
+// Convention: ALL_CAPS names for values that should not change.
+int MAX_SIZE = 1024;
+```
+
+A `const` keyword is reserved for a future version.
+
+---
+
+## 5. Operators
+
+### 5.1 Arithmetic
+
+| Operator | Description                              |
+|----------|------------------------------------------|
+| `+`      | Addition; also string concatenation      |
+| `-`      | Subtraction                              |
+| `*`      | Multiplication                           |
+| `/`      | Division (integer if both sides are int) |
+| `%`      | Modulo (int only)                        |
+
+### 5.2 Comparison
+
+All return `bool`.
+
+```
+==  !=  <  >  <=  >=
+```
+
+Comparing a pointer to `null` is valid. Comparing two pointers checks address equality.
+
+### 5.3 Logical
+
+```
+&&   // AND — short-circuit
+||   // OR  — short-circuit
+!    // NOT
+```
+
+Operands must be `bool`. Integers are not truthy.
+
+### 5.4 Bitwise (int only)
+
+```
+&   |   ^   ~   <<   >>
+```
+
+Right shift is arithmetic (sign-extending) for signed ints.
+
+### 5.5 Assignment
+
+```
+=   +=   -=   *=   /=   %=   &=   |=   ^=   <<=   >>=
+```
+
+Assignment is a statement, not an expression. It does not return a value. Chained assignment (`a = b = 5`) is not allowed.
+
+The bitwise compound assignments (`&=`, `|=`, `^=`, `<<=`, `>>=`) are only valid on `int` operands, matching the restriction on their non-compound counterparts (§5.4).
+
+### 5.6 Increment / decrement
+
+Prefix only:
+
+```
+++i;   // increment
+--i;   // decrement
+```
+
+Postfix (`i++`) is not supported.
+
+### 5.7 Address-of and dereference
+
+```
+&x       // address of x — produces int*
+*p       // dereference pointer p
+p->field // dereference p and access field (equivalent to (*p).field)
+```
+
+### 5.8 Operator precedence (high to low)
+
+| Level | Operators                        |
+|-------|----------------------------------|
+| 1     | `!` `~` `++` `--` (prefix) `&` `*` (unary) cast |
+| 2     | `*` `/` `%`                      |
+| 3     | `+` `-`                          |
+| 4     | `<<` `>>`                        |
+| 5     | `<` `>` `<=` `>=`                |
+| 6     | `==` `!=`                        |
+| 7     | `&`                              |
+| 8     | `^`                              |
+| 9     | `\|`                             |
+| 10    | `&&`                             |
+| 11    | `\|\|`                           |
+| 12    | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` |
+
+Use parentheses liberally. When in doubt, parenthesise.
+
+---
+
+## 6. Control Flow
+
+### 6.1 If / else
+
+```c
+if (x > 0) {
+    // ...
+} else if (x == 0) {
+    // ...
+} else {
+    // ...
+}
+```
+
+Braces are always required, even for single-statement bodies. The condition must be `bool`.
+
+### 6.2 While
+
+```c
+while (cond) {
+    // ...
+}
+```
+
+### 6.3 For
+
+```c
+for (int i = 0; i < n; ++i) {
+    // ...
+}
+```
+
+The init, condition, and post sections are all required. The loop variable is scoped to the loop body.
+
+### 6.4 Break and continue
+
+```c
+break;      // exit the nearest enclosing loop
+continue;   // jump to the next iteration
+```
+
+### 6.5 Return
+
+```c
+return;          // void function
+return value;    // typed function
+```
+
+All non-void code paths must return a value — enforced at compile time.
+
+---
+
+## 7. Functions
+
+### 7.1 Declaration
+
+```c
+int add(int a, int b) {
+    return a + b;
+}
+
+void log(string msg) {
+    // ...
+}
+```
+
+Return type is required. Parameter types are required. No default parameters. No overloading — each function name must be unique within its scope.
+
+### 7.2 Multiple return values
+
+Use out-parameters (pointers):
+
+```c
+void divmod(int a, int b, int* q, int* r) {
+    *q = a / b;
+    *r = a % b;
+}
+
+// call site
+int q = 0;
+int r = 0;
+divmod(10, 3, &q, &r);
+```
+
+### 7.3 Recursion
+
+Supported. No tail-call optimisation guarantee in v1.
+
+### 7.4 Restrictions
+
+- No function overloading
+- No default parameters
+- No variadic functions
+- Functions are not first-class values (no function pointers in v1)
+- No nested function definitions
+
+### 7.5 Built-in functions
+
+The runtime provides a single built-in function, `print`, for diagnostic output:
+
+```c
+print(42);          // 42
+print(3.14);        // 3.14
+print(true);        // true
+print('a');         // a
+print("hello");     // hello
+```
+
+- `print` takes exactly one argument of a primitive type (`int`, `float`, `bool`, `char`, or `string`) and returns `void`.
+- It writes the value followed by a newline. `bool` prints as `true`/`false`.
+- `print` is not a keyword and not overloadable; it occupies the global function namespace and may not be redefined.
+- It is the only built-in I/O. Formatted, buffered, or file I/O is a standard-library concern (see §15, variadic functions).
+
+---
+
+## 8. Memory Model
+
+### 8.1 Stack allocation
+
+Primitive types and fixed-size arrays declared inside a function or block are stack-allocated. They are freed automatically when the enclosing scope exits.
+
+```c
+int x = 5;           // stack
+int[64] buf;         // stack
+```
+
+### 8.2 Heap allocation — primitives
+
+```c
+int* p = alloc(int);
+*p = 42;
+free(p);
+```
+
+`alloc(T)` allocates enough memory for one value of type `T` and returns a `T*`. The memory is uninitialised — you must write before reading. `free(p)` releases the memory. Behaviour after `free` is undefined.
+
+### 8.3 Heap allocation — objects
+
+Objects are always heap-allocated via `new` and `delete`:
+
+```c
+Dog* d = new Dog("Rex");
+d->speak();
+delete d;            // calls destructor, then frees memory
+```
+
+`new` calls the constructor. `delete` calls the destructor, then frees the memory. Calling `delete` on `null` is a no-op.
+
+### 8.4 Destructor chaining
+
+When `delete` is called on a subclass instance through a base class pointer, the subclass destructor runs first, then the base class destructor. This requires that the vtable stores the destructor.
+
+```c
+Animal* a = new Dog("Rex");
+delete a;            // calls ~Dog(), then ~Animal()
+```
+
+### 8.5 Ownership rules
+
+The language has no ownership tracking. By convention:
+- The caller that calls `new` owns the object
+- A function that receives a pointer does not own it unless documented otherwise
+- The standard library will provide owning wrapper types
+
+### 8.6 `null`
+
+`null` can be assigned to any pointer or object type. Dereferencing `null` is undefined behaviour. Null checks are explicit:
+
+```c
+if (p == null) { ... }
+```
+
+---
+
+## 9. Classes
+
+### 9.1 Declaration
+
+```c
+class Animal {
+    // fields
+    string name;
+    static int count = 0;
+
+    // constructor
+    Animal(string n) {
+        this.name = n;
+        Animal.count += 1;
+    }
+
+    // destructor
+    ~Animal() {
+        Animal.count -= 1;
+    }
+
+    // instance method
+    string speak() {
+        return "...";
+    }
+
+    // static method
+    static int getCount() {
+        return Animal.count;
+    }
+}
+```
+
+### 9.2 Fields
+
+- Instance fields are declared at the top of the class body with their type
+- Static fields are declared with `static` and must have an initialiser
+- All fields are public in v1
+- Fields are accessed via `this.field` inside instance methods, and via `ClassName.field` for static fields
+
+### 9.3 Constructor
+
+- Same name as the class, no return type
+- Called via `new ClassName(args)`
+- A class with no explicit constructor gets a zero-argument default constructor that zero-initialises all fields
+- A class with any explicit constructor does not get a default constructor
+
+### 9.4 Destructor
+
+- Named `~ClassName()`, no parameters, no return type
+- Called automatically by `delete`
+- A class with no explicit destructor gets a no-op destructor
+- Destructor chaining through inheritance is automatic
+
+### 9.5 `this`
+
+Inside any instance method or constructor, `this` is a pointer to the current instance. Field and method access through `this` uses `this.field` / `this.method()`.
+
+### 9.6 Static members
+
+Accessed via `ClassName.member`, never via an instance. Static methods have no access to `this`.
+
+### 9.7 Inheritance
+
+Single inheritance only via `extends`:
+
+```c
+class Dog extends Animal {
+    // constructor must call super
+    Dog(string n) : super(n) {}
+
+    // override a method
+    string speak() {
+        return "woof";
+    }
+}
+```
+
+- `super(args)` calls the parent constructor and must be the first thing in a subclass constructor body
+- All methods are virtual by default — dispatch is always through the vtable
+- No `override` keyword required, but a method with the same signature as a parent method silently overrides it
+- A subclass can call a parent method explicitly: `super.speak()`
+- No multiple inheritance of classes
+
+### 9.8 Vtable
+
+Every class has a vtable. The vtable stores pointers to all virtual methods (all instance methods) and the destructor. This is handled entirely by the runtime — user code does not interact with vtables directly.
+
+### 9.9 No access modifiers
+
+All fields and methods are public in v1. A future version may add `private` and `protected`.
+
+### 9.10 No abstract classes
+
+Declare an interface instead.
+
+---
+
+## 10. Interfaces
+
+### 10.1 Declaration
+
+```c
+interface Printable {
+    string toString();
+}
+
+interface Comparable {
+    int compareTo(Comparable* other);
+}
+```
+
+Interface bodies contain method signatures only — no fields, no static members, no default implementations.
+
+### 10.2 Implementation
+
+```c
+class Dog extends Animal implements Printable, Comparable {
+    string toString() {
+        return this.name;
+    }
+
+    int compareTo(Comparable* other) {
+        // ...
+    }
+}
+```
+
+- A class may implement multiple interfaces
+- All methods declared in every implemented interface must be present — missing implementations are a compile error
+- Interface pointer types are valid: `Printable* p = new Dog("Rex");`
+- Calling a method through an interface pointer dispatches via vtable
+
+---
+
+## 11. Scope & Lifetime
+
+### 11.1 Block scoping
+
+Variables are visible from their declaration to the end of the enclosing `{}` block. There is no hoisting.
+
+```c
+int x = 1;
+{
+    int x = 2;   // shadows outer x — compiler warning
+    // inner x freed here
+}
+// outer x = 1
+```
+
+Shadowing is allowed but generates a compiler warning.
+
+### 11.2 Stack lifetime
+
+Stack variables are destroyed in reverse declaration order when their scope exits. If a class has a destructor, it is called.
+
+### 11.3 Heap lifetime
+
+Heap objects live until explicitly freed with `delete` or `free`. The compiler does not track heap lifetimes.
+
+---
+
+## 12. Modules
+
+### 12.1 Import
+
+```c
+import "path/to/file.lang";
+```
+
+Importing a file makes all top-level declarations in that file visible in the current file. Import paths are relative to the source file. Circular imports are a compile error. Duplicate imports are silently ignored (include-guard semantics).
+
+### 12.2 No namespaces
+
+All top-level names share a single global namespace in v1. Naming conventions (e.g. `List_create`) are used to avoid collisions.
+
+---
+
+## 13. Entry Point
+
+Every program must define exactly one `main` function:
+
+```c
+int main() {
+    // ...
+    return 0;
+}
+```
+
+The return value is the process exit code. `0` means success. No command-line argument support in v1.
+
+---
+
+## 14. Memory-safety violations
+
+These operations are programming errors. The language does not define a way to
+recover from them.
+
+**Checked by the reference interpreter** — it detects these and aborts with a
+runtime error (a `RuntimeError` diagnostic) rather than continuing:
+
+- Dereferencing a null pointer
+- Dereferencing a freed pointer (use-after-free)
+- Out-of-bounds array access
+- Calling `delete` (or `free`) twice on the same pointer
+- `free` of a pointer that was not heap-allocated
+- Division or modulo by zero
+
+**Undefined behaviour** — not detected; results are unspecified:
+
+- Reading an uninitialised `alloc`'d value (the interpreter zero-fills, but
+  programs must not rely on this)
+- Integer overflow (wraps on most platforms, but not guaranteed)
+- Casting to an incompatible pointer type and dereferencing
+
+> **Direction:** the reference interpreter favours fail-fast safety, so most of
+> the classic C hazards above are *checked* rather than silently undefined. A
+> future optimising or native backend may downgrade some checked cases to true
+> undefined behaviour for performance; portable programs should not depend on
+> either the check firing or on a particular post-violation result.
+
+---
+
+## 15. Future Work
+
+The following are explicitly out of scope for v1 and reserved for later versions:
+
+| Feature              | Notes                                              |
+|----------------------|----------------------------------------------------|
+| Generics             | Stdlib uses `void*` in the meantime                |
+| Function pointers    | Needed for callbacks, higher-order patterns        |
+| Closures / lambdas   | Depends on function pointers                       |
+| Exceptions           | Error handling via return values for now           |
+| `const` qualifier    | Variables and parameters                           |
+| Access modifiers     | `private`, `protected`                             |
+| Abstract classes     | Use interfaces                                     |
+| Operator overloading | Needed for ergonomic GC wrapper types              |
+| Enums                | Can be emulated with `static int` class fields     |
+| Garbage collection   | Will be implemented as a standard library          |
+| Command-line args    | `main(int argc, string[] argv)`                    |
+| Variadic functions   | Needed for printf-style stdlib functions           |
