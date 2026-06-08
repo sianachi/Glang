@@ -1,0 +1,33 @@
+{
+  "name": "glang",
+  "displayName": "Glang",
+  "description": "Syntax highlighting and snippets for the Glang / GScript language",
+  "version": "0.1.0",
+  "publisher": "glang",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["glang", "gscript", "lang"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "glang",
+        "aliases": ["Glang", "GScript"],
+        "extensions": [".lang", ".glang"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "glang",
+        "scopeName": "source.glang",
+        "path": "./syntaxes/glang.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "glang",
+        "path": "./snippets/glang.json"
+      }
+    ]
+  }
+}

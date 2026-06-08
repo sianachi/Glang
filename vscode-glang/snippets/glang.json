@@ -1,0 +1,148 @@
+{
+  "Main entry point": {
+    "prefix": "main",
+    "body": [
+      "int main() {",
+      "\t$0",
+      "\treturn 0;",
+      "}"
+    ],
+    "description": "int main() entry point"
+  },
+
+  "Function declaration": {
+    "prefix": "fn",
+    "body": [
+      "${1:void} ${2:name}(${3}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Function declaration"
+  },
+
+  "Class declaration": {
+    "prefix": "class",
+    "body": [
+      "class ${1:Name} {",
+      "\t${2:int} ${3:field};",
+      "",
+      "\t${1:Name}(${4:int ${3:field}}) {",
+      "\t\tthis.${3:field} = ${3:field};",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Class declaration with constructor"
+  },
+
+  "Class with destructor": {
+    "prefix": "classd",
+    "body": [
+      "class ${1:Name} {",
+      "\t${2:int} ${3:field};",
+      "",
+      "\t${1:Name}(${4}) {",
+      "\t\t$0",
+      "\t}",
+      "",
+      "\t~${1:Name}() {",
+      "\t}",
+      "}"
+    ],
+    "description": "Class with constructor and destructor"
+  },
+
+  "Interface declaration": {
+    "prefix": "interface",
+    "body": [
+      "interface ${1:Name} {",
+      "\t${2:void} ${3:method}(${4});",
+      "\t$0",
+      "}"
+    ],
+    "description": "Interface declaration"
+  },
+
+  "Enum declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:VARIANT_A},",
+      "\t${3:VARIANT_B},$0",
+      "}"
+    ],
+    "description": "Enum declaration"
+  },
+
+  "If statement": {
+    "prefix": "if",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If statement"
+  },
+
+  "If-else statement": {
+    "prefix": "ife",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$0",
+      "} else {",
+      "\t",
+      "}"
+    ],
+    "description": "If-else statement"
+  },
+
+  "While loop": {
+    "prefix": "while",
+    "body": [
+      "while (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "While loop"
+  },
+
+  "For loop": {
+    "prefix": "for",
+    "body": [
+      "for (int ${1:i} = ${2:0}; ${1:i} < ${3:n}; ${1:i} += 1) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "For loop"
+  },
+
+  "New expression": {
+    "prefix": "new",
+    "body": "${1:ClassName}* ${2:ptr} = new ${1:ClassName}($3);",
+    "description": "Heap-allocate a class instance"
+  },
+
+  "Delete expression": {
+    "prefix": "del",
+    "body": "delete ${1:ptr};",
+    "description": "Free a heap-allocated instance"
+  },
+
+  "Const variable": {
+    "prefix": "const",
+    "body": "const ${1:int} ${2:NAME} = $3;",
+    "description": "Const local variable"
+  },
+
+  "Import statement": {
+    "prefix": "import",
+    "body": "import \"${1:path/to/file.lang}\";",
+    "description": "Import another Glang source file"
+  },
+
+  "Print statement": {
+    "prefix": "print",
+    "body": "print(${1:value});",
+    "description": "Print a value"
+  }
+}

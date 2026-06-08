@@ -1,0 +1,255 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Glang",
+  "scopeName": "source.glang",
+  "fileTypes": ["lang", "glang"],
+  "patterns": [
+    { "include": "#block-comment" },
+    { "include": "#line-comment" },
+    { "include": "#string" },
+    { "include": "#char-literal" },
+    { "include": "#number" },
+    { "include": "#constant-language" },
+    { "include": "#storage-modifier" },
+    { "include": "#control-keyword" },
+    { "include": "#storage-type" },
+    { "include": "#class-decl" },
+    { "include": "#enum-decl" },
+    { "include": "#interface-decl" },
+    { "include": "#import-stmt" },
+    { "include": "#inherit-keyword" },
+    { "include": "#language-variable" },
+    { "include": "#builtin-function" },
+    { "include": "#destructor" },
+    { "include": "#function-call" },
+    { "include": "#operator" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+
+    "block-comment": {
+      "name": "comment.block.glang",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.glang" } },
+      "endCaptures":   { "0": { "name": "punctuation.definition.comment.end.glang" } }
+    },
+
+    "line-comment": {
+      "name": "comment.line.double-slash.glang",
+      "match": "//.*$"
+    },
+
+    "string": {
+      "name": "string.quoted.double.glang",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.glang",
+          "match": "\\\\([nrt0abf\\\\'\"]|x[0-9A-Fa-f]{2})"
+        },
+        {
+          "name": "invalid.illegal.unrecognized-escape.glang",
+          "match": "\\\\."
+        }
+      ]
+    },
+
+    "char-literal": {
+      "name": "string.quoted.single.glang",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.glang",
+          "match": "\\\\([nrt0abf\\\\'\"]|x[0-9A-Fa-f]{2})"
+        }
+      ]
+    },
+
+    "number": {
+      "patterns": [
+        {
+          "comment": "Floating-point literal: 3.14, 1.0e-5",
+          "name": "constant.numeric.float.glang",
+          "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?\\b"
+        },
+        {
+          "comment": "Hexadecimal literal: 0xFF, 0XA_B",
+          "name": "constant.numeric.hex.glang",
+          "match": "\\b0[xX][0-9A-Fa-f][0-9A-Fa-f_]*\\b"
+        },
+        {
+          "comment": "Binary literal: 0b1010, 0B1_0",
+          "name": "constant.numeric.binary.glang",
+          "match": "\\b0[bB][01][01_]*\\b"
+        },
+        {
+          "comment": "Decimal integer: 42, 1_000_000",
+          "name": "constant.numeric.integer.decimal.glang",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+
+    "constant-language": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.true.glang",
+          "match": "\\btrue\\b"
+        },
+        {
+          "name": "constant.language.boolean.false.glang",
+          "match": "\\bfalse\\b"
+        },
+        {
+          "name": "constant.language.null.glang",
+          "match": "\\bnull\\b"
+        }
+      ]
+    },
+
+    "storage-modifier": {
+      "name": "storage.modifier.glang",
+      "match": "\\b(const|static|private|protected|public)\\b"
+    },
+
+    "control-keyword": {
+      "name": "keyword.control.glang",
+      "match": "\\b(if|else|while|for|break|continue|return|new|delete)\\b"
+    },
+
+    "storage-type": {
+      "name": "storage.type.glang",
+      "match": "\\b(int|float|bool|char|string|void|fn)\\b"
+    },
+
+    "class-decl": {
+      "comment": "class ClassName — names the declaration keyword and the class identifier",
+      "match": "\\b(class)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.class.glang" },
+        "2": { "name": "entity.name.class.glang" }
+      }
+    },
+
+    "enum-decl": {
+      "comment": "enum EnumName",
+      "match": "\\b(enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.enum.glang" },
+        "2": { "name": "entity.name.type.enum.glang" }
+      }
+    },
+
+    "interface-decl": {
+      "comment": "interface InterfaceName",
+      "match": "\\b(interface)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.interface.glang" },
+        "2": { "name": "entity.name.type.interface.glang" }
+      }
+    },
+
+    "import-stmt": {
+      "comment": "import \"path\";",
+      "match": "\\b(import)\\b",
+      "name": "keyword.other.import.glang"
+    },
+
+    "inherit-keyword": {
+      "name": "keyword.other.glang",
+      "match": "\\b(extends|implements|super)\\b"
+    },
+
+    "language-variable": {
+      "name": "variable.language.glang",
+      "match": "\\bthis\\b"
+    },
+
+    "builtin-function": {
+      "comment": "Built-in callables: print, alloc, free",
+      "name": "support.function.builtin.glang",
+      "match": "\\b(print|alloc|free)\\b(?=\\s*\\()"
+    },
+
+    "destructor": {
+      "comment": "Destructor declaration: ~ClassName()",
+      "match": "(~)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.glang" },
+        "2": { "name": "entity.name.function.destructor.glang" }
+      }
+    },
+
+    "function-call": {
+      "comment": "Any identifier immediately before '(' that was not already matched",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.glang" }
+      }
+    },
+
+    "operator": {
+      "patterns": [
+        {
+          "comment": "Arrow operator ->",
+          "name": "keyword.operator.arrow.glang",
+          "match": "->"
+        },
+        {
+          "comment": "Increment / decrement",
+          "name": "keyword.operator.increment.glang",
+          "match": "\\+\\+|--"
+        },
+        {
+          "comment": "Compound assignment operators",
+          "name": "keyword.operator.assignment.compound.glang",
+          "match": "\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>="
+        },
+        {
+          "comment": "Plain assignment",
+          "name": "keyword.operator.assignment.glang",
+          "match": "(?<![=!<>])=(?!=)"
+        },
+        {
+          "comment": "Comparison operators",
+          "name": "keyword.operator.comparison.glang",
+          "match": "==|!=|<=|>=|<|>"
+        },
+        {
+          "comment": "Logical operators",
+          "name": "keyword.operator.logical.glang",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "comment": "Bitwise shift operators",
+          "name": "keyword.operator.bitwise.shift.glang",
+          "match": "<<|>>"
+        },
+        {
+          "comment": "Bitwise operators",
+          "name": "keyword.operator.bitwise.glang",
+          "match": "&|\\||\\^|~"
+        },
+        {
+          "comment": "Arithmetic operators",
+          "name": "keyword.operator.arithmetic.glang",
+          "match": "\\+|-|\\*|/|%"
+        }
+      ]
+    },
+
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.terminator.statement.glang", "match": ";" },
+        { "name": "punctuation.separator.comma.glang",      "match": "," },
+        { "name": "punctuation.accessor.dot.glang",         "match": "\\." },
+        { "name": "punctuation.definition.block.glang",     "match": "[{}]" },
+        { "name": "punctuation.definition.bracket.glang",   "match": "[\\[\\]]" }
+      ]
+    }
+
+  }
+}
