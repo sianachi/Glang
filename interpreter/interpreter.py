@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from parser.ast_nodes import (
     Program, Stmt, Expr,
-    FunctionDecl, ClassDecl, StaticFieldDecl,
+    FunctionDecl, ClassDecl, StaticFieldDecl, EnumDecl,
     MethodDecl, ConstructorDecl, DestructorDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
     ReturnStmt, BreakStmt, ContinueStmt,
@@ -650,6 +650,16 @@ class Interpreter:
             return self._field_box(box.value.raw, expr.field_name, expr.line, expr.col)
 
         if isinstance(expr, FieldAccessExpr):
+            # Enum variant: Color.RED
+            if (
+                isinstance(expr.object, IdentifierExpr)
+                and self._env.is_enum(expr.object.name)
+                and self._frame.lookup(expr.object.name) is None
+            ):
+                enum_info = self._env.enums[expr.object.name]
+                val = enum_info.variants[expr.field_name]
+                return self._new_box(Value(NamedType(expr.object.name), val))
+
             # Static field: ClassName.field
             if (
                 isinstance(expr.object, IdentifierExpr)
@@ -722,6 +732,8 @@ class Interpreter:
                 return Value(t, "\0")
             if t.name == "string":
                 return Value(t, "")
+            if self._env.is_enum(t.name):
+                return Value(t, 0)
             # class-typed field with no pointer: treat as null reference
             return Value(t, Pointer(None))
         return Value(t, None)

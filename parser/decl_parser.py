@@ -11,6 +11,7 @@ try:
     from .ast_nodes import (
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
+        EnumDecl, EnumVariant,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -22,6 +23,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
+        EnumDecl, EnumVariant,
     )
 
 
@@ -53,7 +55,34 @@ class DeclParser:
             return self._parse_class()
         if self._s.check(TokenType.KW_INTERFACE):
             return self._parse_interface()
+        if self._s.check(TokenType.KW_ENUM):
+            return self._parse_enum()
         return self._parse_function()
+
+    # ------------------------------------------------------------------
+    # Enums
+    # ------------------------------------------------------------------
+
+    def _parse_enum(self) -> EnumDecl:
+        tok = self._s.advance()  # consume 'enum'
+        name_tok = self._s.expect(TokenType.IDENT)
+        self._s.expect(TokenType.LBRACE)
+        variants: List[EnumVariant] = []
+        while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            v_tok = self._s.expect(TokenType.IDENT)
+            explicit_val = None
+            if self._s.match(TokenType.ASSIGN):
+                val_tok = self._s.expect(TokenType.INT_LIT)
+                explicit_val = int(val_tok.value, 0)
+            variants.append(EnumVariant(
+                name=v_tok.value, value=explicit_val,
+                line=v_tok.line, col=v_tok.col,
+            ))
+            if not self._s.match(TokenType.COMMA):
+                break
+        self._s.expect(TokenType.RBRACE)
+        return EnumDecl(name=name_tok.value, variants=variants,
+                        line=tok.line, col=tok.col)
 
     # ------------------------------------------------------------------
     # Functions

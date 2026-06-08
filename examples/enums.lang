@@ -1,0 +1,80 @@
+// enums.lang — named-integer-constant enums in Glang.
+//
+// Demonstrates:
+//   - implicit sequential values (starting at 0)
+//   - explicit integer overrides
+//   - enums as function parameters and return types
+//   - comparing enum values with ==
+//   - casting enum <-> int with an explicit cast
+//
+// Run with:
+//     python main.py run examples/enums.lang
+
+// Cardinal directions — implicit sequential values: NORTH=0, EAST=1, SOUTH=2, WEST=3
+enum Direction { NORTH, EAST, SOUTH, WEST }
+
+// HTTP response codes — explicit integer values
+enum HttpStatus { OK = 200, NOT_FOUND = 404, SERVER_ERROR = 500 }
+
+// Return the direction directly opposite the one given.
+Direction opposite(Direction d) {
+    if (d == Direction.NORTH) { return Direction.SOUTH; }
+    if (d == Direction.SOUTH) { return Direction.NORTH; }
+    if (d == Direction.EAST)  { return Direction.WEST;  }
+    return Direction.EAST;
+}
+
+// Rotate 90 degrees clockwise.  Uses a cast to compute the next ordinal.
+Direction turn_right(Direction d) {
+    int next = ((int) d + 1) % 4;
+    return (Direction) next;
+}
+
+// True if the HTTP status falls in the 2xx success range.
+bool is_success(HttpStatus s) {
+    int code = (int) s;
+    return code >= 200 && code < 300;
+}
+
+int main() {
+    // --- Directions -------------------------------------------------
+    Direction heading = Direction.NORTH;
+    print("NORTH ordinal:");
+    print((int) heading);              // 0
+
+    Direction back = opposite(heading);
+    print("opposite of NORTH:");
+    print((int) back);                 // 2  (SOUTH)
+
+    Direction right = turn_right(heading);
+    print("one right-turn from NORTH:");
+    print((int) right);                // 1  (EAST)
+
+    // Compare enum values with ==
+    print("back == SOUTH:");
+    print(back == Direction.SOUTH);    // true
+
+    // --- HTTP status codes ------------------------------------------
+    HttpStatus good = HttpStatus.OK;
+    HttpStatus bad  = HttpStatus.NOT_FOUND;
+
+    print("OK code:");
+    print((int) good);                 // 200
+
+    print("NOT_FOUND code:");
+    print((int) bad);                  // 404
+
+    print("OK is success:");
+    print(is_success(good));           // true
+    print("NOT_FOUND is success:");
+    print(is_success(bad));            // false
+
+    // Cast an integer back to an enum type
+    HttpStatus err = (HttpStatus) 500;
+    print("SERVER_ERROR code:");
+    print((int) err);                  // 500
+    print("500 is success:");
+    print(is_success(err));            // false
+
+    return 0;
+}

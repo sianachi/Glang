@@ -74,6 +74,24 @@ class ArrayType(TypeNode):
     col: int = 0
 
 
+@dataclass
+class FunctionPointerType(TypeNode):
+    """A function pointer type: fn(T1, T2, ...) -> R.
+
+    Represents a callable value whose parameter types and return type are
+    fully specified. The null literal is assignable to any function pointer.
+
+    Examples:
+      fn(int, int) -> int     → FunctionPointerType([NamedType("int"), NamedType("int")], NamedType("int"))
+      fn() -> void            → FunctionPointerType([], NamedType("void"))
+      fn(string) -> bool      → FunctionPointerType([NamedType("string")], NamedType("bool"))
+    """
+    param_types: List[TypeNode]
+    return_type: TypeNode
+    line: int = 0
+    col: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Helper: function / method parameter
 # ---------------------------------------------------------------------------
@@ -261,6 +279,43 @@ class ClassDecl(Decl):
     interfaces: List[str] = field(default_factory=list)
     constructor: Optional[ConstructorDecl] = None
     destructor: Optional[DestructorDecl] = None
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class EnumVariant:
+    """One variant (named integer constant) inside an enum declaration.
+
+    If ``value`` is None the variant takes the next sequential integer (starting
+    at 0 or one past the previous explicit value).
+
+    Example:
+      enum Color { RED, GREEN, BLUE }
+      →  [EnumVariant("RED"), EnumVariant("GREEN"), EnumVariant("BLUE")]
+
+      enum Status { OK = 200, ERR = 404 }
+      →  [EnumVariant("OK", 200), EnumVariant("ERR", 404)]
+    """
+    name: str
+    value: Optional[int] = None
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class EnumDecl(Decl):
+    """A named-integer-constant enum type declaration.
+
+    Enum types are distinct from ``int`` — the type checker prevents implicit
+    conversion in either direction.  An explicit cast is required.
+
+    Example:
+      enum Color { RED, GREEN, BLUE }
+      →  EnumDecl("Color", [EnumVariant("RED"), EnumVariant("GREEN"), EnumVariant("BLUE")])
+    """
+    name: str
+    variants: List[EnumVariant]
     line: int = 0
     col: int = 0
 

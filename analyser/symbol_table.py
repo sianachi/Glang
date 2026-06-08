@@ -1,13 +1,16 @@
 from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, TYPE_CHECKING
 
 from parser.ast_nodes import (
     TypeNode, Param, FunctionDecl, ClassDecl, InterfaceDecl,
     ConstructorDecl, DestructorDecl, MethodDecl, NamedType,
 )
 from errors.errors import TypeError
+
+if TYPE_CHECKING:
+    from parser.ast_nodes import EnumDecl
 
 
 PRIMITIVES = {"int", "float", "bool", "char", "string", "void"}
@@ -41,6 +44,13 @@ class InterfaceInfo:
     name: str
     methods: Dict[str, MethodDecl]
     decl: InterfaceDecl
+
+
+@dataclass
+class EnumInfo:
+    name: str
+    variants: Dict[str, int]
+    decl: 'EnumDecl'
 
 
 class SymbolTable:
@@ -91,6 +101,7 @@ class GlobalEnv:
     functions: Dict[str, FunctionInfo] = field(default_factory=dict)
     classes: Dict[str, ClassInfo] = field(default_factory=dict)
     interfaces: Dict[str, InterfaceInfo] = field(default_factory=dict)
+    enums: Dict[str, EnumInfo] = field(default_factory=dict)
 
     def resolve_type(self, node: TypeNode) -> None:
         from parser.ast_nodes import PointerType, ArrayType
@@ -99,6 +110,7 @@ class GlobalEnv:
                 node.name not in PRIMITIVES
                 and node.name not in self.classes
                 and node.name not in self.interfaces
+                and node.name not in self.enums
                 and node.name != "null"
             ):
                 raise TypeError(
@@ -114,6 +126,9 @@ class GlobalEnv:
 
     def is_interface(self, name: str) -> bool:
         return name in self.interfaces
+
+    def is_enum(self, name: str) -> bool:
+        return name in self.enums
 
     def is_primitive(self, name: str) -> bool:
         return name in PRIMITIVES

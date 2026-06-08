@@ -4,11 +4,11 @@ from typing import Dict, List, Set
 from parser.ast_nodes import (
     Program, FunctionDecl, ClassDecl, InterfaceDecl,
     MethodDecl, FieldDecl, StaticFieldDecl,
-    NamedType,
+    NamedType, EnumDecl,
 )
 from errors.errors import TypeError
 from analyser.symbol_table import (
-    GlobalEnv, FunctionInfo, ClassInfo, InterfaceInfo,
+    GlobalEnv, FunctionInfo, ClassInfo, InterfaceInfo, EnumInfo,
 )
 
 
@@ -33,12 +33,15 @@ class Pass1Collector:
                 self._register_class(decl)
             elif isinstance(decl, InterfaceDecl):
                 self._register_interface(decl)
+            elif isinstance(decl, EnumDecl):
+                self._register_enum(decl)
 
     def _name_taken(self, name: str) -> bool:
         return (
             name in self._env.functions
             or name in self._env.classes
             or name in self._env.interfaces
+            or name in self._env.enums
         )
 
     def _register_function(self, decl: FunctionDecl) -> None:
@@ -117,6 +120,25 @@ class Pass1Collector:
             name=decl.name,
             methods=methods,
             decl=decl,
+        )
+
+    def _register_enum(self, decl: EnumDecl) -> None:
+        if self._name_taken(decl.name):
+            raise TypeError(
+                f"name '{decl.name}' is already defined", decl.line, decl.col
+            )
+        variants: Dict[str, int] = {}
+        next_val = 0
+        for v in decl.variants:
+            if v.name in variants:
+                raise TypeError(
+                    f"duplicate enum variant '{v.name}'", v.line, v.col
+                )
+            val = v.value if v.value is not None else next_val
+            variants[v.name] = val
+            next_val = val + 1
+        self._env.enums[decl.name] = EnumInfo(
+            name=decl.name, variants=variants, decl=decl
         )
 
     # ------------------------------------------------------------------

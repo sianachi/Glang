@@ -47,6 +47,10 @@ class TokenType(Enum):
     KW_RETURN    = auto()  # return
     # Module
     KW_IMPORT    = auto()  # import
+    # Function pointer type
+    KW_FN        = auto()  # fn
+    # Enum
+    KW_ENUM      = auto()  # enum
 
     # --- Arithmetic operators ---
     PLUS    = auto()  # +
@@ -139,4 +143,6 @@ KEYWORDS: dict[str, TokenType] = {
     "continue":   TokenType.KW_CONTINUE,
     "return":     TokenType.KW_RETURN,
     "import":     TokenType.KW_IMPORT,
+    "fn":         TokenType.KW_FN,
+    "enum":       TokenType.KW_ENUM,
 }

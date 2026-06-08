@@ -3,7 +3,7 @@ from typing import Optional
 
 from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
-    FunctionDecl, ClassDecl, InterfaceDecl,
+    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
     ReturnStmt, BreakStmt, ContinueStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, MethodCallExpr,
@@ -41,6 +41,8 @@ class Pass2Checker:
                 self._check_class(decl, info)
             elif isinstance(decl, InterfaceDecl):
                 self._check_interface(decl)
+            elif isinstance(decl, EnumDecl):
+                pass  # validated in pass1
 
     # ------------------------------------------------------------------
     # Declarations
@@ -514,6 +516,20 @@ class Pass2Checker:
             return method.return_type
 
         if isinstance(expr, FieldAccessExpr):
+            # Enum variant access: Color.RED
+            if (
+                isinstance(expr.object, IdentifierExpr)
+                and self._env.is_enum(expr.object.name)
+                and self._scope._find(expr.object.name) is None
+            ):
+                enum_info = self._env.enums[expr.object.name]
+                if expr.field_name not in enum_info.variants:
+                    raise TypeError(
+                        f"'{expr.object.name}' has no variant '{expr.field_name}'",
+                        expr.line, expr.col,
+                    )
+                return NamedType(expr.object.name)
+
             # Static field access: ClassName.field
             if (
                 isinstance(expr.object, IdentifierExpr)
@@ -671,6 +687,13 @@ class Pass2Checker:
     ) -> None:
         src_s = type_str(src)
         dst_s = type_str(dst)
+
+        # Enum ↔ int casts
+        if isinstance(src, NamedType) and isinstance(dst, NamedType):
+            if dst.name == "int" and self._env.is_enum(src.name):
+                return
+            if self._env.is_enum(dst.name) and src.name == "int":
+                return
 
         numeric_pairs = {
             ("int", "float"), ("float", "int"),
