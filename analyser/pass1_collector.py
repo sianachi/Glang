@@ -4,7 +4,7 @@ from typing import Dict, List, Set
 from parser.ast_nodes import (
     Program, FunctionDecl, ClassDecl, InterfaceDecl,
     MethodDecl, FieldDecl, StaticFieldDecl,
-    NamedType, EnumDecl,
+    NamedType, PointerType, ArrayType, EnumDecl,
 )
 from errors.errors import TypeError
 from analyser.symbol_table import (
@@ -17,7 +17,10 @@ class Pass1Collector:
         self._env = env
 
     def collect(self, program: Program) -> None:
-        self._register_declarations(program)
+        self._register_class_names(program)
+        self._register_non_class_declarations(program)
+        self._populate_classes(program)
+        self._validate_direct_class_field_cycles()
         self._validate_inheritance()
         self._build_vtables()
 
@@ -25,16 +28,26 @@ class Pass1Collector:
     # Phase 1: register all top-level names
     # ------------------------------------------------------------------
 
-    def _register_declarations(self, program: Program) -> None:
+    def _register_class_names(self, program: Program) -> None:
+        for decl in program.declarations:
+            if isinstance(decl, ClassDecl):
+                self._register_class_shell(decl)
+
+    def _register_non_class_declarations(self, program: Program) -> None:
+        for decl in program.declarations:
+            if isinstance(decl, EnumDecl):
+                self._register_enum(decl)
+        for decl in program.declarations:
+            if isinstance(decl, InterfaceDecl):
+                self._register_interface(decl)
         for decl in program.declarations:
             if isinstance(decl, FunctionDecl):
                 self._register_function(decl)
-            elif isinstance(decl, ClassDecl):
-                self._register_class(decl)
-            elif isinstance(decl, InterfaceDecl):
-                self._register_interface(decl)
-            elif isinstance(decl, EnumDecl):
-                self._register_enum(decl)
+
+    def _populate_classes(self, program: Program) -> None:
+        for decl in program.declarations:
+            if isinstance(decl, ClassDecl):
+                self._populate_class(decl)
 
     def _name_taken(self, name: str) -> bool:
         return (
@@ -59,12 +72,28 @@ class Pass1Collector:
             decl=decl,
         )
 
-    def _register_class(self, decl: ClassDecl) -> None:
+    def _register_class_shell(self, decl: ClassDecl) -> None:
         if self._name_taken(decl.name):
             raise TypeError(
                 f"name '{decl.name}' is already defined", decl.line, decl.col
             )
 
+        self._env.classes[decl.name] = ClassInfo(
+            name=decl.name,
+            fields={},
+            static_fields={},
+            instance_methods={},
+            static_methods={},
+            vtable={},
+            constructor=decl.constructor,
+            destructor=decl.destructor,
+            superclass=decl.superclass,
+            interfaces=list(decl.interfaces),
+            decl=decl,
+            access=decl.access,
+        )
+
+    def _populate_class(self, decl: ClassDecl) -> None:
         fields: Dict[str, object] = {}
         for fd in decl.fields:
             self._env.resolve_type(fd.type)
@@ -90,20 +119,17 @@ class Pass1Collector:
             for p in decl.constructor.params:
                 self._env.resolve_type(p.type)
 
-        self._env.classes[decl.name] = ClassInfo(
-            name=decl.name,
-            fields=fields,
-            static_fields=static_fields,
-            instance_methods=instance_methods,
-            static_methods=static_methods,
-            vtable={},
-            constructor=decl.constructor,
-            destructor=decl.destructor,
-            superclass=decl.superclass,
-            interfaces=list(decl.interfaces),
-            decl=decl,
-            access=decl.access,
-        )
+        info = self._env.classes[decl.name]
+        info.fields = fields
+        info.static_fields = static_fields
+        info.instance_methods = instance_methods
+        info.static_methods = static_methods
+        info.constructor = decl.constructor
+        info.destructor = decl.destructor
+        info.superclass = decl.superclass
+        info.interfaces = list(decl.interfaces)
+        info.decl = decl
+        info.access = decl.access
 
     def _register_interface(self, decl: InterfaceDecl) -> None:
         if self._name_taken(decl.name):
@@ -193,6 +219,46 @@ class Pass1Collector:
             if info is None:
                 break
             current = info.superclass
+
+    def _validate_direct_class_field_cycles(self) -> None:
+        graph: Dict[str, List[tuple[str, FieldDecl]]] = {}
+        for class_name, info in self._env.classes.items():
+            edges: List[tuple[str, FieldDecl]] = []
+            for fd in info.decl.fields:
+                target = self._direct_class_field_target(fd.type)
+                if target is not None:
+                    edges.append((target, fd))
+            graph[class_name] = edges
+
+        visiting: Set[str] = set()
+        visited: Set[str] = set()
+
+        def visit(class_name: str) -> None:
+            if class_name in visited:
+                return
+            visiting.add(class_name)
+            for target, fd in graph.get(class_name, []):
+                if target in visiting:
+                    raise TypeError(
+                        f"direct class field cycle involving '{target}'",
+                        fd.line, fd.col,
+                    )
+                if target in self._env.classes:
+                    visit(target)
+            visiting.discard(class_name)
+            visited.add(class_name)
+
+        for class_name in self._env.classes:
+            visit(class_name)
+
+    def _direct_class_field_target(self, type_node) -> str | None:
+        if isinstance(type_node, PointerType):
+            return None
+        if isinstance(type_node, ArrayType):
+            return self._direct_class_field_target(type_node.base)
+        if isinstance(type_node, NamedType) and type_node.name in self._env.classes:
+            return type_node.name
+        return None
 
     # ------------------------------------------------------------------
     # Phase 3: build vtables in topological order

@@ -341,6 +341,25 @@ class TestRuntimeErrors:
 # ---------------------------------------------------------------------------
 
 class TestClasses:
+    def test_self_referential_node_links(self):
+        src = (
+            "class Node {\n"
+            "  int value;\n"
+            "  Node* next;\n"
+            "  Node(int v) { this.value = v; this.next = null; }\n"
+            "}\n"
+            + main(
+                "Node* first = new Node(10); "
+                "Node* second = new Node(32); "
+                "first->next = second; "
+                "int result = first->value + first->next->value; "
+                "delete second; "
+                "delete first; "
+                "return result;"
+            )
+        )
+        assert run(src) == 42
+
     def test_fields_and_methods(self):
         src = (
             "class Counter {\n"

@@ -605,6 +605,27 @@ class TestPass1Classes:
     def test_class_with_unknown_field_type_raises(self):
         err("class Dog { Foo x; } void main() {}", "unknown type 'Foo'")
 
+    def test_self_pointer_field_ok(self):
+        ok("class Node { int value; Node* next; } void main() {}")
+
+    def test_self_type_in_method_signature_ok(self):
+        ok("class Node { void link(Node* next) {} } void main() {}")
+
+    def test_mutually_referential_pointer_fields_ok(self):
+        ok("class A { B* b; } class B { A* a; } void main() {}")
+
+    def test_direct_self_field_raises(self):
+        err(
+            "class Node { Node child; } void main() {}",
+            "direct class field cycle",
+        )
+
+    def test_mutual_direct_class_fields_raise(self):
+        err(
+            "class A { B b; } class B { A a; } void main() {}",
+            "direct class field cycle",
+        )
+
     def test_extends_unknown_class_raises(self):
         err("class Dog extends Animal {} void main() {}", "unknown class 'Animal'")
 
