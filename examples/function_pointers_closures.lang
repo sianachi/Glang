@@ -1,0 +1,90 @@
+// function_pointers_closures.lang — first-class callables in Glang.
+//
+// Demonstrates:
+//   - storing free functions in fn(...) -> ... variables
+//   - passing function pointers as parameters
+//   - returning closures from factory functions
+//   - closures capturing outer variables by value
+//   - closures keeping private mutable captured state
+//
+// Run with:
+//     python3 main.py run examples/function_pointers_closures.lang
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int multiply(int a, int b) {
+    return a * b;
+}
+
+int combine(int a, int b, fn(int, int) -> int op) {
+    return op(a, b);
+}
+
+fn(int) -> int make_bonus(int bonus) {
+    return (int score) -> int {
+        return score + bonus;
+    };
+}
+
+fn(int) -> bool make_minimum_filter(int minimum) {
+    return (int score) -> bool {
+        return score >= minimum;
+    };
+}
+
+fn() -> int make_counter() {
+    int count = 0;
+    return () -> int {
+        count = count + 1;
+        return count;
+    };
+}
+
+int evaluate(
+    string name,
+    int base_score,
+    fn(int) -> int transform,
+    fn(int) -> bool keep,
+    fn() -> int next_id
+) {
+    int final_score = transform(base_score);
+
+    if (keep(final_score)) {
+        print(name);
+        print(final_score);
+        return next_id();
+    }
+
+    return 0;
+}
+
+int main() {
+    print("free function pointer:");
+    fn(int, int) -> int op = add;
+    print(combine(40, 2, op));         // 42
+
+    op = multiply;
+    print(combine(6, 7, op));          // 42
+
+    print("direct call of returned closure:");
+    print((make_bonus(5))(10));        // 15
+
+    int threshold = 70;
+    fn(int) -> bool eligible = make_minimum_filter(threshold);
+    threshold = 95;                    // eligible still uses captured 70
+
+    fn(int) -> int curve = make_bonus(12);
+    fn() -> int accepted_count = make_counter();
+
+    print("accepted applicants:");
+    int ana = evaluate("Ana", 61, curve, eligible, accepted_count);  // 73, accepted
+    int bo = evaluate("Bo", 55, curve, eligible, accepted_count);    // 67, rejected
+    int cy = evaluate("Cy", 88, curve, eligible, accepted_count);    // 100, accepted
+
+    print("accepted count:");
+    print(cy);                         // 2
+
+    return ana + bo + cy;              // 1 + 0 + 2 = 3
+}

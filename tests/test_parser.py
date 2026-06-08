@@ -11,12 +11,13 @@ from parser.ast_nodes import (
     FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
     BreakStmt, ContinueStmt, ReturnStmt,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, MethodCallExpr,
+    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    NamedType, PointerType, ArrayType,
+    NamedType, PointerType, ArrayType, FunctionPointerType,
 )
 from errors.errors import ParseError
 
@@ -55,6 +56,12 @@ def type_matches(node, expected) -> bool:
         return type_matches(node.base, expected.base)
     if isinstance(node, ArrayType):
         return node.size == expected.size and type_matches(node.base, expected.base)
+    if isinstance(node, FunctionPointerType):
+        return (
+            len(node.param_types) == len(expected.param_types)
+            and all(type_matches(a, b) for a, b in zip(node.param_types, expected.param_types))
+            and type_matches(node.return_type, expected.return_type)
+        )
     return False
 
 
@@ -135,6 +142,22 @@ class TestTypes:
         t = prog.declarations[0].return_type
         assert isinstance(t, NamedType) and t.name == "Dog"
 
+    def test_function_pointer_type(self):
+        prog = parse("fn(int, int) -> int choose() { return null; }")
+        t = prog.declarations[0].return_type
+        assert type_matches(
+            t,
+            FunctionPointerType([NamedType("int"), NamedType("int")], NamedType("int")),
+        )
+
+    def test_function_pointer_local_decl(self):
+        stmt = parse_stmt("fn(int) -> int f = null;")
+        assert isinstance(stmt, VarDecl)
+        assert type_matches(
+            stmt.type,
+            FunctionPointerType([NamedType("int")], NamedType("int")),
+        )
+
 
 # ---------------------------------------------------------------------------
 # ExprParser — literals and identifiers
@@ -186,6 +209,24 @@ class TestLiterals:
         e = parse_expr("myVar")
         assert isinstance(e, IdentifierExpr)
         assert e.name == "myVar"
+
+    def test_empty_closure_literal(self):
+        e = parse_expr("() -> int { return 1; }")
+        assert isinstance(e, ClosureExpr)
+        assert e.params == []
+        assert type_matches(e.return_type, named("int"))
+
+    def test_closure_literal_with_params(self):
+        e = parse_expr("(int x, int y) -> int { return x + y; }")
+        assert isinstance(e, ClosureExpr)
+        assert [p.name for p in e.params] == ["x", "y"]
+        assert all(type_matches(p.type, named("int")) for p in e.params)
+
+    def test_indirect_call(self):
+        e = parse_expr("(makeAdder(2))(5)")
+        assert isinstance(e, IndirectCallExpr)
+        assert isinstance(e.callee, CallExpr)
+        assert len(e.args) == 1
 
 
 # ---------------------------------------------------------------------------

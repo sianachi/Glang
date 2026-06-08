@@ -43,6 +43,12 @@ class TokenStream:
     def check(self, *types: TokenType) -> bool:
         return self.peek().type in types
 
+    def mark(self) -> int:
+        return self._pos
+
+    def reset(self, pos: int) -> None:
+        self._pos = pos
+
     def is_at_end(self) -> bool:
         return self.peek().type == TokenType.EOF
 

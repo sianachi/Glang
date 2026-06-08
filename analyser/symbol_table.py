@@ -82,6 +82,24 @@ class SymbolTable:
         entry = self._symbols.get(name)
         return entry[0] if entry is not None else None
 
+    def find_scope(self, name: str) -> Optional[SymbolTable]:
+        if name in self._symbols:
+            return self
+        if self._parent is not None:
+            return self._parent.find_scope(name)
+        return None
+
+    def entry(self, name: str) -> Optional[tuple]:
+        return self._symbols.get(name)
+
+    def is_descendant_of(self, ancestor: SymbolTable) -> bool:
+        current: Optional[SymbolTable] = self
+        while current is not None:
+            if current is ancestor:
+                return True
+            current = current._parent
+        return False
+
     def is_const_var(self, name: str) -> bool:
         entry = self._find(name)
         return bool(entry and entry[3])
@@ -110,7 +128,7 @@ class GlobalEnv:
     enums: Dict[str, EnumInfo] = field(default_factory=dict)
 
     def resolve_type(self, node: TypeNode) -> None:
-        from parser.ast_nodes import PointerType, ArrayType
+        from parser.ast_nodes import PointerType, ArrayType, FunctionPointerType
         if isinstance(node, NamedType):
             if (
                 node.name not in PRIMITIVES
@@ -126,6 +144,10 @@ class GlobalEnv:
             self.resolve_type(node.base)
         elif isinstance(node, ArrayType):
             self.resolve_type(node.base)
+        elif isinstance(node, FunctionPointerType):
+            for p in node.param_types:
+                self.resolve_type(p)
+            self.resolve_type(node.return_type)
 
     def is_class(self, name: str) -> bool:
         return name in self.classes

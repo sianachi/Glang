@@ -3,26 +3,30 @@ from typing import List, Optional, Tuple
 
 try:
     from .token_stream import TokenStream
-    from .type_parser import TypeParser, _TYPE_KEYWORDS
+    from .type_parser import TypeParser, _TYPE_KEYWORDS, is_type_start
     from ..lexer.token_types import TokenType
     from ..errors.errors import ParseError
     from .ast_nodes import (
+        Param,
         Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
         UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
         NewExpr, DeleteExpr, AllocExpr, FreeExpr,
-        BinaryExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
+        BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+        MethodCallExpr, FieldAccessExpr,
         ArrowAccessExpr, IndexExpr,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
-    from parser.type_parser import TypeParser, _TYPE_KEYWORDS  # type: ignore
+    from parser.type_parser import TypeParser, _TYPE_KEYWORDS, is_type_start  # type: ignore
     from lexer.token_types import TokenType  # type: ignore
     from errors.errors import ParseError  # type: ignore
     from parser.ast_nodes import (  # type: ignore
+        Param,
         Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
         UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
         NewExpr, DeleteExpr, AllocExpr, FreeExpr,
-        BinaryExpr, CallExpr, MethodCallExpr, FieldAccessExpr,
+        BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+        MethodCallExpr, FieldAccessExpr,
         ArrowAccessExpr, IndexExpr,
     )
 
@@ -72,6 +76,10 @@ class ExprParser:
     def __init__(self, stream: TokenStream, type_parser: TypeParser) -> None:
         self._s = stream
         self._tp = type_parser
+        self._stmt_parser = None
+
+    def set_stmt_parser(self, stmt_parser) -> None:
+        self._stmt_parser = stmt_parser
 
     def parse_expr(self, min_bp: int = 0) -> Expr:
         left = self._parse_prefix()
@@ -122,6 +130,8 @@ class ExprParser:
             return DerefExpr(operand=operand, line=tok.line, col=tok.col)
 
         if tok.type == TokenType.LPAREN:
+            if self._is_closure_start():
+                return self._parse_closure()
             return self._parse_paren_or_cast()
 
         if tok.type == TokenType.KW_NEW:
@@ -192,7 +202,7 @@ class ExprParser:
         lparen = self._s.advance()  # consume '('
         next_tok = self._s.peek()
         is_cast = False
-        if next_tok.type in _TYPE_KEYWORDS:
+        if next_tok.type in _TYPE_KEYWORDS or next_tok.type == TokenType.KW_FN:
             is_cast = True
         elif next_tok.type == TokenType.IDENT and self._s.peek(1).type == TokenType.RPAREN:
             is_cast = True
@@ -206,6 +216,56 @@ class ExprParser:
         inner = self.parse_expr()
         self._s.expect(TokenType.RPAREN)
         return inner
+
+    def _is_closure_start(self) -> bool:
+        mark = self._s.mark()
+        try:
+            self._s.expect(TokenType.LPAREN)
+            if not self._s.check(TokenType.RPAREN):
+                self._parse_closure_param_probe()
+                while self._s.match(TokenType.COMMA):
+                    self._parse_closure_param_probe()
+            self._s.expect(TokenType.RPAREN)
+            return self._s.check(TokenType.ARROW)
+        except ParseError:
+            return False
+        finally:
+            self._s.reset(mark)
+
+    def _parse_closure_param_probe(self) -> None:
+        self._s.match(TokenType.KW_CONST)
+        if not is_type_start(self._s):
+            raise self._s.error("Expected closure parameter type")
+        self._tp.parse_type()
+        self._s.expect(TokenType.IDENT)
+
+    def _parse_closure(self) -> ClosureExpr:
+        if self._stmt_parser is None:
+            raise self._s.error("Closure parsing is not initialised")
+        tok = self._s.expect(TokenType.LPAREN)
+        params: List[Param] = []
+        if not self._s.check(TokenType.RPAREN):
+            params.append(self._parse_closure_param())
+            while self._s.match(TokenType.COMMA):
+                params.append(self._parse_closure_param())
+        self._s.expect(TokenType.RPAREN)
+        self._s.expect(TokenType.ARROW)
+        return_type = self._tp.parse_type()
+        body = self._stmt_parser.parse_block()
+        return ClosureExpr(
+            params=params,
+            return_type=return_type,
+            body=body,
+            line=tok.line,
+            col=tok.col,
+        )
+
+    def _parse_closure_param(self) -> Param:
+        is_const = bool(self._s.match(TokenType.KW_CONST))
+        t = self._tp.parse_type()
+        n = self._s.expect(TokenType.IDENT)
+        return Param(name=n.value, type=t, is_const=is_const,
+                     line=n.line, col=n.col)
 
     def _parse_new(self) -> Expr:
         tok = self._s.advance()  # consume 'new'
@@ -246,17 +306,15 @@ class ExprParser:
             return IndexExpr(array=left, index=index, line=tok.line, col=tok.col)
 
         if tok.type == TokenType.LPAREN:
-            if not isinstance(left, IdentifierExpr):
-                raise ParseError(
-                    "Call target must be an identifier", tok.line, tok.col
-                )
             args = []
             if not self._s.check(TokenType.RPAREN):
                 args.append(self.parse_expr())
                 while self._s.match(TokenType.COMMA):
                     args.append(self.parse_expr())
             self._s.expect(TokenType.RPAREN)
-            return CallExpr(name=left.name, args=args, line=tok.line, col=tok.col)
+            if isinstance(left, IdentifierExpr):
+                return CallExpr(name=left.name, args=args, line=tok.line, col=tok.col)
+            return IndirectCallExpr(callee=left, args=args, line=tok.line, col=tok.col)
 
         op = tok.value
         right = self.parse_expr(right_bp)

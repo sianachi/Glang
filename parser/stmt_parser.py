@@ -22,6 +22,7 @@ except ImportError:
 _TYPE_KWS = {
     TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL,
     TokenType.KW_CHAR, TokenType.KW_STRING, TokenType.KW_VOID,
+    TokenType.KW_FN,
 }
 
 

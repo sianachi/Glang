@@ -27,6 +27,7 @@ class Parser:
         type_parser = TypeParser(stream)
         expr_parser = ExprParser(stream, type_parser)
         stmt_parser = StmtParser(stream, type_parser, expr_parser)
+        expr_parser.set_stmt_parser(stmt_parser)
         decl_parser = DeclParser(stream, type_parser, expr_parser, stmt_parser)
         self._stream = stream
         self._decl_parser = decl_parser

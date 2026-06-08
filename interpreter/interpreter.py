@@ -26,12 +26,13 @@ from parser.ast_nodes import (
     MethodDecl, ConstructorDecl, DestructorDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
     ReturnStmt, BreakStmt, ContinueStmt,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, MethodCallExpr,
+    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    TypeNode, NamedType, PointerType, ArrayType,
+    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
 )
 from errors.errors import RuntimeError as GlangRuntimeError
 from analyser.symbol_table import GlobalEnv
@@ -74,6 +75,20 @@ class ObjectInstance:
     """A heap-allocated class instance."""
     class_name: str
     fields: Dict[str, Box]
+
+
+@dataclass
+class CallableValue:
+    """A callable stored in a function pointer value."""
+    function: Optional[FunctionDecl] = None
+    method: Optional[MethodDecl] = None
+    defining_class: Optional[str] = None
+    params: List[Any] = field(default_factory=list)
+    return_type: Optional[TypeNode] = None
+    body: Optional[Block] = None
+    captures: Dict[str, Box] = field(default_factory=dict)
+    this_val: Optional[Value] = None
+    current_class: Optional[str] = None
 
 
 class Heap:
@@ -182,7 +197,7 @@ class Interpreter:
                 if isinstance(decl, ClassDecl):
                     for sfd in decl.static_fields:
                         val = self._eval(sfd.initializer)
-                        box = self._new_box(Value(sfd.type, val.raw))
+                        box = self._new_box(self._coerce_value(val, sfd.type))
                         self._statics[(decl.name, sfd.name)] = box
         finally:
             self._frames.pop()
@@ -205,7 +220,7 @@ class Interpreter:
     def _call_function(self, fn: FunctionDecl, args: List[Value]) -> Value:
         frame = Frame(this_val=None, current_class=None)
         for param, arg in zip(fn.params, args):
-            frame.define(param.name, self._new_box(Value(param.type, arg.raw)))
+            frame.define(param.name, self._new_box(self._coerce_value(arg, param.type)))
         return self._run_body(frame, fn.body, fn.return_type)
 
     def _call_method(
@@ -217,7 +232,7 @@ class Interpreter:
     ) -> Value:
         frame = Frame(this_val=this_val, current_class=defining_class)
         for param, arg in zip(method.params, args):
-            frame.define(param.name, self._new_box(Value(param.type, arg.raw)))
+            frame.define(param.name, self._new_box(self._coerce_value(arg, param.type)))
         return self._run_body(frame, method.body, method.return_type)
 
     def _run_body(self, frame: Frame, body: Block, return_type: TypeNode) -> Value:
@@ -226,7 +241,7 @@ class Interpreter:
             for stmt in body.stmts:
                 self._exec_stmt(stmt)
         except ReturnSignal as ret:
-            return ret.value
+            return self._coerce_value(ret.value, return_type)
         finally:
             self._frames.pop()
         return VOID
@@ -247,7 +262,7 @@ class Interpreter:
 
         elif isinstance(stmt, VarDecl):
             init = self._eval(stmt.initializer)
-            self._frame.define(stmt.name, self._new_box(Value(stmt.type, init.raw)))
+            self._frame.define(stmt.name, self._new_box(self._coerce_value(init, stmt.type)))
 
         elif isinstance(stmt, AssignStmt):
             box = self._resolve_lvalue(stmt.target)
@@ -320,11 +335,14 @@ class Interpreter:
 
         if isinstance(expr, IdentifierExpr):
             box = self._frame.lookup(expr.name)
-            if box is None:
-                raise GlangRuntimeError(
-                    f"undefined variable '{expr.name}'", expr.line, expr.col
-                )
-            return box.value
+            if box is not None:
+                return box.value
+            fn = self._env.functions.get(expr.name)
+            if fn is not None:
+                return self._make_function_value(fn.decl)
+            raise GlangRuntimeError(
+                f"undefined variable '{expr.name}'", expr.line, expr.col
+            )
 
         if isinstance(expr, ThisExpr):
             return self._frame.this_val
@@ -363,6 +381,14 @@ class Interpreter:
         if isinstance(expr, CallExpr):
             return self._eval_call(expr)
 
+        if isinstance(expr, IndirectCallExpr):
+            callee = self._eval(expr.callee)
+            args = [self._eval(a) for a in expr.args]
+            return self._call_callable(callee, args, expr.line, expr.col)
+
+        if isinstance(expr, ClosureExpr):
+            return self._eval_closure(expr)
+
         if isinstance(expr, MethodCallExpr):
             return self._eval_method_call(expr)
 
@@ -372,7 +398,13 @@ class Interpreter:
         if isinstance(expr, DeleteExpr):
             return self._eval_delete(expr)
 
-        if isinstance(expr, (FieldAccessExpr, ArrowAccessExpr, IndexExpr)):
+        if isinstance(expr, FieldAccessExpr):
+            method_ref = self._static_method_ref(expr)
+            if method_ref is not None:
+                return method_ref
+            return self._resolve_lvalue(expr).value
+
+        if isinstance(expr, (ArrowAccessExpr, IndexExpr)):
             return self._resolve_lvalue(expr).value
 
         raise GlangRuntimeError(
@@ -457,6 +489,20 @@ class Interpreter:
         raise GlangRuntimeError(f"unknown operator '{op}'", line, col)
 
     def _values_equal(self, left: Value, right: Value) -> bool:
+        if isinstance(left.type, FunctionPointerType) or isinstance(right.type, FunctionPointerType):
+            left_null = (
+                left.raw is None
+                or (isinstance(left.raw, Pointer) and left.raw.target is None)
+            )
+            right_null = (
+                right.raw is None
+                or (isinstance(right.raw, Pointer) and right.raw.target is None)
+            )
+            if left_null or right_null:
+                return left_null and right_null
+            if isinstance(left.raw, CallableValue) and isinstance(right.raw, CallableValue):
+                return self._callables_equal(left.raw, right.raw)
+            return False
         if isinstance(left.raw, Pointer) or isinstance(right.raw, Pointer):
             lt = left.raw.target if isinstance(left.raw, Pointer) else None
             rt = right.raw.target if isinstance(right.raw, Pointer) else None
@@ -482,6 +528,16 @@ class Interpreter:
             return operand
         raise GlangRuntimeError(f"unknown unary operator '{expr.op}'", expr.line, expr.col)
 
+    def _callables_equal(self, left: CallableValue, right: CallableValue) -> bool:
+        if left.function is not None or right.function is not None:
+            return left.function is right.function
+        if left.method is not None or right.method is not None:
+            return (
+                left.method is right.method
+                and left.defining_class == right.defining_class
+            )
+        return left is right
+
     def _eval_cast(self, expr: CastExpr) -> Value:
         src = self._eval(expr.expr)
         target = expr.target_type
@@ -500,6 +556,11 @@ class Interpreter:
         return Value(target, src.raw)
 
     def _eval_call(self, expr: CallExpr) -> Value:
+        box = self._frame.lookup(expr.name)
+        if box is not None:
+            args = [self._eval(a) for a in expr.args]
+            return self._call_callable(box.value, args, expr.line, expr.col)
+
         if expr.name == "print":
             self._do_print(self._eval(expr.args[0]))
             return VOID
@@ -517,6 +578,52 @@ class Interpreter:
             return self._deref(this_val, expr.line, expr.col).value
 
         raise GlangRuntimeError(f"undefined function '{expr.name}'", expr.line, expr.col)
+
+    def _eval_closure(self, expr: ClosureExpr) -> Value:
+        captures: Dict[str, Box] = {}
+        for name in expr.captures:
+            box = self._frame.lookup(name)
+            if box is None:
+                raise GlangRuntimeError(
+                    f"undefined variable '{name}'", expr.line, expr.col
+                )
+            captures[name] = self._new_box(Value(box.value.type, box.value.raw))
+
+        callable_value = CallableValue(
+            params=expr.params,
+            return_type=expr.return_type,
+            body=expr.body,
+            captures=captures,
+            this_val=self._frame.this_val,
+            current_class=self._frame.current_class,
+        )
+        return Value(
+            self._function_type(expr.params, expr.return_type),
+            callable_value,
+        )
+
+    def _call_callable(
+        self, callee: Value, args: List[Value], line: int, col: int
+    ) -> Value:
+        raw = callee.raw
+        if raw is None or (isinstance(raw, Pointer) and raw.target is None):
+            raise GlangRuntimeError("null function pointer call", line, col)
+        if not isinstance(raw, CallableValue):
+            raise GlangRuntimeError("call of a non-function pointer", line, col)
+
+        if raw.function is not None:
+            return self._call_function(raw.function, args)
+        if raw.method is not None:
+            return self._call_method(raw.method, raw.defining_class, None, args)
+        if raw.body is not None and raw.return_type is not None:
+            frame = Frame(this_val=raw.this_val, current_class=raw.current_class)
+            for name, box in raw.captures.items():
+                frame.define(name, box)
+            for param, arg in zip(raw.params, args):
+                frame.define(param.name, self._new_box(self._coerce_value(arg, param.type)))
+            return self._run_body(frame, raw.body, raw.return_type)
+
+        raise GlangRuntimeError("invalid function pointer", line, col)
 
     def _eval_method_call(self, expr: MethodCallExpr) -> Value:
         # Static method call: ClassName.method(args)
@@ -590,7 +697,7 @@ class Interpreter:
         frame = Frame(this_val=this_val, current_class=class_name)
         if ctor is not None:
             for param, arg in zip(ctor.params, args):
-                frame.define(param.name, self._new_box(Value(param.type, arg.raw)))
+                frame.define(param.name, self._new_box(self._coerce_value(arg, param.type)))
 
         self._frames.append(frame)
         try:
@@ -618,6 +725,24 @@ class Interpreter:
                 return info.instance_methods[method], cls
         raise GlangRuntimeError(
             f"'{class_name}' has no method '{method}'", 0, 0
+        )
+
+    def _make_function_value(self, fn: FunctionDecl) -> Value:
+        return Value(
+            self._function_type(fn.params, fn.return_type),
+            CallableValue(function=fn),
+        )
+
+    def _make_static_method_value(self, cls: str, method: MethodDecl) -> Value:
+        return Value(
+            self._function_type(method.params, method.return_type),
+            CallableValue(method=method, defining_class=cls),
+        )
+
+    def _function_type(self, params, return_type: TypeNode) -> FunctionPointerType:
+        return FunctionPointerType(
+            param_types=[p.type for p in params],
+            return_type=return_type,
         )
 
     def _receiver(self, value: Value, line: int, col: int) -> Tuple[ObjectInstance, Value]:
@@ -686,6 +811,28 @@ class Interpreter:
             f"'{type(expr).__name__}' is not an lvalue", 0, 0
         )
 
+    def _static_method_ref(self, expr: FieldAccessExpr) -> Optional[Value]:
+        if not (
+            isinstance(expr.object, IdentifierExpr)
+            and self._env.is_class(expr.object.name)
+            and self._frame.lookup(expr.object.name) is None
+        ):
+            return None
+
+        cls = expr.object.name
+        if self._has_static_field(cls, expr.field_name):
+            return None
+        method = self._env.classes[cls].static_methods.get(expr.field_name)
+        if method is None:
+            return None
+        return self._make_static_method_value(cls, method)
+
+    def _has_static_field(self, cls: str, name: str) -> bool:
+        for c in superclass_chain(cls, self._env):
+            if (c, name) in self._statics:
+                return True
+        return False
+
     def _field_box(self, instance: Any, name: str, line: int, col: int) -> Box:
         if not isinstance(instance, ObjectInstance) or name not in instance.fields:
             raise GlangRuntimeError(f"no field '{name}'", line, col)
@@ -711,12 +858,22 @@ class Interpreter:
         return ptr.target
 
     def _store(self, box: Box, value: Value) -> None:
-        box.value = Value(box.value.type, value.raw)
+        box.value = self._coerce_value(value, box.value.type)
+
+    def _coerce_value(self, value: Value, target_type: TypeNode) -> Value:
+        if isinstance(value.type, NamedType) and value.type.name == "null":
+            if isinstance(target_type, FunctionPointerType):
+                return Value(target_type, None)
+            if isinstance(target_type, PointerType):
+                return Value(target_type, Pointer(None))
+        return Value(target_type, value.raw)
 
     def _is(self, value: Value, name: str) -> bool:
         return isinstance(value.type, NamedType) and value.type.name == name
 
     def _zero_value(self, t: TypeNode) -> Value:
+        if isinstance(t, FunctionPointerType):
+            return Value(t, None)
         if isinstance(t, PointerType):
             return Value(t, Pointer(None))
         if isinstance(t, ArrayType):

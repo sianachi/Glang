@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lexer.lexer import Lexer
 from parser.parser import Parser
 from parser.ast_nodes import (
-    NamedType, PointerType, ArrayType, Block, ReturnStmt, IfStmt,
+    NamedType, PointerType, ArrayType, FunctionPointerType,
+    Block, ReturnStmt, IfStmt,
     WhileStmt, ForStmt, VarDecl, IdentifierExpr, LiteralExpr,
     BinaryExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
 )
@@ -83,6 +84,16 @@ class TestTypesEqual:
     def test_array_base_differs(self):
         assert not types_equal(ArrayType(named("int"), 5), ArrayType(named("float"), 5))
 
+    def test_function_pointer_equal(self):
+        a = FunctionPointerType([named("int")], named("bool"))
+        b = FunctionPointerType([named("int")], named("bool"))
+        assert types_equal(a, b)
+
+    def test_function_pointer_param_differs(self):
+        a = FunctionPointerType([named("int")], named("bool"))
+        b = FunctionPointerType([named("float")], named("bool"))
+        assert not types_equal(a, b)
+
     def test_null_type_equal(self):
         assert types_equal(NULL_TYPE, NamedType("null"))
 
@@ -102,6 +113,10 @@ class TestIsAssignable:
 
     def test_null_to_pointer(self):
         assert is_assignable(NULL_TYPE, ptr(named("int")), self._env())
+
+    def test_null_to_function_pointer(self):
+        fn_t = FunctionPointerType([named("int")], named("int"))
+        assert is_assignable(NULL_TYPE, fn_t, self._env())
 
     def test_null_to_named(self):
         assert not is_assignable(NULL_TYPE, named("int"), self._env())
@@ -805,6 +820,53 @@ class TestPass2Functions:
 
     def test_recursive_function_ok(self):
         ok("int fib(int n) { if (n <= 1) { return n; } else { return fib(n - 1) + fib(n - 2); } }")
+
+
+class TestPass2FunctionPointersAndClosures:
+    def test_free_function_reference_ok(self):
+        ok(
+            "int add(int a, int b) { return a + b; } "
+            "void main() { fn(int, int) -> int op = add; int x = op(1, 2); }"
+        )
+
+    def test_static_method_reference_ok(self):
+        ok(
+            "class C { static int inc(int x) { return x + 1; } } "
+            "void main() { fn(int) -> int f = C.inc; int x = f(1); }"
+        )
+
+    def test_null_assignment_and_comparison_ok(self):
+        ok("void main() { fn(int) -> int f = null; if (f == null) {} }")
+
+    def test_function_pointer_signature_mismatch_raises(self):
+        err(
+            "int add(int a, int b) { return a + b; } "
+            "void main() { fn(int) -> int op = add; }",
+            "cannot initialise",
+        )
+
+    def test_non_callable_variable_call_raises(self):
+        err("void main() { int x = 1; x(); }", "'x' is not callable")
+
+    def test_instance_method_reference_raises(self):
+        err(
+            "class C { int m() { return 1; } } "
+            "void main() { C c = C(); fn() -> int f = c.m; }",
+            "has no field 'm'",
+        )
+
+    def test_closure_capture_ok(self):
+        ok(
+            "void main() { int threshold = 10; "
+            "fn(int) -> bool check = (int x) -> bool { return x > threshold; }; }"
+        )
+
+    def test_recursive_closure_unsupported(self):
+        err(
+            "void main() { fn(int) -> int f = "
+            "(int x) -> int { return f(x); }; }",
+            "undefined function 'f'",
+        )
 
 
 # ---------------------------------------------------------------------------

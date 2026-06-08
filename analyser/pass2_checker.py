@@ -1,27 +1,35 @@
 from __future__ import annotations
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
     ReturnStmt, BreakStmt, ContinueStmt,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, MethodCallExpr,
+    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    NamedType, PointerType,
+    NamedType, PointerType, FunctionPointerType,
 )
 from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
 from analyser.type_utils import (
     NULL_TYPE, is_assignable, is_integer, is_bool,
     is_pointer, is_array, pointer_base, type_str,
-    is_lvalue, binary_result_type, unary_result_type,
+    is_lvalue, is_function_pointer, binary_result_type, unary_result_type,
     superclass_chain,
 )
 from analyser.return_checker import always_returns
+
+
+@dataclass
+class ClosureContext:
+    root: SymbolTable
+    captures: Dict[str, TypeNode] = field(default_factory=dict)
 
 
 class Pass2Checker:
@@ -33,6 +41,7 @@ class Pass2Checker:
         self._in_loop: bool = False
         self._in_static_method: bool = False
         self._in_constructor: bool = False
+        self._closure_stack: List[ClosureContext] = []
 
     def check_program(self, program: Program) -> None:
         for decl in program.declarations:
@@ -209,6 +218,10 @@ class Pass2Checker:
                 raise TypeError(
                     f"left-hand side of '=' is not assignable", stmt.line, stmt.col
                 )
+            if self._is_static_method_ref(stmt.target):
+                raise TypeError(
+                    f"left-hand side of '=' is not assignable", stmt.line, stmt.col
+                )
             target_t = self._check_expr(stmt.target)
             value_t = self._check_expr(stmt.value)
 
@@ -342,10 +355,21 @@ class Pass2Checker:
         if isinstance(expr, NullExpr):
             return NULL_TYPE
 
+        if isinstance(expr, ClosureExpr):
+            return self._check_closure(expr)
+
         if isinstance(expr, IdentifierExpr):
-            t = self._scope._find(expr.name)
-            if t is not None:
-                return t[0]
+            defining_scope = self._scope.find_scope(expr.name)
+            if defining_scope is not None:
+                entry = defining_scope.entry(expr.name)
+                self._record_capture(expr.name, defining_scope)
+                return entry[0]
+            fn_info = self._env.functions.get(expr.name)
+            if fn_info is not None:
+                return self._function_type_from_params(
+                    fn_info.params, fn_info.return_type,
+                    line=expr.line, col=expr.col,
+                )
             raise TypeError(
                 f"undefined variable '{expr.name}'", expr.line, expr.col
             )
@@ -408,6 +432,19 @@ class Pass2Checker:
                 raise TypeError(e.msg, expr.line, expr.col) from None
 
         if isinstance(expr, CallExpr):
+            defining_scope = self._scope.find_scope(expr.name)
+            if defining_scope is not None:
+                entry = defining_scope.entry(expr.name)
+                callee_t = entry[0]
+                if not isinstance(callee_t, FunctionPointerType):
+                    raise TypeError(
+                        f"'{expr.name}' is not callable", expr.line, expr.col
+                    )
+                return self._check_callable_args(
+                    expr.name, expr.args, callee_t.param_types,
+                    callee_t.return_type, expr.line, expr.col,
+                )
+
             # Built-in print(x): accepts one primitive argument, returns void.
             # (Not part of the spec; provided so program output is observable.)
             if expr.name == "print":
@@ -427,21 +464,10 @@ class Pass2Checker:
 
             fn_info = self._env.functions.get(expr.name)
             if fn_info is not None:
-                expected = len(fn_info.params)
-                got = len(expr.args)
-                if expected != got:
-                    raise TypeError(
-                        f"'{expr.name}' expects {expected} arguments, got {got}",
-                        expr.line, expr.col,
-                    )
-                for arg, param in zip(expr.args, fn_info.params):
-                    arg_t = self._check_expr(arg)
-                    if not is_assignable(arg_t, param.type, self._env):
-                        raise TypeError(
-                            f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
-                            expr.line, expr.col,
-                        )
-                return fn_info.return_type
+                return self._check_callable_args(
+                    expr.name, expr.args, [p.type for p in fn_info.params],
+                    fn_info.return_type, expr.line, expr.col,
+                )
 
             # Stack constructor call: Dog("Rex") where Dog is a class name
             class_info = self._env.classes.get(expr.name)
@@ -472,6 +498,18 @@ class Pass2Checker:
 
             raise TypeError(
                 f"undefined function '{expr.name}'", expr.line, expr.col
+            )
+
+        if isinstance(expr, IndirectCallExpr):
+            callee_t = self._check_expr(expr.callee)
+            if not isinstance(callee_t, FunctionPointerType):
+                raise TypeError(
+                    f"'{type_str(callee_t)}' is not callable",
+                    expr.line, expr.col,
+                )
+            return self._check_callable_args(
+                "function pointer", expr.args, callee_t.param_types,
+                callee_t.return_type, expr.line, expr.col,
             )
 
         if isinstance(expr, MethodCallExpr):
@@ -577,14 +615,22 @@ class Pass2Checker:
             ):
                 class_info = self._env.classes[expr.object.name]
                 sfd = class_info.static_fields.get(expr.field_name)
-                if sfd is None:
-                    raise TypeError(
-                        f"'{expr.object.name}' has no field '{expr.field_name}'",
-                        expr.line, expr.col,
+                if sfd is not None:
+                    self._check_access(expr.object.name, sfd.access, expr.field_name,
+                                       expr.line, expr.col)
+                    return sfd.type
+                method = class_info.static_methods.get(expr.field_name)
+                if method is not None:
+                    self._check_access(expr.object.name, method.access,
+                                       expr.field_name, expr.line, expr.col)
+                    return self._function_type_from_params(
+                        method.params, method.return_type,
+                        line=expr.line, col=expr.col,
                     )
-                self._check_access(expr.object.name, sfd.access, expr.field_name,
-                                   expr.line, expr.col)
-                return sfd.type
+                raise TypeError(
+                    f"'{expr.object.name}' has no field '{expr.field_name}'",
+                    expr.line, expr.col,
+                )
 
             obj_t = self._check_expr(expr.object)
             # Auto-deref: `this.field` uses FieldAccessExpr with a pointer receiver
@@ -722,6 +768,98 @@ class Pass2Checker:
             f"unknown expression type '{type(expr).__name__}'", 0, 0
         )
 
+    def _check_closure(self, expr: ClosureExpr) -> FunctionPointerType:
+        self._env.resolve_type(expr.return_type)
+        self._check_class_access(expr.return_type, expr.line, expr.col)
+        for p in expr.params:
+            self._env.resolve_type(p.type)
+            self._check_class_access(p.type, p.line, p.col)
+
+        saved_scope = self._scope
+        saved_return = self._return_type
+        saved_loop = self._in_loop
+        saved_ctor = self._in_constructor
+
+        closure_scope = self._scope.child()
+        ctx = ClosureContext(root=closure_scope)
+        self._scope = closure_scope
+        for p in expr.params:
+            self._scope.define(p.name, p.type, p.line, p.col, p.is_const)
+        self._return_type = expr.return_type
+        self._in_loop = False
+        self._in_constructor = False
+        self._closure_stack.append(ctx)
+        try:
+            self._check_block(expr.body)
+            rt_name = (
+                expr.return_type.name
+                if isinstance(expr.return_type, NamedType) else None
+            )
+            if rt_name != "void" and not always_returns(expr.body.stmts):
+                raise TypeError(
+                    "not all code paths return a value", expr.line, expr.col
+                )
+        finally:
+            self._closure_stack.pop()
+            self._scope = saved_scope
+            self._return_type = saved_return
+            self._in_loop = saved_loop
+            self._in_constructor = saved_ctor
+
+        expr.captures = list(ctx.captures.keys())
+        return self._function_type_from_params(
+            expr.params, expr.return_type, line=expr.line, col=expr.col,
+        )
+
+    def _record_capture(self, name: str, defining_scope: SymbolTable) -> None:
+        if not self._closure_stack:
+            return
+        entry = defining_scope.entry(name)
+        if entry is None:
+            return
+        for ctx in self._closure_stack:
+            if not defining_scope.is_descendant_of(ctx.root):
+                ctx.captures.setdefault(name, entry[0])
+
+    def _function_type_from_params(
+        self,
+        params,
+        return_type: TypeNode,
+        *,
+        line: int = 0,
+        col: int = 0,
+    ) -> FunctionPointerType:
+        return FunctionPointerType(
+            param_types=[p.type for p in params],
+            return_type=return_type,
+            line=line,
+            col=col,
+        )
+
+    def _check_callable_args(
+        self,
+        name: str,
+        args,
+        param_types,
+        return_type: TypeNode,
+        line: int,
+        col: int,
+    ) -> TypeNode:
+        expected = len(param_types)
+        got = len(args)
+        if expected != got:
+            raise TypeError(
+                f"'{name}' expects {expected} arguments, got {got}", line, col
+            )
+        for arg, param_t in zip(args, param_types):
+            arg_t = self._check_expr(arg)
+            if not is_assignable(arg_t, param_t, self._env):
+                raise TypeError(
+                    f"cannot assign '{type_str(arg_t)}' to '{type_str(param_t)}'",
+                    line, col,
+                )
+        return return_type
+
     # ------------------------------------------------------------------
     # Access / const helpers
     # ------------------------------------------------------------------
@@ -744,7 +882,9 @@ class Pass2Checker:
                 )
 
     def _check_class_access(self, type_node: TypeNode, line: int, col: int) -> None:
-        from parser.ast_nodes import PointerType as PT, ArrayType as AT
+        from parser.ast_nodes import (
+            PointerType as PT, ArrayType as AT, FunctionPointerType as FPT,
+        )
         if isinstance(type_node, NamedType):
             ci = self._env.classes.get(type_node.name)
             if ci and ci.access != "public" and self._current_class is None:
@@ -757,6 +897,10 @@ class Pass2Checker:
             self._check_class_access(type_node.base, line, col)
         elif isinstance(type_node, AT):
             self._check_class_access(type_node.base, line, col)
+        elif isinstance(type_node, FPT):
+            for p in type_node.param_types:
+                self._check_class_access(p, line, col)
+            self._check_class_access(type_node.return_type, line, col)
 
     def _field_declaring_class(self, class_name: str, field_name: str) -> str:
         for cls in superclass_chain(class_name, self._env):
@@ -800,6 +944,22 @@ class Pass2Checker:
                         if isinstance(base, NamedType):
                             return self._env.classes.get(base.name)
         return None
+
+    def _is_static_method_ref(self, expr: Expr) -> bool:
+        if not isinstance(expr, FieldAccessExpr):
+            return False
+        obj = expr.object
+        if (
+            isinstance(obj, IdentifierExpr)
+            and self._env.is_class(obj.name)
+            and self._scope._find(obj.name) is None
+        ):
+            class_info = self._env.classes[obj.name]
+            return (
+                expr.field_name not in class_info.static_fields
+                and expr.field_name in class_info.static_methods
+            )
+        return False
 
     # ------------------------------------------------------------------
     # Cast validation

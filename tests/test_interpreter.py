@@ -225,6 +225,73 @@ class TestFunctions:
         assert run(src) == 7
 
 
+class TestFunctionPointersAndClosures:
+    def test_store_and_call_function_pointer(self):
+        src = (
+            "int add(int a, int b) { return a + b; }\n"
+            + main("fn(int, int) -> int op = add; return op(3, 4);")
+        )
+        assert run(src) == 7
+
+    def test_pass_and_return_function_pointer(self):
+        src = (
+            "int inc(int x) { return x + 1; }\n"
+            "int apply(fn(int) -> int f, int x) { return f(x); }\n"
+            "fn(int) -> int choose() { return inc; }\n"
+            + main("fn(int) -> int f = choose(); return apply(f, 6);")
+        )
+        assert run(src) == 7
+
+    def test_static_method_function_pointer(self):
+        src = (
+            "class C { static int twice(int x) { return x * 2; } }\n"
+            + main("fn(int) -> int f = C.twice; return f(6);")
+        )
+        assert run(src) == 12
+
+    def test_null_function_pointer_call_raises(self):
+        with pytest.raises(GRE):
+            run(main("fn(int) -> int f = null; return f(1);"))
+
+    def test_closure_capture_snapshot(self):
+        src = main(
+            "int x = 10; "
+            "fn() -> int f = () -> int { return x; }; "
+            "x = 20; "
+            "return f();"
+        )
+        assert run(src) == 10
+
+    def test_closure_mutates_private_capture(self):
+        src = main(
+            "int x = 0; "
+            "fn() -> int f = () -> int { x = x + 1; return x; }; "
+            "int a = f(); "
+            "int b = f(); "
+            "return a * 100 + b * 10 + x;"
+        )
+        assert run(src) == 120
+
+    def test_closure_uses_this(self):
+        src = (
+            "class C { "
+            "  int base; "
+            "  C(int b) { this.base = b; } "
+            "  fn(int) -> int make() { "
+            "    return (int x) -> int { return this.base + x; }; "
+            "  } "
+            "}\n"
+            + main(
+                "C* c = new C(5); "
+                "fn(int) -> int f = c->make(); "
+                "int r = f(3); "
+                "delete c; "
+                "return r;"
+            )
+        )
+        assert run(src) == 8
+
+
 # ---------------------------------------------------------------------------
 # Pointers & memory
 # ---------------------------------------------------------------------------

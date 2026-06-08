@@ -546,6 +546,35 @@ class CallExpr(Expr):
 
 
 @dataclass
+class IndirectCallExpr(Expr):
+    """A call through a callable expression.
+
+    Used for parenthesised calls and non-identifier callees:
+      (makeAdder(2))(5)  →  IndirectCallExpr(CallExpr("makeAdder", ...), ...)
+    """
+    callee: Expr
+    args: List[Expr]
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class ClosureExpr(Expr):
+    """An anonymous function literal that captures outer variables by value.
+
+    Example:
+      (int x) -> int { return x + base; }
+      → ClosureExpr([Param("x", ...)], NamedType("int"), Block(...), ["base"])
+    """
+    params: List[Param]
+    return_type: TypeNode
+    body: Block
+    captures: List[str] = field(default_factory=list)
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class MethodCallExpr(Expr):
     """A method call on an object or pointer.
 

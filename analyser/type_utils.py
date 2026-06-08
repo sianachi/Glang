@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, TYPE_CHECKING
 
 from parser.ast_nodes import (
-    TypeNode, NamedType, PointerType, ArrayType, Expr,
+    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, Expr,
     IdentifierExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
 )
 from errors.errors import TypeError
@@ -24,6 +24,13 @@ def types_equal(a: TypeNode, b: TypeNode) -> bool:
         return types_equal(a.base, b.base)
     if isinstance(a, ArrayType):
         return a.size == b.size and types_equal(a.base, b.base)
+    if isinstance(a, FunctionPointerType):
+        if len(a.param_types) != len(b.param_types):
+            return False
+        if not types_equal(a.return_type, b.return_type):
+            return False
+        return all(types_equal(pa, pb)
+                   for pa, pb in zip(a.param_types, b.param_types))
     return False
 
 
@@ -34,6 +41,8 @@ def is_assignable(from_type: TypeNode, to_type: TypeNode, env: GlobalEnv) -> boo
     # null → any pointer
     if isinstance(from_type, NamedType) and from_type.name == "null":
         if isinstance(to_type, PointerType):
+            return True
+        if isinstance(to_type, FunctionPointerType):
             return True
 
     # Subclass pointer covariance
@@ -76,6 +85,10 @@ def is_array(t: TypeNode) -> bool:
     return isinstance(t, ArrayType)
 
 
+def is_function_pointer(t: TypeNode) -> bool:
+    return isinstance(t, FunctionPointerType)
+
+
 def pointer_base(t: PointerType) -> TypeNode:
     return t.base
 
@@ -87,6 +100,9 @@ def type_str(t: TypeNode) -> str:
         return type_str(t.base) + "*"
     if isinstance(t, ArrayType):
         return f"{type_str(t.base)}[{t.size}]"
+    if isinstance(t, FunctionPointerType):
+        params = ", ".join(type_str(p) for p in t.param_types)
+        return f"fn({params}) -> {type_str(t.return_type)}"
     return "?"
 
 
@@ -144,6 +160,11 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
         null_name = isinstance(left, NamedType) and left.name == "null"
         null_name2 = isinstance(right, NamedType) and right.name == "null"
         if (null_name and is_pointer(right)) or (null_name2 and is_pointer(left)):
+            return NamedType("bool")
+        if (
+            (null_name and is_function_pointer(right))
+            or (null_name2 and is_function_pointer(left))
+        ):
             return NamedType("bool")
         ls, rs = type_str(left), type_str(right)
         raise TypeError(
