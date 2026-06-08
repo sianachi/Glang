@@ -825,8 +825,8 @@ python3 main.py run path/to/program.lang
 python3 -m pytest tests/ -v
 ```
 
-Runnable example programs live in `examples/`, each paired with an
-`examples/<name>.expected` golden-output file. Two harnesses run them — both
+Runnable example programs live in `examples/`, each paired with a golden-output
+file under `examples/expected/<name>.expected`. Two harnesses run them — both
 separate from the unit tests:
 
 ```bash
