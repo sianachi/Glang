@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, TYPE_CHECKING
 
 from parser.ast_nodes import (
     TypeNode, Param, FunctionDecl, ClassDecl, InterfaceDecl,
-    ConstructorDecl, DestructorDecl, MethodDecl, NamedType,
+    ConstructorDecl, DestructorDecl, MethodDecl, NamedType, FieldDecl,
 )
 from errors.errors import TypeError
 
@@ -27,7 +27,7 @@ class FunctionInfo:
 @dataclass
 class ClassInfo:
     name: str
-    fields: Dict[str, TypeNode]
+    fields: Dict[str, FieldDecl]
     static_fields: Dict[str, object]   # str → StaticFieldDecl
     instance_methods: Dict[str, MethodDecl]
     static_methods: Dict[str, MethodDecl]
@@ -37,6 +37,7 @@ class ClassInfo:
     superclass: Optional[str]
     interfaces: List[str]
     decl: ClassDecl
+    access: str = "public"
 
 
 @dataclass
@@ -56,9 +57,10 @@ class EnumInfo:
 class SymbolTable:
     def __init__(self, parent: Optional[SymbolTable] = None) -> None:
         self._parent = parent
-        self._symbols: Dict[str, tuple] = {}  # name → (TypeNode, line, col)
+        self._symbols: Dict[str, tuple] = {}  # name → (TypeNode, line, col, is_const)
 
-    def define(self, name: str, type: TypeNode, line: int, col: int) -> None:
+    def define(self, name: str, type: TypeNode, line: int, col: int,
+               is_const: bool = False) -> None:
         if name in self._symbols:
             raise TypeError(f"name '{name}' is already defined", line, col)
         outer = self._find_outer(name)
@@ -68,7 +70,7 @@ class SymbolTable:
                 f"warning: '{name}' shadows variable declared at line {outer_line}",
                 file=sys.stderr,
             )
-        self._symbols[name] = (type, line, col)
+        self._symbols[name] = (type, line, col, is_const)
 
     def lookup(self, name: str) -> TypeNode:
         entry = self._find(name)
@@ -79,6 +81,10 @@ class SymbolTable:
     def lookup_local(self, name: str) -> Optional[TypeNode]:
         entry = self._symbols.get(name)
         return entry[0] if entry is not None else None
+
+    def is_const_var(self, name: str) -> bool:
+        entry = self._find(name)
+        return bool(entry and entry[3])
 
     def child(self) -> SymbolTable:
         return SymbolTable(parent=self)

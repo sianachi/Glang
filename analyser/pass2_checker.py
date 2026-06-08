@@ -19,6 +19,7 @@ from analyser.type_utils import (
     NULL_TYPE, is_assignable, is_integer, is_bool,
     is_pointer, is_array, pointer_base, type_str,
     is_lvalue, binary_result_type, unary_result_type,
+    superclass_chain,
 )
 from analyser.return_checker import always_returns
 
@@ -31,6 +32,7 @@ class Pass2Checker:
         self._current_class: Optional[ClassInfo] = None
         self._in_loop: bool = False
         self._in_static_method: bool = False
+        self._in_constructor: bool = False
 
     def check_program(self, program: Program) -> None:
         for decl in program.declarations:
@@ -54,7 +56,7 @@ class Pass2Checker:
 
         self._scope = self._scope.child()
         for p in fn.params:
-            self._scope.define(p.name, p.type, p.line, p.col)
+            self._scope.define(p.name, p.type, p.line, p.col, p.is_const)
         self._return_type = fn.return_type
 
         self._check_block(fn.body)
@@ -88,11 +90,13 @@ class Pass2Checker:
             ctor = cls.constructor
             saved_scope = self._scope
             saved_return = self._return_type
+            saved_ctor = self._in_constructor
             self._scope = self._scope.child()
             for p in ctor.params:
-                self._scope.define(p.name, p.type, p.line, p.col)
+                self._scope.define(p.name, p.type, p.line, p.col, p.is_const)
             self._return_type = NamedType("void")
             self._in_static_method = False
+            self._in_constructor = True
 
             if info.superclass is not None:
                 if ctor.super_args is None:
@@ -132,6 +136,7 @@ class Pass2Checker:
             self._check_block(ctor.body)
             self._scope = saved_scope
             self._return_type = saved_return
+            self._in_constructor = saved_ctor
 
         # Destructor
         if cls.destructor:
@@ -151,7 +156,7 @@ class Pass2Checker:
             saved_return = self._return_type
             self._scope = self._scope.child()
             for p in md.params:
-                self._scope.define(p.name, p.type, p.line, p.col)
+                self._scope.define(p.name, p.type, p.line, p.col, p.is_const)
             self._return_type = md.return_type
             self._in_static_method = md.is_static
 
@@ -190,13 +195,14 @@ class Pass2Checker:
 
         elif isinstance(stmt, VarDecl):
             self._env.resolve_type(stmt.type)
+            self._check_class_access(stmt.type, stmt.line, stmt.col)
             init_t = self._check_expr(stmt.initializer)
             if not is_assignable(init_t, stmt.type, self._env):
                 raise TypeError(
                     f"cannot initialise '{type_str(stmt.type)}' with '{type_str(init_t)}'",
                     stmt.line, stmt.col,
                 )
-            self._scope.define(stmt.name, stmt.type, stmt.line, stmt.col)
+            self._scope.define(stmt.name, stmt.type, stmt.line, stmt.col, stmt.is_const)
 
         elif isinstance(stmt, AssignStmt):
             if not is_lvalue(stmt.target):
@@ -216,6 +222,37 @@ class Pass2Checker:
                     f"cannot assign '{type_str(value_t)}' to '{type_str(target_t)}'",
                     stmt.line, stmt.col,
                 )
+
+            # const check
+            if isinstance(stmt.target, IdentifierExpr):
+                if self._scope.is_const_var(stmt.target.name):
+                    raise TypeError(
+                        f"cannot assign to const '{stmt.target.name}'",
+                        stmt.line, stmt.col,
+                    )
+            elif isinstance(stmt.target, (FieldAccessExpr, ArrowAccessExpr)):
+                field_name = stmt.target.field_name
+                class_info = self._resolve_target_class_info(stmt.target)
+                if class_info:
+                    # Instance field const check
+                    fd = class_info.fields.get(field_name)
+                    if fd and fd.is_const:
+                        receiver = (stmt.target.object
+                                    if isinstance(stmt.target, FieldAccessExpr)
+                                    else None)
+                        receiver_is_this = isinstance(receiver, ThisExpr)
+                        if not (self._in_constructor and receiver_is_this):
+                            raise TypeError(
+                                f"cannot assign to const field '{field_name}'",
+                                stmt.line, stmt.col,
+                            )
+                    # Static field const check
+                    sfd = class_info.static_fields.get(field_name)
+                    if sfd and sfd.is_const:
+                        raise TypeError(
+                            f"cannot assign to const field '{field_name}'",
+                            stmt.line, stmt.col,
+                        )
 
         elif isinstance(stmt, IfStmt):
             cond_t = self._check_expr(stmt.condition)
@@ -499,6 +536,8 @@ class Pass2Checker:
                     f"'{class_t.name}' has no method '{expr.method}'",
                     expr.line, expr.col,
                 )
+            self._check_access(class_t.name, method.access, expr.method,
+                               expr.line, expr.col)
             expected = len(method.params)
             got = len(expr.args)
             if expected != got:
@@ -543,6 +582,8 @@ class Pass2Checker:
                         f"'{expr.object.name}' has no field '{expr.field_name}'",
                         expr.line, expr.col,
                     )
+                self._check_access(expr.object.name, sfd.access, expr.field_name,
+                                   expr.line, expr.col)
                 return sfd.type
 
             obj_t = self._check_expr(expr.object)
@@ -562,13 +603,15 @@ class Pass2Checker:
                     f"'{class_t.name}' has no field '{expr.field_name}'",
                     expr.line, expr.col,
                 )
-            field_t = class_info.fields.get(expr.field_name)
-            if field_t is None:
+            fd = class_info.fields.get(expr.field_name)
+            if fd is None:
                 raise TypeError(
                     f"'{class_t.name}' has no field '{expr.field_name}'",
                     expr.line, expr.col,
                 )
-            return field_t
+            defining = self._field_declaring_class(class_t.name, expr.field_name)
+            self._check_access(defining, fd.access, expr.field_name, expr.line, expr.col)
+            return fd.type
 
         if isinstance(expr, ArrowAccessExpr):
             ptr_t = self._check_expr(expr.pointer)
@@ -589,13 +632,15 @@ class Pass2Checker:
                     f"'{class_t.name}' has no field '{expr.field_name}'",
                     expr.line, expr.col,
                 )
-            field_t = class_info.fields.get(expr.field_name)
-            if field_t is None:
+            fd = class_info.fields.get(expr.field_name)
+            if fd is None:
                 raise TypeError(
                     f"'{class_t.name}' has no field '{expr.field_name}'",
                     expr.line, expr.col,
                 )
-            return field_t
+            defining = self._field_declaring_class(class_t.name, expr.field_name)
+            self._check_access(defining, fd.access, expr.field_name, expr.line, expr.col)
+            return fd.type
 
         if isinstance(expr, IndexExpr):
             arr_t = self._check_expr(expr.array)
@@ -618,6 +663,9 @@ class Pass2Checker:
                     f"unknown class '{expr.class_name}'", expr.line, expr.col
                 )
             class_info = self._env.classes[expr.class_name]
+            self._check_class_access(NamedType(expr.class_name,
+                                               line=expr.line, col=expr.col),
+                                     expr.line, expr.col)
             if class_info.constructor is not None:
                 expected = len(class_info.constructor.params)
                 got = len(expr.args)
@@ -673,6 +721,85 @@ class Pass2Checker:
         raise TypeError(
             f"unknown expression type '{type(expr).__name__}'", 0, 0
         )
+
+    # ------------------------------------------------------------------
+    # Access / const helpers
+    # ------------------------------------------------------------------
+
+    def _check_access(self, defining_class: str, access: str,
+                      member: str, line: int, col: int) -> None:
+        if access == "public":
+            return
+        accessor = self._current_class.name if self._current_class else None
+        if access == "private":
+            if accessor != defining_class:
+                raise TypeError(
+                    f"'{member}' is private to '{defining_class}'", line, col
+                )
+        elif access == "protected":
+            chain = superclass_chain(accessor, self._env) if accessor else []
+            if defining_class not in chain:
+                raise TypeError(
+                    f"'{member}' is protected in '{defining_class}'", line, col
+                )
+
+    def _check_class_access(self, type_node: TypeNode, line: int, col: int) -> None:
+        from parser.ast_nodes import PointerType as PT, ArrayType as AT
+        if isinstance(type_node, NamedType):
+            ci = self._env.classes.get(type_node.name)
+            if ci and ci.access != "public" and self._current_class is None:
+                raise TypeError(
+                    f"class '{type_node.name}' is {ci.access} "
+                    f"and cannot be used outside a class body",
+                    line, col,
+                )
+        elif isinstance(type_node, PT):
+            self._check_class_access(type_node.base, line, col)
+        elif isinstance(type_node, AT):
+            self._check_class_access(type_node.base, line, col)
+
+    def _field_declaring_class(self, class_name: str, field_name: str) -> str:
+        for cls in superclass_chain(class_name, self._env):
+            info = self._env.classes.get(cls)
+            if info and any(fd.name == field_name for fd in info.decl.fields):
+                return cls
+        return class_name
+
+    def _resolve_target_class_info(self, target):
+        """Resolve the ClassInfo for a field-access assignment target without
+        re-invoking _check_expr (which would fail for class-name receivers)."""
+        if isinstance(target, FieldAccessExpr):
+            obj = target.object
+            # Static field: ClassName.field
+            if (isinstance(obj, IdentifierExpr)
+                    and self._env.is_class(obj.name)
+                    and self._scope._find(obj.name) is None):
+                return self._env.classes[obj.name]
+            # this.field
+            if isinstance(obj, ThisExpr):
+                return self._current_class
+            # variable.field — look up from scope
+            if isinstance(obj, IdentifierExpr):
+                entry = self._scope._find(obj.name)
+                if entry:
+                    t = entry[0]
+                    if isinstance(t, PointerType) and isinstance(t.base, NamedType):
+                        return self._env.classes.get(t.base.name)
+                    if isinstance(t, NamedType):
+                        return self._env.classes.get(t.name)
+        elif isinstance(target, ArrowAccessExpr):
+            ptr = target.pointer
+            if isinstance(ptr, ThisExpr):
+                return self._current_class
+            if isinstance(ptr, IdentifierExpr):
+                entry = self._scope._find(ptr.name)
+                if entry:
+                    t = entry[0]
+                    if is_pointer(t):
+                        base = pointer_base(t)
+                        if isinstance(base, NamedType):
+                            return self._env.classes.get(base.name)
+        return None
 
     # ------------------------------------------------------------------
     # Cast validation

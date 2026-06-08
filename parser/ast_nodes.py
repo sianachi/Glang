@@ -106,6 +106,7 @@ class Param:
     """
     name: str
     type: TypeNode
+    is_const: bool = False
     line: int = 0
     col: int = 0
 
@@ -176,6 +177,8 @@ class FieldDecl(Decl):
     """
     name: str
     type: TypeNode
+    is_const: bool = False
+    access: str = "public"
     line: int = 0
     col: int = 0
 
@@ -191,6 +194,8 @@ class StaticFieldDecl(Decl):
     name: str
     type: TypeNode
     initializer: Expr
+    is_const: bool = False
+    access: str = "public"
     line: int = 0
     col: int = 0
 
@@ -252,6 +257,7 @@ class MethodDecl(Decl):
     return_type: TypeNode
     body: Block
     is_static: bool = False
+    access: str = "public"
     line: int = 0
     col: int = 0
 
@@ -279,6 +285,7 @@ class ClassDecl(Decl):
     interfaces: List[str] = field(default_factory=list)
     constructor: Optional[ConstructorDecl] = None
     destructor: Optional[DestructorDecl] = None
+    access: str = "public"
     line: int = 0
     col: int = 0
 
@@ -367,6 +374,7 @@ class VarDecl(Stmt):
     name: str
     type: TypeNode
     initializer: Expr
+    is_const: bool = False
     line: int = 0
     col: int = 0
 

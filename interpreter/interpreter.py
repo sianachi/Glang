@@ -577,8 +577,8 @@ class Interpreter:
         # all are zero-initialised before any constructor runs.
         for cls in reversed(superclass_chain(class_name, self._env)):
             info = self._env.classes[cls]
-            for fname, ftype in info.fields.items():
-                fields[fname] = self._new_box(self._zero_value(ftype))
+            for fname, fd in info.fields.items():
+                fields[fname] = self._new_box(self._zero_value(fd.type))
         instance = ObjectInstance(class_name=class_name, fields=fields)
         obj_value = Value(NamedType(class_name), instance)
         box = self._new_box(obj_value, on_heap=on_heap)

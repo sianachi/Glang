@@ -68,7 +68,7 @@ class Pass1Collector:
         fields: Dict[str, object] = {}
         for fd in decl.fields:
             self._env.resolve_type(fd.type)
-            fields[fd.name] = fd.type
+            fields[fd.name] = fd
 
         static_fields: Dict[str, StaticFieldDecl] = {}
         for sfd in decl.static_fields:
@@ -102,6 +102,7 @@ class Pass1Collector:
             superclass=decl.superclass,
             interfaces=list(decl.interfaces),
             decl=decl,
+            access=decl.access,
         )
 
     def _register_interface(self, decl: InterfaceDecl) -> None:

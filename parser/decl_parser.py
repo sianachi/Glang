@@ -51,8 +51,11 @@ class DeclParser:
         return ImportDecl(path=path_tok.value, line=tok.line, col=tok.col)
 
     def parse_top_level_decl(self) -> Decl:
+        access = "public"
+        if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
+            access = self._s.advance().value
         if self._s.check(TokenType.KW_CLASS):
-            return self._parse_class()
+            return self._parse_class(access=access)
         if self._s.check(TokenType.KW_INTERFACE):
             return self._parse_interface()
         if self._s.check(TokenType.KW_ENUM):
@@ -102,7 +105,7 @@ class DeclParser:
     # Classes
     # ------------------------------------------------------------------
 
-    def _parse_class(self) -> ClassDecl:
+    def _parse_class(self, access: str = "public") -> ClassDecl:
         tok = self._s.advance()  # consume 'class'
         name_tok = self._s.expect(TokenType.IDENT)
 
@@ -128,6 +131,7 @@ class DeclParser:
             interfaces=interfaces,
             constructor=constructor,
             destructor=destructor,
+            access=access,
             line=tok.line,
             col=tok.col,
         )
@@ -153,11 +157,16 @@ class DeclParser:
         phase = 0
 
         while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            # Consume optional access modifier
+            access = "public"
+            if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
+                access = self._s.advance().value
             tok = self._s.peek()
 
             # Static member
             if tok.type == TokenType.KW_STATIC:
                 self._s.advance()  # consume 'static'
+                is_const = bool(self._s.match(TokenType.KW_CONST))
                 ret_type = self._tp.parse_type()
                 member_name = self._s.expect(TokenType.IDENT)
                 if self._s.check(TokenType.LPAREN):
@@ -167,7 +176,7 @@ class DeclParser:
                     body = self._sp.parse_block()
                     methods.append(MethodDecl(
                         name=member_name.value, params=params, return_type=ret_type,
-                        body=body, is_static=True,
+                        body=body, is_static=True, access=access,
                         line=member_name.line, col=member_name.col,
                     ))
                 else:
@@ -181,6 +190,7 @@ class DeclParser:
                     self._s.expect(TokenType.SEMICOLON)
                     static_fields.append(StaticFieldDecl(
                         name=member_name.value, type=ret_type, initializer=init,
+                        is_const=is_const, access=access,
                         line=member_name.line, col=member_name.col,
                     ))
                 continue
@@ -224,6 +234,7 @@ class DeclParser:
                 continue
 
             # Type-led member: instance field or instance method
+            is_const = bool(self._s.match(TokenType.KW_CONST))
             ret_type = self._tp.parse_type()
             member_name = self._s.expect(TokenType.IDENT)
 
@@ -233,7 +244,7 @@ class DeclParser:
                 body = self._sp.parse_block()
                 methods.append(MethodDecl(
                     name=member_name.value, params=params, return_type=ret_type,
-                    body=body, is_static=False,
+                    body=body, is_static=False, access=access,
                     line=member_name.line, col=member_name.col,
                 ))
             else:
@@ -245,6 +256,7 @@ class DeclParser:
                 self._s.expect(TokenType.SEMICOLON)
                 fields.append(FieldDecl(
                     name=member_name.value, type=ret_type,
+                    is_const=is_const, access=access,
                     line=member_name.line, col=member_name.col,
                 ))
 
@@ -284,12 +296,14 @@ class DeclParser:
         self._s.expect(TokenType.LPAREN)
         params: List[Param] = []
         if not self._s.check(TokenType.RPAREN):
+            is_const = bool(self._s.match(TokenType.KW_CONST))
             t = self._tp.parse_type()
             n = self._s.expect(TokenType.IDENT)
-            params.append(Param(name=n.value, type=t, line=n.line, col=n.col))
+            params.append(Param(name=n.value, type=t, is_const=is_const, line=n.line, col=n.col))
             while self._s.match(TokenType.COMMA):
+                is_const = bool(self._s.match(TokenType.KW_CONST))
                 t = self._tp.parse_type()
                 n = self._s.expect(TokenType.IDENT)
-                params.append(Param(name=n.value, type=t, line=n.line, col=n.col))
+                params.append(Param(name=n.value, type=t, is_const=is_const, line=n.line, col=n.col))
         self._s.expect(TokenType.RPAREN)
         return params

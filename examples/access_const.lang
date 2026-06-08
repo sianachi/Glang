@@ -1,0 +1,156 @@
+// access_const.lang — const qualifier and access modifiers in Glang.
+//
+// Demonstrates:
+//   - const local variables and parameters
+//   - const fields (writable in constructor, immutable after)
+//   - private / protected / public members
+//   - private class (usable only inside other class bodies)
+//   - public class (usable anywhere)
+//
+// Run with:
+//     python3 main.py run examples/access_const.lang
+
+// -------------------------------------------------------------------------
+// private class — Stat can only be named inside a class body.
+// Holds a single running min/max pair; not part of the public API.
+// -------------------------------------------------------------------------
+
+private class Stat {
+    int lo;
+    int hi;
+    Stat(int first) {
+        this.lo = first;
+        this.hi = first;
+    }
+    void update(int v) {
+        if (v < this.lo) { this.lo = v; }
+        if (v > this.hi) { this.hi = v; }
+    }
+}
+
+// -------------------------------------------------------------------------
+// public class — DataSet wraps Stat and exposes a clean API.
+// -------------------------------------------------------------------------
+
+public class DataSet {
+    private Stat* stats;
+    private int   count;
+
+    DataSet(int seed) {
+        this.stats = new Stat(seed);
+        this.count = 1;
+    }
+
+    ~DataSet() { delete this.stats; }
+
+    void add(const int v) {
+        this.stats->update(v);
+        this.count += 1;
+    }
+
+    int min() { return this.stats->lo; }
+    int max() { return this.stats->hi; }
+    int size() { return this.count; }
+}
+
+// -------------------------------------------------------------------------
+// const parameter: the bounds are read-only inside the function.
+// -------------------------------------------------------------------------
+
+int clamp(const int val, const int lo, const int hi) {
+    if (val < lo) { return lo; }
+    if (val > hi) { return hi; }
+    return val;
+}
+
+// -------------------------------------------------------------------------
+// Immutable point — x and y can only be set in the constructor.
+// -------------------------------------------------------------------------
+
+class Point {
+    const int x;
+    const int y;
+    Point(int a, int b) { this.x = a; this.y = b; }
+
+    int manhattan(int ox, int oy) {
+        int dx = this.x - ox;
+        int dy = this.y - oy;
+        if (dx < 0) { dx = -dx; }
+        if (dy < 0) { dy = -dy; }
+        return dx + dy;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Access hierarchy: private / protected / public members.
+// -------------------------------------------------------------------------
+
+class Shape {
+    private   string kind;
+    protected int    area;
+    public    string color;
+
+    Shape(string k, string c, int a) {
+        this.kind  = k;
+        this.color = c;
+        this.area  = a;
+    }
+
+    string get_color() { return this.color; }
+}
+
+class Rectangle extends Shape {
+    Rectangle(string c, int w, int h) : super("rect", c, w * h) {}
+
+    int get_area() {
+        return this.area;
+    }
+}
+
+// -------------------------------------------------------------------------
+// main
+// -------------------------------------------------------------------------
+
+int main() {
+    // --- const local ---
+    const int SCALE = 10;
+    print("scale:");
+    print(SCALE);
+
+    // --- clamp with const params ---
+    print("clamp(25, 0, 10):");
+    print(clamp(25, 0, SCALE));
+    print("clamp(-3, 0, 10):");
+    print(clamp(-3, 0, SCALE));
+
+    // --- DataSet hides Stat behind private ---
+    DataSet* ds = new DataSet(42);
+    ds->add(7);
+    ds->add(99);
+    ds->add(15);
+    print("data set size:");
+    print(ds->size());
+    print("min:");
+    print(ds->min());
+    print("max:");
+    print(ds->max());
+    delete ds;
+
+    // --- immutable Point ---
+    Point* p1 = new Point(0, 0);
+    Point* p2 = new Point(3, 4);
+    print("manhattan distance (0,0) to (3,4):");
+    print(p1->manhattan(p2->x, p2->y));
+    delete p1;
+    delete p2;
+
+    // --- access modifiers on Shape hierarchy ---
+    Rectangle* r = new Rectangle("blue", 6, 7);
+    print("color (public):");
+    print(r->get_color());
+    print("area (protected, via subclass method):");
+    print(r->get_area());
+    delete r;
+
+    return 0;
+}

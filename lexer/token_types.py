@@ -11,7 +11,7 @@ class TokenType(Enum):
     # --- Identifier ---
     IDENT = auto()  # foo, myVar, _count
 
-    # --- Keywords (27) ---
+    # --- Keywords (31) ---
     # Types
     KW_INT       = auto()  # int
     KW_FLOAT     = auto()  # float
@@ -51,6 +51,11 @@ class TokenType(Enum):
     KW_FN        = auto()  # fn
     # Enum
     KW_ENUM      = auto()  # enum
+    # Qualifiers / visibility
+    KW_CONST     = auto()  # const
+    KW_PRIVATE   = auto()  # private
+    KW_PROTECTED = auto()  # protected
+    KW_PUBLIC    = auto()  # public
 
     # --- Arithmetic operators ---
     PLUS    = auto()  # +
@@ -145,4 +150,8 @@ KEYWORDS: dict[str, TokenType] = {
     "import":     TokenType.KW_IMPORT,
     "fn":         TokenType.KW_FN,
     "enum":       TokenType.KW_ENUM,
+    "const":      TokenType.KW_CONST,
+    "private":    TokenType.KW_PRIVATE,
+    "protected":  TokenType.KW_PROTECTED,
+    "public":     TokenType.KW_PUBLIC,
 }

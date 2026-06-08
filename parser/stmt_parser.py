@@ -81,6 +81,8 @@ class StmtParser:
 
     def _is_var_decl_start(self) -> bool:
         tok = self._s.peek()
+        if tok.type == TokenType.KW_CONST:
+            return True
         if tok.type in _TYPE_KWS:
             return True
         if tok.type != TokenType.IDENT:
@@ -104,6 +106,7 @@ class StmtParser:
         return False
 
     def _parse_var_decl(self) -> VarDecl:
+        is_const = bool(self._s.match(TokenType.KW_CONST))
         type_node = self._tp.parse_type()
         name_tok = self._s.expect(TokenType.IDENT)
 
@@ -118,6 +121,7 @@ class StmtParser:
         self._s.expect(TokenType.SEMICOLON)
         return VarDecl(
             name=name_tok.value, type=type_node, initializer=init,
+            is_const=is_const,
             line=name_tok.line, col=name_tok.col,
         )
 
