@@ -13,11 +13,12 @@
 8. [Memory Model](#8-memory-model)
 9. [Classes](#9-classes)
 10. [Interfaces](#10-interfaces)
-11. [Scope & Lifetime](#11-scope--lifetime)
-12. [Modules](#12-modules)
-13. [Entry Point](#13-entry-point)
-14. [Memory-safety violations](#14-memory-safety-violations)
-15. [Future Work](#15-future-work)
+11. [Enums](#11-enums)
+12. [Scope & Lifetime](#12-scope--lifetime)
+13. [Modules](#13-modules)
+14. [Entry Point](#14-entry-point)
+15. [Memory-safety violations](#15-memory-safety-violations)
+16. [Future Work](#16-future-work)
 
 ---
 
@@ -58,10 +59,10 @@ Identifiers start with a letter or underscore, followed by any number of letters
 
 ```
 alloc     bool      break     char      class     continue
-delete    else      extends   false     float     for
-free      if        implements  import  int       interface
-new       null      return    static    string    super
-this      true      void      while
+delete    else      enum      extends   false     float
+for       free      if        implements  import  int
+interface new       null      return    static    string
+super     this      true      void      while
 ```
 
 ### 2.4 Literals
@@ -142,6 +143,29 @@ Dog* d = (Dog*) p;
 ```
 
 No implicit numeric widening or narrowing. No implicit bool/int conversion.
+
+### 3.5 Enum types
+
+An enum is a named set of integer constants. Each variant carries a distinct `int` value.
+
+```
+enum Color  { RED, GREEN, BLUE }            // implicit: RED=0, GREEN=1, BLUE=2
+enum Status { OK = 200, NOT_FOUND = 404 }   // explicit values
+```
+
+Implicit values start at 0 and increment by 1; after an explicit value the next implicit value is `explicit + 1`.
+
+Enum types are **not** aliases of `int` — the type checker prevents assigning an `int` to an enum or vice versa without an explicit cast:
+
+```
+Color c = Color.GREEN;        // ok
+int   n = (int) c;            // ok — cast to int
+Color d = (Color) 2;          // ok — cast int to enum
+int   x = Color.RED;          // error: cannot assign 'Color' to 'int'
+Color e = 0;                  // error: cannot assign 'int' to 'Color'
+```
+
+Variant access uses dot notation (`Color.RED`). Enum values support `==` and `!=` comparisons.
 
 ---
 
@@ -375,7 +399,16 @@ print("hello");     // hello
 - `print` takes exactly one argument of a primitive type (`int`, `float`, `bool`, `char`, or `string`) and returns `void`.
 - It writes the value followed by a newline. `bool` prints as `true`/`false`.
 - `print` is not a keyword and not overloadable; it occupies the global function namespace and may not be redefined.
-- It is the only built-in I/O. Formatted, buffered, or file I/O is a standard-library concern (see §15, variadic functions).
+
+Alongside `print` and the string built-ins (`len`, `substr`, `parseInt`, `parseFloat`, `toString`, `startsWith`, `endsWith`, `contains`, `indexOf`), the runtime provides three file-I/O built-ins. They are always available — no import is required — and operate on paths relative to the process working directory:
+
+```c
+writeFile("out.txt", "hello\n");   // (string, string) -> void
+bool ok = fileExists("out.txt");   // (string) -> bool
+string s = readFile("out.txt");    // (string) -> string  (errors if missing)
+```
+
+Higher-level, line-oriented helpers built on these live in `std/io.lang` (see the Standard Library section).
 
 ---
 
@@ -399,6 +432,17 @@ free(p);
 ```
 
 `alloc(T)` allocates enough memory for one value of type `T` and returns a `T*`. The memory is uninitialised — you must write before reading. `free(p)` releases the memory. Behaviour after `free` is undefined.
+
+A count allocates a **contiguous block** of zero-initialised cells, which is indexable through the pointer with `p[i]`:
+
+```c
+int* xs = alloc(int, 8);   // a block of 8 zeroed ints
+xs[3] = 42;
+int v = xs[3];             // 42  (in-bounds; out-of-bounds is a runtime error)
+free(xs);                  // frees the whole block
+```
+
+This — a sized `alloc` plus pointer indexing — is what lets the standard-library collections (`List<T>`, `Map<K,V>`, …) grow by allocating a larger block, copying, and freeing the old one.
 
 ### 8.3 Heap allocation — objects
 
@@ -573,9 +617,55 @@ class Dog extends Animal implements Printable, Comparable {
 
 ---
 
-## 11. Scope & Lifetime
+## 11. Enums
 
-### 11.1 Block scoping
+### 11.1 Declaration
+
+```
+enum Direction { NORTH, EAST, SOUTH, WEST }
+enum HttpStatus { OK = 200, NOT_FOUND = 404, SERVER_ERROR = 500 }
+```
+
+Variants are listed inside `{ }`, separated by commas. Each variant may optionally carry an explicit integer value with `= N`; otherwise it takes the value of the previous variant plus one (or 0 for the first variant).
+
+### 11.2 Type rules
+
+- An enum type is a distinct type. It is not interchangeable with `int` or any other enum without an explicit cast.
+- `Color c = Color.RED;` — correct.
+- `int n = Color.RED;` — type error.
+- `Color c = 0;` — type error.
+
+### 11.3 Variant access
+
+Variants are accessed via `EnumName.VariantName`:
+
+```
+Direction d = Direction.NORTH;
+HttpStatus s = HttpStatus.NOT_FOUND;
+```
+
+### 11.4 Comparisons
+
+Enum values support `==` and `!=`:
+
+```
+if (d == Direction.SOUTH) { ... }
+```
+
+### 11.5 Casting
+
+Cast to `int` to read the underlying ordinal; cast from `int` to convert a runtime integer back to an enum type:
+
+```
+int code = (int) HttpStatus.NOT_FOUND;   // 404
+HttpStatus s = (HttpStatus) 500;         // SERVER_ERROR
+```
+
+---
+
+## 12. Scope & Lifetime
+
+### 12.1 Block scoping
 
 Variables are visible from their declaration to the end of the enclosing `{}` block. There is no hoisting.
 
@@ -590,19 +680,19 @@ int x = 1;
 
 Shadowing is allowed but generates a compiler warning.
 
-### 11.2 Stack lifetime
+### 12.2 Stack lifetime
 
 Stack variables are destroyed in reverse declaration order when their scope exits. If a class has a destructor, it is called.
 
-### 11.3 Heap lifetime
+### 12.3 Heap lifetime
 
 Heap objects live until explicitly freed with `delete` or `free`. The compiler does not track heap lifetimes.
 
 ---
 
-## 12. Modules
+## 13. Modules
 
-### 12.1 Import
+### 13.1 Import
 
 ```c
 import "path/to/file.lang";
@@ -610,13 +700,20 @@ import "path/to/file.lang";
 
 Importing a file makes all top-level declarations in that file visible in the current file. Import paths are relative to the source file. Circular imports are a compile error. Duplicate imports are silently ignored (include-guard semantics).
 
-### 12.2 No namespaces
+An import path beginning with `std/` is resolved against the bundled standard-library directory (`stdlib/`) instead of the importing file's directory, regardless of the current working directory:
+
+```c
+import "std/list.lang";   // resolves to <project>/stdlib/list.lang
+import "std/math.lang";
+```
+
+### 13.2 No namespaces
 
 All top-level names share a single global namespace in v1. Naming conventions (e.g. `List_create`) are used to avoid collisions.
 
 ---
 
-## 13. Entry Point
+## 14. Entry Point
 
 Every program must define exactly one `main` function:
 
@@ -631,7 +728,7 @@ The return value is the process exit code. `0` means success. No command-line ar
 
 ---
 
-## 14. Memory-safety violations
+## 15. Memory-safety violations
 
 These operations are programming errors. The language does not define a way to
 recover from them.
@@ -661,21 +758,82 @@ runtime error (a `RuntimeError` diagnostic) rather than continuing:
 
 ---
 
-## 15. Future Work
+## 16. Future Work
 
-The following are explicitly out of scope for v1 and reserved for later versions:
+Since v1, the following have shipped: `const`, access modifiers, string
+operations, the import system (with a `std/` prefix), function pointers,
+closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
+file-I/O built-ins, and **generics** (monomorphized) with a generic standard
+library. The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
-| Generics             | Stdlib uses `void*` in the meantime                |
-| Function pointers    | Needed for callbacks, higher-order patterns        |
-| Closures / lambdas   | Depends on function pointers                       |
+| Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
+| Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
+| Namespaces           | All top-level names still share one global namespace |
 | Exceptions           | Error handling via return values for now           |
-| `const` qualifier    | Variables and parameters                           |
-| Access modifiers     | `private`, `protected`                             |
-| Abstract classes     | Use interfaces                                     |
-| Operator overloading | Needed for ergonomic GC wrapper types              |
-| Enums                | Can be emulated with `static int` class fields     |
-| Garbage collection   | Will be implemented as a standard library          |
+| Garbage collection   | Planned as a pure-GScript standard-library module  |
 | Command-line args    | `main(int argc, string[] argv)`                    |
 | Variadic functions   | Needed for printf-style stdlib functions           |
+
+---
+
+## 17. Standard Library
+
+The bundled standard library lives in `stdlib/` and is imported with the `std/`
+prefix (e.g. `import "std/list.lang";`). The file-I/O built-ins (`readFile`,
+`writeFile`, `fileExists`) are part of the runtime and need no import.
+
+| Module            | Provides                                                                 |
+|-------------------|--------------------------------------------------------------------------|
+| `std/math.lang`   | `abs`, `fabs`, `min`/`max`, `fmin`/`fmax`, `clamp`, `sign`, `ipow`, `gcd`, `lcm`, `isqrt`, `factorial` |
+| `std/char.lang`   | `isDigit`/`isAlpha`/`isAlnum`/`isSpace`/`isUpper`/`isLower`, `toUpper`/`toLower`, `digitToInt` |
+| `std/string.lang` | `toUpperStr`/`toLowerStr`, `reverse`, `repeat`, `trim`, `padLeft`, `count`, `replaceChar`, `equalsIgnoreCase` |
+| `std/io.lang`     | `appendFile`, `readLineCount` (built on the I/O built-ins)                |
+| `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `isEmpty`, `clear` |
+| `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek`, `length`, `isEmpty`                   |
+| `std/queue.lang`  | `Queue<T>` — ring buffer: `enqueue`, `dequeue`, `peek`, `length`, `isEmpty` |
+| `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length`  |
+| `std/option.lang` | `Option<T>` — `setSome`/`setNone`, `isSome`/`isNone`, `get`, `getOr`      |
+
+The collections are growable and generic: each one is backed by a contiguous
+`alloc(T, cap)` block that doubles when full. The map uses linear search, so it
+works for any key type that supports `==` (a hashed map awaits a generic hashing
+mechanism).
+
+```c
+import "std/list.lang";
+
+int main() {
+    List<int> xs = List<int>();
+    xs.add(10);
+    xs.add(20);
+    print(xs.get(1));   // 20
+    return 0;
+}
+```
+
+---
+
+## 18. Running Programs and Examples
+
+```bash
+# Run a program
+python3 main.py run path/to/program.lang
+
+# Run all unit tests
+python3 -m pytest tests/ -v
+```
+
+Runnable example programs live in `examples/`, each paired with an
+`examples/<name>.expected` golden-output file. Two harnesses run them — both
+separate from the unit tests:
+
+```bash
+# Standalone runner: executes every example and diffs stdout against its golden
+python3 examples/run_examples.py
+python3 examples/run_examples.py --generate   # rewrite the golden files
+
+# The same examples under pytest
+python3 -m pytest tests/test_examples.py -v
+```

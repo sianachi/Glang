@@ -128,7 +128,15 @@ class GlobalEnv:
     enums: Dict[str, EnumInfo] = field(default_factory=dict)
 
     def resolve_type(self, node: TypeNode) -> None:
-        from parser.ast_nodes import PointerType, ArrayType, FunctionPointerType
+        from parser.ast_nodes import (
+            PointerType, ArrayType, FunctionPointerType, GenericType,
+        )
+        if isinstance(node, GenericType):
+            # Monomorphization should have rewritten every GenericType already;
+            # reaching one here means an instantiation site was missed.
+            raise TypeError(
+                f"unresolved generic type '{node.name}'", node.line, node.col
+            )
         if isinstance(node, NamedType):
             if (
                 node.name not in PRIMITIVES

@@ -1046,6 +1046,121 @@ class TestPass2Arithmetic:
         err("bool f() { return 1 == true; }", "type mismatch")
 
 
+class TestPass2StringOperations:
+    def test_string_index_returns_char(self):
+        ok('char f() { string s = "hello"; return s[1]; }')
+
+    def test_string_index_requires_int(self):
+        err(
+            'char f() { string s = "hello"; return s[true]; }',
+            "string index must be int",
+        )
+
+    def test_string_index_not_assignable(self):
+        err(
+            'void f() { string s = "hi"; s[0] = \'H\'; }',
+            "string index is not assignable",
+        )
+
+    def test_len_string_ok(self):
+        ok('int f() { return len("hello"); }')
+
+    def test_len_array_ok(self):
+        ok("class Buf { int[3] data; Buf() {} } int f() { Buf b = Buf(); return len(b.data); }")
+
+    def test_len_wrong_type_raises(self):
+        err("int f() { return len(42); }", "'len' requires string or array")
+
+    def test_string_builtins_ok(self):
+        ok(
+            'int f() { int i = parseInt("42"); float x = parseFloat("3.5"); '
+            'string s = substr("hello", 1, 3); string t = toString(i); '
+            'bool a = startsWith("hello", "he"); bool b = endsWith("hello", "lo"); '
+            'bool c = contains("hello", "ell"); return indexOf("hello", "ll"); }'
+        )
+
+    def test_substr_wrong_arg_type_raises(self):
+        err('string f() { return substr("hello", true, 3); }', "cannot assign")
+
+    def test_to_string_wrong_arg_type_raises(self):
+        err("string f() { int* p = null; return toString(p); }", "'toString' requires a primitive")
+
+    def test_file_io_builtins_ok(self):
+        ok(
+            'int f() { writeFile("a.txt", "x"); '
+            'bool e = fileExists("a.txt"); '
+            'string s = readFile("a.txt"); return len(s); }'
+        )
+
+    def test_write_file_wrong_arg_type_raises(self):
+        err('void f() { writeFile("a.txt", 42); }', "cannot assign")
+
+
+class TestPass2OperatorOverloading:
+    VEC2 = """
+    class Vec2 {
+        int x;
+        int y;
+        Vec2(int x, int y) { this.x = x; this.y = y; }
+        Vec2 operator+(Vec2 other) {
+            return Vec2(this.x + other.x, this.y + other.y);
+        }
+        bool operator==(Vec2 other) {
+            return this.x == other.x && this.y == other.y;
+        }
+        int operator[](int index) {
+            if (index == 0) { return this.x; }
+            return this.y;
+        }
+    }
+    """
+
+    def test_binary_operator_overload_ok(self):
+        ok(self.VEC2 + "int f() { Vec2 a = Vec2(1, 2); Vec2 b = Vec2(3, 4); Vec2 c = a + b; return c.x; }")
+
+    def test_equality_and_inequality_fallback_ok(self):
+        ok(self.VEC2 + "bool f() { Vec2 a = Vec2(1, 2); Vec2 b = Vec2(1, 2); return a == b && !(a != b); }")
+
+    def test_index_operator_overload_ok(self):
+        ok(self.VEC2 + "int f() { Vec2 a = Vec2(7, 9); return a[1]; }")
+
+    def test_missing_binary_operator_raises(self):
+        err(
+            "class Vec2 {} int f() { Vec2 a = Vec2(); Vec2 b = Vec2(); return a + b; }",
+            "operator '+' requires int or float operands",
+        )
+
+    def test_static_operator_rejected(self):
+        err(
+            "class Vec2 { static Vec2 operator+(Vec2 other) { return other; } } void main() {}",
+            "operator overloads must be instance methods",
+        )
+
+    def test_binary_operator_param_must_match_class(self):
+        err(
+            "class Vec2 { Vec2 operator+(int other) { return Vec2(); } } void main() {}",
+            "'operator+' parameter must be 'Vec2'",
+        )
+
+    def test_comparison_operator_must_return_bool(self):
+        err(
+            "class Vec2 { int operator==(Vec2 other) { return 1; } } void main() {}",
+            "'operator==' must return bool",
+        )
+
+    def test_index_operator_result_not_assignable(self):
+        err(
+            "class Box { int operator[](int i) { return i; } } void f() { Box b = Box(); b[0] = 1; }",
+            "operator[] result is not assignable",
+        )
+
+    def test_index_operator_arg_type_checked(self):
+        err(
+            "class Box { int operator[](string key) { return 1; } } int f() { Box b = Box(); return b[0]; }",
+            "cannot assign 'int' to 'string'",
+        )
+
+
 class TestPass2Unary:
     def test_negate_int(self):
         ok("int f() { return -1; }")
@@ -1132,6 +1247,20 @@ class TestPass2Memory:
 
     def test_free_non_pointer_raises(self):
         err("void main() { int x = 0; free(x); }", "'free' requires a pointer")
+
+    def test_alloc_block(self):
+        ok("void main() { int* p = alloc(int, 8); p[0] = 1; free(p); }")
+
+    def test_alloc_count_must_be_int(self):
+        err("void main() { int* p = alloc(int, 1.5); free(p); }",
+            "alloc count must be int")
+
+    def test_pointer_index_yields_element_type(self):
+        ok("void main() { int* p = alloc(int, 4); int x = p[2]; free(p); }")
+
+    def test_pointer_index_must_be_int(self):
+        err("void main() { int* p = alloc(int, 4); int x = p[\"a\"]; free(p); }",
+            "pointer index must be int")
 
 
 # ---------------------------------------------------------------------------

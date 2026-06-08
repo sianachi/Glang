@@ -1,0 +1,72 @@
+// std/list.lang — a growable generic list, List<T>.
+//
+// Backed by a contiguous block allocated with alloc(T, cap); when it fills, a
+// block of double the capacity is allocated, the elements are copied over, and
+// the old block is freed. Element access is the indexable-pointer form data[i].
+
+class List<T> {
+    T* data;
+    int cap;
+    int size;
+
+    List() {
+        this.cap = 4;
+        this.size = 0;
+        this.data = alloc(T, 4);
+    }
+
+    int length() {
+        return this.size;
+    }
+
+    bool isEmpty() {
+        return this.size == 0;
+    }
+
+    void _grow() {
+        int newcap = this.cap * 2;
+        T* bigger = alloc(T, newcap);
+        for (int i = 0; i < this.size; ++i) {
+            bigger[i] = this.data[i];
+        }
+        free(this.data);
+        this.data = bigger;
+        this.cap = newcap;
+    }
+
+    void add(T item) {
+        if (this.size == this.cap) {
+            this._grow();
+        }
+        this.data[this.size] = item;
+        this.size = this.size + 1;
+    }
+
+    T get(int index) {
+        return this.data[index];
+    }
+
+    void set(int index, T item) {
+        this.data[index] = item;
+    }
+
+    bool contains(T item) {
+        for (int i = 0; i < this.size; ++i) {
+            if (this.data[i] == item) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void removeAt(int index) {
+        for (int i = index; i < this.size - 1; ++i) {
+            this.data[i] = this.data[i + 1];
+        }
+        this.size = this.size - 1;
+    }
+
+    void clear() {
+        this.size = 0;
+    }
+}

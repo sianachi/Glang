@@ -22,17 +22,27 @@ from parser.parser import Parser
 from parser.ast_nodes import Program, ImportDecl, Decl
 from errors.errors import ImportError
 
+# The standard-library root: the top-level ``stdlib/`` directory shipped with
+# the project, found relative to this file so it works regardless of the
+# current working directory. Imports beginning with ``std/`` resolve here.
+STDLIB_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "stdlib")
+)
+STD_PREFIX = "std/"
+
 
 class Loader:
     """Resolves imports starting from a root file into one merged Program."""
 
-    def __init__(self) -> None:
+    def __init__(self, stdlib_dir: Optional[str] = None) -> None:
         # Realpaths of files fully merged already (include-guard de-dup).
         self._loaded: set[str] = set()
         # Realpaths currently being loaded (the DFS stack) — used to spot cycles.
         self._visiting: List[str] = []
         # Top-level declarations gathered across all files, in load order.
         self._declarations: List[Decl] = []
+        # The stdlib root used to resolve ``std/...`` imports (overridable for tests).
+        self._stdlib_dir = stdlib_dir if stdlib_dir is not None else STDLIB_DIR
 
     def load(self, root_path: str) -> Program:
         """Load ``root_path`` and all its imports into a single Program."""
@@ -58,7 +68,7 @@ class Loader:
 
             base_dir = os.path.dirname(abspath)
             for imp in program.imports:
-                target = os.path.realpath(os.path.join(base_dir, imp.path))
+                target = os.path.realpath(self._resolve_import(imp.path, base_dir))
                 self._load_file(target, via=imp)
 
             # Post-order: a file's imports are merged before the file itself.
@@ -67,6 +77,13 @@ class Loader:
             self._visiting.pop()
 
         self._loaded.add(abspath)
+
+    def _resolve_import(self, import_path: str, base_dir: str) -> str:
+        """Resolve an import path. ``std/...`` paths resolve against the stdlib
+        root; all others resolve relative to the importing file's directory."""
+        if import_path.startswith(STD_PREFIX):
+            return os.path.join(self._stdlib_dir, import_path[len(STD_PREFIX):])
+        return os.path.join(base_dir, import_path)
 
     def _read(self, abspath: str, via: Optional[ImportDecl]) -> str:
         try:

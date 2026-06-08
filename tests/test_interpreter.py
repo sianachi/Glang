@@ -136,6 +136,128 @@ class TestStrings:
     def test_string_inequality(self):
         assert run(main('if ("a" != "b") { return 1; } return 0;')) == 1
 
+    def test_string_index_and_builtins(self):
+        src = main(
+            'string s = "hello"; '
+            'print(s[1]); '
+            'print(len(s)); '
+            'print(substr(s, 1, 3)); '
+            'print(parseInt("0x2a")); '
+            'print(parseFloat("3.5")); '
+            'print(toString(true)); '
+            'print(toString(42)); '
+            'print(startsWith(s, "he")); '
+            'print(endsWith(s, "lo")); '
+            'print(contains(s, "ell")); '
+            'print(indexOf(s, "ll")); '
+            'print(indexOf(s, "zz")); '
+            'return indexOf(s, "ll");'
+        )
+        code, out = run_out(src)
+        assert code == 2
+        assert out == [
+            "e",
+            "5",
+            "el",
+            "42",
+            "3.5",
+            "true",
+            "42",
+            "true",
+            "true",
+            "true",
+            "2",
+            "-1",
+        ]
+
+    def test_len_array(self):
+        src = (
+            "class Buf { int[3] data; Buf() {} }\n"
+            + main("Buf* b = new Buf(); int n = len(b->data); delete b; return n;")
+        )
+        assert run(src) == 3
+
+    def test_string_index_out_of_bounds_raises(self):
+        with pytest.raises(GRE):
+            run(main('string s = "hi"; print(s[2]); return 0;'))
+
+    def test_substr_out_of_bounds_raises(self):
+        with pytest.raises(GRE):
+            run(main('print(substr("hello", 3, 9)); return 0;'))
+
+    def test_parse_int_invalid_raises(self):
+        with pytest.raises(GRE):
+            run(main('return parseInt("nope");'))
+
+    def test_parse_float_invalid_raises(self):
+        with pytest.raises(GRE):
+            run(main('print(parseFloat("nope")); return 0;'))
+
+
+# ---------------------------------------------------------------------------
+# Operator overloading
+# ---------------------------------------------------------------------------
+
+class TestOperatorOverloading:
+    VEC2 = """
+    class Vec2 {
+        int x;
+        int y;
+        Vec2(int x, int y) { this.x = x; this.y = y; }
+        Vec2 operator+(Vec2 other) {
+            return Vec2(this.x + other.x, this.y + other.y);
+        }
+        bool operator==(Vec2 other) {
+            return this.x == other.x && this.y == other.y;
+        }
+        bool operator<(Vec2 other) {
+            return this.x + this.y < other.x + other.y;
+        }
+        int operator[](int index) {
+            if (index == 0) { return this.x; }
+            return this.y;
+        }
+    }
+    """
+
+    def test_operator_plus_and_compound_assignment(self):
+        src = self.VEC2 + main(
+            "Vec2 a = Vec2(1, 2); "
+            "Vec2 b = Vec2(3, 4); "
+            "Vec2 c = a + b; "
+            "a += b; "
+            "print(c.x); "
+            "print(c.y); "
+            "print(a.x); "
+            "return a.y;"
+        )
+        code, out = run_out(src)
+        assert code == 6
+        assert out == ["4", "6", "4"]
+
+    def test_operator_equality_and_inequality_fallback(self):
+        src = self.VEC2 + main(
+            "Vec2 a = Vec2(2, 5); "
+            "Vec2 b = Vec2(2, 5); "
+            "Vec2 c = Vec2(5, 2); "
+            "if (a == b && a != c) { return 1; } "
+            "return 0;"
+        )
+        assert run(src) == 1
+
+    def test_operator_comparison(self):
+        src = self.VEC2 + main(
+            "Vec2 a = Vec2(1, 1); "
+            "Vec2 b = Vec2(2, 3); "
+            "if (a < b) { return 1; } "
+            "return 0;"
+        )
+        assert run(src) == 1
+
+    def test_operator_index(self):
+        src = self.VEC2 + main("Vec2 a = Vec2(8, 13); return a[1];")
+        assert run(src) == 13
+
 
 # ---------------------------------------------------------------------------
 # print builtin
@@ -308,6 +430,40 @@ class TestPointers:
 
     def test_non_null_comparison(self):
         assert run(main("int* p = alloc(int); int r = 0; if (p != null) { r = 1; } free(p); return r;")) == 1
+
+
+class TestBlockAlloc:
+    def test_alloc_block_write_read(self):
+        body = (
+            "int* p = alloc(int, 4);"
+            "for (int i = 0; i < 4; ++i) { p[i] = i * i; }"
+            "int sum = 0;"
+            "for (int i = 0; i < 4; ++i) { sum = sum + p[i]; }"
+            "free(p); return sum;"
+        )
+        assert run(main(body)) == 14
+
+    def test_alloc_block_is_zero_initialised(self):
+        assert run(main("int* p = alloc(int, 3); int v = p[2]; free(p); return v;")) == 0
+
+    def test_alloc_block_index_assignment(self):
+        assert run(main("int* p = alloc(int, 2); p[1] = 7; int v = p[1]; free(p); return v;")) == 7
+
+    def test_block_index_out_of_bounds_raises(self):
+        with pytest.raises(GRE):
+            run(main("int* p = alloc(int, 2); return p[5];"))
+
+    def test_block_use_after_free_raises(self):
+        with pytest.raises(GRE):
+            run(main("int* p = alloc(int, 2); free(p); p[0] = 1; return 0;"))
+
+    def test_string_block(self):
+        body = (
+            'string* names = alloc(string, 2);'
+            'names[0] = "a"; names[1] = "b";'
+            'string r = names[0] + names[1]; free(names); return len(r);'
+        )
+        assert run(main(body)) == 2
 
 
 # ---------------------------------------------------------------------------

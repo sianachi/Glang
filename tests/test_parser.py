@@ -627,6 +627,24 @@ class TestClassDecl:
         cls = prog.declarations[0]
         assert cls.methods[0].is_static is True
 
+    def test_operator_method(self):
+        prog = parse("class Vec2 { Vec2 operator+(Vec2 other) { return other; } }")
+        cls = prog.declarations[0]
+        assert len(cls.methods) == 1
+        m = cls.methods[0]
+        assert m.name == "operator+"
+        assert m.is_static is False
+
+    def test_operator_equality_method(self):
+        prog = parse("class Vec2 { bool operator==(Vec2 other) { return true; } }")
+        cls = prog.declarations[0]
+        assert cls.methods[0].name == "operator=="
+
+    def test_operator_index_method(self):
+        prog = parse("class Vec2 { int operator[](int index) { return index; } }")
+        cls = prog.declarations[0]
+        assert cls.methods[0].name == "operator[]"
+
     def test_full_class(self):
         src = """
         class Dog extends Animal implements Printable {

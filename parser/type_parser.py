@@ -3,12 +3,16 @@ from __future__ import annotations
 try:
     from .token_stream import TokenStream
     from ..lexer.token_types import TokenType
-    from .ast_nodes import TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType
+    from .ast_nodes import (
+        TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
+        GenericType,
+    )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
     from lexer.token_types import TokenType  # type: ignore
     from parser.ast_nodes import (  # type: ignore
         TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
+        GenericType,
     )
 
 _TYPE_KEYWORDS = {
@@ -38,6 +42,9 @@ def is_type_start(stream: TokenStream) -> bool:
 class TypeParser:
     def __init__(self, stream: TokenStream) -> None:
         self._s = stream
+        # Count of pending '>' tokens "owed" after splitting a '>>' (RSHIFT)
+        # encountered while closing nested generic argument lists.
+        self._pending_gt = 0
 
     def parse_type(self) -> TypeNode:
         tok = self._s.peek()
@@ -50,7 +57,13 @@ class TypeParser:
             )
         elif tok.type == TokenType.IDENT:
             self._s.advance()
-            node = NamedType(name=tok.value, line=tok.line, col=tok.col)
+            if self._s.check(TokenType.LT):
+                node = GenericType(
+                    name=tok.value, type_args=self.parse_type_args(),
+                    line=tok.line, col=tok.col,
+                )
+            else:
+                node = NamedType(name=tok.value, line=tok.line, col=tok.col)
         else:
             raise self._s.error(f"Expected type, got {tok.type.name!r}")
 
@@ -67,6 +80,33 @@ class TypeParser:
             )
 
         return node
+
+    def parse_type_args(self) -> list:
+        """Parse ``<T1, T2, ...>`` starting at the opening ``<``. Handles a
+        ``>>`` closing two nested argument lists by splitting it."""
+        self._s.expect(TokenType.LT)
+        args = [self.parse_type()]
+        while self._s.match(TokenType.COMMA):
+            args.append(self.parse_type())
+        self._expect_gt()
+        return args
+
+    def _expect_gt(self) -> None:
+        """Consume one closing ``>``. A ``>>`` (RSHIFT) token closes two levels:
+        the first call consumes it and leaves one ``>`` pending for the outer
+        argument list."""
+        if self._pending_gt > 0:
+            self._pending_gt -= 1
+            return
+        tok = self._s.peek()
+        if tok.type == TokenType.GT:
+            self._s.advance()
+            return
+        if tok.type == TokenType.RSHIFT:
+            self._s.advance()
+            self._pending_gt += 1
+            return
+        raise self._s.error("Expected '>' to close type arguments")
 
     def _parse_function_pointer_type(self) -> FunctionPointerType:
         tok = self._s.expect(TokenType.KW_FN)

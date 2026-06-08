@@ -30,3 +30,6 @@ dist/
 
 # OS cruft
 .DS_Store
+
+# Scratch file written by examples/file_io.lang when run directly
+glang_demo.txt

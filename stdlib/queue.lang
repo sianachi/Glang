@@ -1,0 +1,61 @@
+// std/queue.lang — a growable generic FIFO queue, Queue<T>.
+//
+// Implemented as a ring buffer over a contiguous block: `head` is the index of
+// the front element and `count` the number of live elements. On growth the
+// elements are copied out in logical order so `head` resets to 0.
+
+class Queue<T> {
+    T* data;
+    int cap;
+    int head;
+    int count;
+
+    Queue() {
+        this.cap = 4;
+        this.head = 0;
+        this.count = 0;
+        this.data = alloc(T, 4);
+    }
+
+    int length() {
+        return this.count;
+    }
+
+    bool isEmpty() {
+        return this.count == 0;
+    }
+
+    void _grow() {
+        int newcap = this.cap * 2;
+        T* bigger = alloc(T, newcap);
+        for (int i = 0; i < this.count; ++i) {
+            bigger[i] = this.data[(this.head + i) % this.cap];
+        }
+        free(this.data);
+        this.data = bigger;
+        this.cap = newcap;
+        this.head = 0;
+    }
+
+    void enqueue(T item) {
+        if (this.count == this.cap) {
+            this._grow();
+        }
+        int tail = (this.head + this.count) % this.cap;
+        this.data[tail] = item;
+        this.count = this.count + 1;
+    }
+
+    // Remove and return the front element. Dequeuing an empty queue is a
+    // runtime error (out-of-bounds access).
+    T dequeue() {
+        T item = this.data[this.head];
+        this.head = (this.head + 1) % this.cap;
+        this.count = this.count - 1;
+        return item;
+    }
+
+    T peek() {
+        return this.data[this.head];
+    }
+}

@@ -1,0 +1,35 @@
+// std/io.lang — higher-level file helpers built on the interpreter's I/O
+// builtins (readFile, writeFile, fileExists). Those builtins are always
+// available without importing anything; this module adds conveniences on top
+// of them with distinct names (a same-named wrapper would just be shadowed by
+// the builtin at every call site).
+
+// Append `text` to the file at `path`, creating it if it does not yet exist.
+void appendFile(string path, string text) {
+    string existing = "";
+    if (fileExists(path)) {
+        existing = readFile(path);
+    }
+    writeFile(path, existing + text);
+}
+
+// Number of newline-separated lines in the file. An empty file has 0 lines;
+// otherwise the count is the number of '\n' characters plus one when the file
+// does not end in a trailing newline.
+int readLineCount(string path) {
+    string text = readFile(path);
+    int n = len(text);
+    if (n == 0) {
+        return 0;
+    }
+    int lines = 0;
+    for (int i = 0; i < n; ++i) {
+        if (text[i] == '\n') {
+            lines = lines + 1;
+        }
+    }
+    if (text[n - 1] != '\n') {
+        lines = lines + 1;
+    }
+    return lines;
+}

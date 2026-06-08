@@ -1,0 +1,35 @@
+// Demonstrates generics: a List<T> that grows past its initial capacity, used
+// at two different element types in the same program.
+// Run: python3 main.py run examples/generic_list.lang
+
+import "std/list.lang";
+
+int main() {
+    // Starts at capacity 4, so adding 10 elements forces it to grow.
+    List<int> nums = List<int>();
+    for (int i = 0; i < 10; ++i) {
+        nums.add(i * i);
+    }
+    print(nums.length());     // 10
+    print(nums.get(9));       // 81
+    print(nums.contains(49)); // true
+
+    int sum = 0;
+    for (int i = 0; i < nums.length(); ++i) {
+        sum = sum + nums.get(i);
+    }
+    print(sum);               // 285
+
+    nums.removeAt(0);
+    print(nums.length());     // 9
+    print(nums.get(0));       // 1
+
+    // A separate instantiation at a different type.
+    List<string> words = List<string>();
+    words.add("hello");
+    words.add("generic");
+    words.add("world");
+    print(words.length());    // 3
+    print(words.get(1));      // generic
+    return 0;
+}

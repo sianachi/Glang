@@ -1,0 +1,94 @@
+// std/string.lang — string helpers built on the string builtins (len, substr,
+// indexOf, ...) and std/char.lang. Strings are immutable, so transforming
+// functions build a fresh result one character at a time via toString(char).
+
+import "std/char.lang";
+
+string toUpperStr(string s) {
+    string out = "";
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        out = out + toString(toUpper(s[i]));
+    }
+    return out;
+}
+
+string toLowerStr(string s) {
+    string out = "";
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        out = out + toString(toLower(s[i]));
+    }
+    return out;
+}
+
+string reverse(string s) {
+    string out = "";
+    int n = len(s);
+    for (int i = n - 1; i >= 0; --i) {
+        out = out + toString(s[i]);
+    }
+    return out;
+}
+
+string repeat(string s, int times) {
+    string out = "";
+    for (int i = 0; i < times; ++i) {
+        out = out + s;
+    }
+    return out;
+}
+
+// Remove leading and trailing whitespace.
+string trim(string s) {
+    int n = len(s);
+    int start = 0;
+    while (start < n && isSpace(s[start])) {
+        start = start + 1;
+    }
+    int end = n;
+    while (end > start && isSpace(s[end - 1])) {
+        end = end - 1;
+    }
+    return substr(s, start, end);
+}
+
+// Left-pad `s` with `pad` until it is at least `width` characters wide.
+string padLeft(string s, int width, char pad) {
+    string out = s;
+    string p = toString(pad);
+    while (len(out) < width) {
+        out = p + out;
+    }
+    return out;
+}
+
+// Number of (non-overlapping) occurrences of character `c` in `s`.
+int count(string s, char c) {
+    int total = 0;
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        if (s[i] == c) {
+            total = total + 1;
+        }
+    }
+    return total;
+}
+
+string replaceChar(string s, char from, char to) {
+    string out = "";
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        if (c == from) {
+            out = out + toString(to);
+        } else {
+            out = out + toString(c);
+        }
+    }
+    return out;
+}
+
+bool equalsIgnoreCase(string a, string b) {
+    return toLowerStr(a) == toLowerStr(b);
+}

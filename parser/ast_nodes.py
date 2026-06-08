@@ -75,6 +75,24 @@ class ArrayType(TypeNode):
 
 
 @dataclass
+class GenericType(TypeNode):
+    """A use of a generic type with concrete type arguments: Name<T1, ...>.
+
+    Produced by the parser in type position; the monomorphizer rewrites every
+    GenericType into an ordinary NamedType whose name is the mangled concrete
+    instantiation (e.g. ``List<int>``). None should survive into Pass2.
+
+    Examples:
+      List<int>           → GenericType("List", [NamedType("int")])
+      Map<string, int>    → GenericType("Map", [NamedType("string"), NamedType("int")])
+    """
+    name: str
+    type_args: List[TypeNode]
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class FunctionPointerType(TypeNode):
     """A function pointer type: fn(T1, T2, ...) -> R.
 
@@ -157,6 +175,7 @@ class FunctionDecl(Decl):
     params: List[Param]
     return_type: TypeNode
     body: Block
+    type_params: List[str] = field(default_factory=list)
     line: int = 0
     col: int = 0
 
@@ -286,6 +305,7 @@ class ClassDecl(Decl):
     constructor: Optional[ConstructorDecl] = None
     destructor: Optional[DestructorDecl] = None
     access: str = "public"
+    type_params: List[str] = field(default_factory=list)
     line: int = 0
     col: int = 0
 
@@ -538,9 +558,15 @@ class CallExpr(Expr):
 
     Example:
       add(a, b)  →  CallExpr("add", [IdentifierExpr("a"), ...])
+
+    `type_args` carries explicit generic type arguments for a generic function
+    call or a generic stack construction (e.g. ``identity<int>(5)`` or
+    ``List<int>()``). The monomorphizer rewrites such calls to a mangled name
+    and clears `type_args`.
     """
     name: str
     args: List[Expr]
+    type_args: List[TypeNode] = field(default_factory=list)
     line: int = 0
     col: int = 0
 
@@ -601,9 +627,13 @@ class NewExpr(Expr):
 
     Example:
       new Dog("Rex")  →  NewExpr("Dog", [LiteralExpr("string", "Rex")])
+
+    `type_args` carries generic type arguments for `new List<int>()`; the
+    monomorphizer rewrites `class_name` to the mangled name and clears it.
     """
     class_name: str
     args: List[Expr]
+    type_args: List[TypeNode] = field(default_factory=list)
     line: int = 0
     col: int = 0
 
@@ -626,12 +656,16 @@ class DeleteExpr(Expr):
 class AllocExpr(Expr):
     """A raw heap allocation for a primitive or pointer type via `alloc(T)`.
 
-    Returns a T*. The allocated memory is uninitialised.
+    Returns a T*. With a count, `alloc(T, n)` allocates a contiguous block of
+    `n` zero-initialised cells and returns a T* to the first; the block is
+    indexable as `p[i]`. The single-cell form leaves memory uninitialised.
 
     Example:
-      alloc(int)  →  AllocExpr(NamedType("int"))
+      alloc(int)     →  AllocExpr(NamedType("int"))
+      alloc(int, 8)  →  AllocExpr(NamedType("int"), count=LiteralExpr("int", 8))
     """
     type: TypeNode
+    count: Optional[Expr] = None
     line: int = 0
     col: int = 0
 

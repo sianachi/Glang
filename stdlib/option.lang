@@ -1,0 +1,42 @@
+// std/option.lang — a generic optional value, Option<T>.
+//
+// A freshly constructed Option is empty (none); call setSome to fill it. Use
+// isSome / isNone to test, and get / getOr to read.
+
+class Option<T> {
+    bool present;
+    T value;
+
+    Option() {
+        this.present = false;
+    }
+
+    void setSome(T v) {
+        this.present = true;
+        this.value = v;
+    }
+
+    void setNone() {
+        this.present = false;
+    }
+
+    bool isSome() {
+        return this.present;
+    }
+
+    bool isNone() {
+        return this.present == false;
+    }
+
+    // The contained value. Reading an empty Option returns the zero value of T.
+    T get() {
+        return this.value;
+    }
+
+    T getOr(T fallback) {
+        if (this.present) {
+            return this.value;
+        }
+        return fallback;
+    }
+}

@@ -1,0 +1,58 @@
+// std/char.lang — character classification and conversion.
+//
+// Glang's ordering operators (< <= > >=) accept int/float only, so chars are
+// compared by first casting to their integer code point. The relevant ASCII
+// code points: '0'..'9' = 48..57, 'A'..'Z' = 65..90, 'a'..'z' = 97..122.
+
+bool isDigit(char c) {
+    int code = (int) c;
+    return code >= 48 && code <= 57;
+}
+
+bool isUpper(char c) {
+    int code = (int) c;
+    return code >= 65 && code <= 90;
+}
+
+bool isLower(char c) {
+    int code = (int) c;
+    return code >= 97 && code <= 122;
+}
+
+bool isAlpha(char c) {
+    return isUpper(c) || isLower(c);
+}
+
+bool isAlnum(char c) {
+    return isAlpha(c) || isDigit(c);
+}
+
+bool isSpace(char c) {
+    int code = (int) c;
+    // space, tab, newline, carriage return, form feed, vertical tab
+    if (code == 32) { return true; }
+    if (code >= 9 && code <= 13) { return true; }
+    return false;
+}
+
+char toUpper(char c) {
+    if (isLower(c)) {
+        return (char) ((int) c - 32);
+    }
+    return c;
+}
+
+char toLower(char c) {
+    if (isUpper(c)) {
+        return (char) ((int) c + 32);
+    }
+    return c;
+}
+
+// The numeric value of a decimal digit character, or -1 if not a digit.
+int digitToInt(char c) {
+    if (isDigit(c)) {
+        return (int) c - 48;
+    }
+    return -1;
+}

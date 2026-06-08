@@ -1,0 +1,94 @@
+// std/map.lang — a growable generic key/value map, Map<K, V>.
+//
+// A simple association map: keys and values are held in two parallel blocks and
+// looked up by linear scan (O(n) per operation), so it works for any key type
+// that supports `==` (int, string, char, ...). For the small collections used
+// across the stdlib and examples this is more than adequate; a hashed map would
+// need a per-key-type hash the language cannot express generically yet.
+
+class Map<K, V> {
+    K* keys;
+    V* vals;
+    int cap;
+    int size;
+
+    Map() {
+        this.cap = 4;
+        this.size = 0;
+        this.keys = alloc(K, 4);
+        this.vals = alloc(V, 4);
+    }
+
+    int length() {
+        return this.size;
+    }
+
+    bool isEmpty() {
+        return this.size == 0;
+    }
+
+    // Index of `key`, or -1 when absent.
+    int _find(K key) {
+        for (int i = 0; i < this.size; ++i) {
+            if (this.keys[i] == key) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    bool has(K key) {
+        return this._find(key) >= 0;
+    }
+
+    void _grow() {
+        int newcap = this.cap * 2;
+        K* nk = alloc(K, newcap);
+        V* nv = alloc(V, newcap);
+        for (int i = 0; i < this.size; ++i) {
+            nk[i] = this.keys[i];
+            nv[i] = this.vals[i];
+        }
+        free(this.keys);
+        free(this.vals);
+        this.keys = nk;
+        this.vals = nv;
+        this.cap = newcap;
+    }
+
+    // Insert or overwrite the value for `key`.
+    void set(K key, V value) {
+        int idx = this._find(key);
+        if (idx >= 0) {
+            this.vals[idx] = value;
+            return;
+        }
+        if (this.size == this.cap) {
+            this._grow();
+        }
+        this.keys[this.size] = key;
+        this.vals[this.size] = value;
+        this.size = this.size + 1;
+    }
+
+    // The value for `key`, or `fallback` when the key is absent.
+    V getOr(K key, V fallback) {
+        int idx = this._find(key);
+        if (idx >= 0) {
+            return this.vals[idx];
+        }
+        return fallback;
+    }
+
+    // Remove `key` if present (swap-with-last; does not preserve order).
+    void remove(K key) {
+        int idx = this._find(key);
+        if (idx < 0) {
+            return;
+        }
+        int last = this.size - 1;
+        this.keys[idx] = this.keys[last];
+        this.vals[idx] = this.vals[last];
+        this.size = this.size - 1;
+    }
+}

@@ -1,0 +1,19 @@
+// Demonstrates std/string.lang and std/char.lang.
+// Run: python3 main.py run examples/stdlib_strings.lang
+
+import "std/string.lang";
+
+int main() {
+    print(toUpperStr("glang"));            // GLANG
+    print(toLowerStr("HELLO"));            // hello
+    print(reverse("stressed"));            // desserts
+    print(trim("   padded   "));           // padded
+    print(repeat("ab", 3));                // ababab
+    print(padLeft("7", 4, '0'));           // 0007
+    print(count("mississippi", 's'));      // 4
+    print(replaceChar("a-b-c", '-', '_')); // a_b_c
+    print(equalsIgnoreCase("Foo", "foo")); // true
+    print(isDigit('5'));                   // true
+    print(isAlpha('5'));                   // false
+    return 0;
+}

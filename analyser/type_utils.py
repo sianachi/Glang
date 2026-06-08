@@ -4,6 +4,7 @@ from typing import List, TYPE_CHECKING
 from parser.ast_nodes import (
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, Expr,
     IdentifierExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
+    GenericType,
 )
 from errors.errors import TypeError
 
@@ -103,6 +104,9 @@ def type_str(t: TypeNode) -> str:
     if isinstance(t, FunctionPointerType):
         params = ", ".join(type_str(p) for p in t.param_types)
         return f"fn({params}) -> {type_str(t.return_type)}"
+    if isinstance(t, GenericType):
+        args = ", ".join(type_str(a) for a in t.type_args)
+        return f"{t.name}<{args}>"
     return "?"
 
 

@@ -1,0 +1,75 @@
+// operator_overloading.lang — ergonomic class operators in Glang.
+//
+// Demonstrates:
+//   - binary operator overloads on class values
+//   - compound assignment through an overloaded binary operator
+//   - operator== providing != automatically
+//   - read-only operator[] indexing
+//
+// Run with:
+//     python3 main.py run examples/operator_overloading.lang
+
+class Vec2 {
+    int x;
+    int y;
+
+    Vec2(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    Vec2 operator+(Vec2 other) {
+        return Vec2(this.x + other.x, this.y + other.y);
+    }
+
+    Vec2 operator-(Vec2 other) {
+        return Vec2(this.x - other.x, this.y - other.y);
+    }
+
+    bool operator==(Vec2 other) {
+        return this.x == other.x && this.y == other.y;
+    }
+
+    bool operator<(Vec2 other) {
+        return this.magnitude_squared() < other.magnitude_squared();
+    }
+
+    int operator[](int index) {
+        if (index == 0) {
+            return this.x;
+        }
+        return this.y;
+    }
+
+    int magnitude_squared() {
+        return this.x * this.x + this.y * this.y;
+    }
+}
+
+int main() {
+    Vec2 a = Vec2(3, 4);
+    Vec2 b = Vec2(1, 2);
+
+    Vec2 sum = a + b;       // Vec2(4, 6)
+    Vec2 diff = a - b;      // Vec2(2, 2)
+    a += b;                 // a now matches sum
+
+    print("sum:");
+    print(sum[0]);          // operator[](0) -> x
+    print(sum[1]);          // operator[](1) -> y
+
+    print("difference:");
+    print(diff[0]);
+    print(diff[1]);
+
+    print("a after += b equals sum:");
+    print(a == sum);
+
+    print("a differs from diff:");
+    print(a != diff);       // uses operator== fallback
+
+    print("diff is shorter than sum:");
+    print(diff < sum);
+
+    return sum.magnitude_squared(); // 4*4 + 6*6 = 52
+}

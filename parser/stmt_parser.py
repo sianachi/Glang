@@ -5,6 +5,7 @@ try:
     from .type_parser import TypeParser
     from .expr_parser import ExprParser, _ASSIGN_OPS
     from ..lexer.token_types import TokenType
+    from ..errors.errors import ParseError
     from .ast_nodes import (
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         ForStmt, BreakStmt, ContinueStmt, ReturnStmt,
@@ -14,6 +15,7 @@ except ImportError:
     from parser.type_parser import TypeParser  # type: ignore
     from parser.expr_parser import ExprParser, _ASSIGN_OPS  # type: ignore
     from lexer.token_types import TokenType  # type: ignore
+    from errors.errors import ParseError  # type: ignore
     from parser.ast_nodes import (  # type: ignore
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         ForStmt, BreakStmt, ContinueStmt, ReturnStmt,
@@ -91,6 +93,11 @@ class StmtParser:
         # User-defined type name followed by a variable name: `Dog d`.
         if self._s.peek(1).type == TokenType.IDENT:
             return True
+        # Generic type declaration: `List<int> xs = ...`, `Map<K,V>* p = ...`.
+        # Trial-parse the type; require a trailing `name =` so a discarded
+        # comparison statement (`a < b > c;`) is not mistaken for a declaration.
+        if self._s.peek(1).type == TokenType.LT:
+            return self._looks_like_generic_var_decl()
         # User-defined pointer type: `Dog* d = ...`, `Dog** d = ...`.
         # We require the trailing `=` to disambiguate from a multiplication
         # expression statement (`a * b;`): `IDENT STAR+ IDENT =` is never a
@@ -105,6 +112,21 @@ class StmtParser:
         ):
             return True
         return False
+
+    def _looks_like_generic_var_decl(self) -> bool:
+        mark = self._s.mark()
+        saved_pending = self._tp._pending_gt
+        try:
+            self._tp.parse_type()
+            return (
+                self._s.check(TokenType.IDENT)
+                and self._s.peek(1).type == TokenType.ASSIGN
+            )
+        except ParseError:
+            return False
+        finally:
+            self._s.reset(mark)
+            self._tp._pending_gt = saved_pending
 
     def _parse_var_decl(self) -> VarDecl:
         is_const = bool(self._s.match(TokenType.KW_CONST))

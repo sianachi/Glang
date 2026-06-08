@@ -146,8 +146,11 @@ class ExprParser:
             self._s.advance()
             self._s.expect(TokenType.LPAREN)
             t = self._tp.parse_type()
+            count = None
+            if self._s.match(TokenType.COMMA):
+                count = self.parse_expr()
             self._s.expect(TokenType.RPAREN)
-            return AllocExpr(type=t, line=tok.line, col=tok.col)
+            return AllocExpr(type=t, count=count, line=tok.line, col=tok.col)
 
         if tok.type == TokenType.KW_FREE:
             self._s.advance()
@@ -194,9 +197,33 @@ class ExprParser:
 
         if tok.type == TokenType.IDENT:
             self._s.advance()
+            generic = self._try_parse_generic_call(tok)
+            if generic is not None:
+                return generic
             return IdentifierExpr(name=tok.value, line=tok.line, col=tok.col)
 
         raise self._s.error(f"Unexpected token {tok.type.name!r} in expression")
+
+    def _try_parse_generic_call(self, name_tok) -> Optional[Expr]:
+        """After consuming an identifier, attempt to parse an explicit generic
+        call or stack construction: ``name<T, ...>(args)``. Returns the CallExpr
+        on success, or None (restoring the stream) when the ``<`` was an
+        ordinary comparison."""
+        if not self._s.check(TokenType.LT):
+            return None
+        mark = self._s.mark()
+        try:
+            type_args = self._tp.parse_type_args()
+        except ParseError:
+            self._s.reset(mark)
+            return None
+        if not self._s.check(TokenType.LPAREN):
+            # `a < b > c` and friends — not a generic call. Back off.
+            self._s.reset(mark)
+            return None
+        args = self.parse_arg_list()
+        return CallExpr(name=name_tok.value, args=args, type_args=type_args,
+                        line=name_tok.line, col=name_tok.col)
 
     def _parse_paren_or_cast(self) -> Expr:
         lparen = self._s.advance()  # consume '('
@@ -270,8 +297,12 @@ class ExprParser:
     def _parse_new(self) -> Expr:
         tok = self._s.advance()  # consume 'new'
         name_tok = self._s.expect(TokenType.IDENT)
+        type_args = []
+        if self._s.check(TokenType.LT):
+            type_args = self._tp.parse_type_args()
         args = self.parse_arg_list()
-        return NewExpr(class_name=name_tok.value, args=args, line=tok.line, col=tok.col)
+        return NewExpr(class_name=name_tok.value, args=args, type_args=type_args,
+                       line=tok.line, col=tok.col)
 
     def _parse_postfix(self, left: Expr, right_bp: int) -> Expr:
         tok = self._s.advance()  # consume the operator

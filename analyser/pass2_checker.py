@@ -19,11 +19,16 @@ from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
 from analyser.type_utils import (
     NULL_TYPE, is_assignable, is_integer, is_bool,
-    is_pointer, is_array, pointer_base, type_str,
-    is_lvalue, is_function_pointer, binary_result_type, unary_result_type,
-    superclass_chain,
+    is_pointer, is_array, is_string, pointer_base, type_str,
+    is_lvalue, binary_result_type, unary_result_type,
+    superclass_chain, types_equal,
 )
 from analyser.return_checker import always_returns
+
+
+_BINARY_OPERATOR_OVERLOADS = {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="}
+_COMPARISON_OPERATOR_OVERLOADS = {"==", "!=", "<", "<=", ">", ">="}
+_ALL_OPERATOR_OVERLOADS = _BINARY_OPERATOR_OVERLOADS | {"[]"}
 
 
 @dataclass
@@ -169,6 +174,7 @@ class Pass2Checker:
             self._return_type = md.return_type
             self._in_static_method = md.is_static
 
+            self._check_operator_method_decl(md)
             self._check_block(md.body)
 
             rt_name = md.return_type.name if isinstance(md.return_type, NamedType) else None
@@ -222,13 +228,15 @@ class Pass2Checker:
                 raise TypeError(
                     f"left-hand side of '=' is not assignable", stmt.line, stmt.col
                 )
-            target_t = self._check_expr(stmt.target)
+            target_t = self._check_assignable_target(stmt.target)
             value_t = self._check_expr(stmt.value)
 
             if stmt.op != "=":
                 # Compound assignment: validate the op makes sense for target_t
                 op_symbol = stmt.op[:-1]  # e.g. "+=" → "+"
-                binary_result_type(op_symbol, target_t, value_t)
+                value_t = self._check_binary_operation_type(
+                    op_symbol, target_t, value_t, stmt.line, stmt.col
+                )
 
             if not is_assignable(value_t, target_t, self._env):
                 raise TypeError(
@@ -405,7 +413,7 @@ class Pass2Checker:
                 raise TypeError(
                     "operand of '&' must be an lvalue", expr.line, expr.col
                 )
-            t = self._check_expr(expr.operand)
+            t = self._check_assignable_target(expr.operand)
             return PointerType(t)
 
         if isinstance(expr, DerefExpr):
@@ -426,10 +434,9 @@ class Pass2Checker:
         if isinstance(expr, BinaryExpr):
             left_t = self._check_expr(expr.left)
             right_t = self._check_expr(expr.right)
-            try:
-                return binary_result_type(expr.op, left_t, right_t)
-            except TypeError as e:
-                raise TypeError(e.msg, expr.line, expr.col) from None
+            return self._check_binary_operation_type(
+                expr.op, left_t, right_t, expr.line, expr.col
+            )
 
         if isinstance(expr, CallExpr):
             defining_scope = self._scope.find_scope(expr.name)
@@ -445,22 +452,9 @@ class Pass2Checker:
                     callee_t.return_type, expr.line, expr.col,
                 )
 
-            # Built-in print(x): accepts one primitive argument, returns void.
-            # (Not part of the spec; provided so program output is observable.)
-            if expr.name == "print":
-                if len(expr.args) != 1:
-                    raise TypeError(
-                        f"'print' expects 1 argument, got {len(expr.args)}",
-                        expr.line, expr.col,
-                    )
-                arg_t = self._check_expr(expr.args[0])
-                if not (isinstance(arg_t, NamedType)
-                        and arg_t.name in ("int", "float", "bool", "char", "string")):
-                    raise TypeError(
-                        f"'print' requires a primitive argument, got '{type_str(arg_t)}'",
-                        expr.line, expr.col,
-                    )
-                return NamedType("void")
+            builtin_t = self._check_builtin_call(expr)
+            if builtin_t is not None:
+                return builtin_t
 
             fn_info = self._env.functions.get(expr.name)
             if fn_info is not None:
@@ -689,19 +683,7 @@ class Pass2Checker:
             return fd.type
 
         if isinstance(expr, IndexExpr):
-            arr_t = self._check_expr(expr.array)
-            if not is_array(arr_t):
-                raise TypeError(
-                    f"'[]' requires an array, got '{type_str(arr_t)}'",
-                    expr.line, expr.col,
-                )
-            idx_t = self._check_expr(expr.index)
-            if not is_integer(idx_t):
-                raise TypeError(
-                    f"array index must be int, got '{type_str(idx_t)}'",
-                    expr.line, expr.col,
-                )
-            return arr_t.base
+            return self._check_index_expr(expr)
 
         if isinstance(expr, NewExpr):
             if expr.class_name not in self._env.classes:
@@ -754,6 +736,13 @@ class Pass2Checker:
             self._env.resolve_type(expr.type)
             if isinstance(expr.type, NamedType) and expr.type.name == "void":
                 raise TypeError("cannot alloc void", expr.line, expr.col)
+            if expr.count is not None:
+                count_t = self._check_expr(expr.count)
+                if not is_integer(count_t):
+                    raise TypeError(
+                        f"alloc count must be int, got '{type_str(count_t)}'",
+                        expr.line, expr.col,
+                    )
             return PointerType(expr.type)
 
         if isinstance(expr, FreeExpr):
@@ -767,6 +756,255 @@ class Pass2Checker:
         raise TypeError(
             f"unknown expression type '{type(expr).__name__}'", 0, 0
         )
+
+    def _check_builtin_call(self, expr: CallExpr) -> Optional[TypeNode]:
+        if expr.name == "print":
+            if len(expr.args) != 1:
+                raise TypeError(
+                    f"'print' expects 1 argument, got {len(expr.args)}",
+                    expr.line, expr.col,
+                )
+            arg_t = self._check_expr(expr.args[0])
+            if not self._is_primitive_value_type(arg_t):
+                raise TypeError(
+                    f"'print' requires a primitive argument, got '{type_str(arg_t)}'",
+                    expr.line, expr.col,
+                )
+            return NamedType("void")
+
+        if expr.name == "len":
+            if len(expr.args) != 1:
+                raise TypeError(
+                    f"'len' expects 1 argument, got {len(expr.args)}",
+                    expr.line, expr.col,
+                )
+            arg_t = self._check_expr(expr.args[0])
+            if not (is_string(arg_t) or is_array(arg_t)):
+                raise TypeError(
+                    f"'len' requires string or array, got '{type_str(arg_t)}'",
+                    expr.line, expr.col,
+                )
+            return NamedType("int")
+
+        if expr.name == "toString":
+            if len(expr.args) != 1:
+                raise TypeError(
+                    f"'toString' expects 1 argument, got {len(expr.args)}",
+                    expr.line, expr.col,
+                )
+            arg_t = self._check_expr(expr.args[0])
+            if not self._is_primitive_value_type(arg_t):
+                raise TypeError(
+                    f"'toString' requires a primitive argument, got '{type_str(arg_t)}'",
+                    expr.line, expr.col,
+                )
+            return NamedType("string")
+
+        fixed = {
+            "substr": (
+                [NamedType("string"), NamedType("int"), NamedType("int")],
+                NamedType("string"),
+            ),
+            "parseInt": ([NamedType("string")], NamedType("int")),
+            "parseFloat": ([NamedType("string")], NamedType("float")),
+            "startsWith": (
+                [NamedType("string"), NamedType("string")],
+                NamedType("bool"),
+            ),
+            "endsWith": (
+                [NamedType("string"), NamedType("string")],
+                NamedType("bool"),
+            ),
+            "contains": (
+                [NamedType("string"), NamedType("string")],
+                NamedType("bool"),
+            ),
+            "indexOf": (
+                [NamedType("string"), NamedType("string")],
+                NamedType("int"),
+            ),
+            "readFile": ([NamedType("string")], NamedType("string")),
+            "writeFile": (
+                [NamedType("string"), NamedType("string")],
+                NamedType("void"),
+            ),
+            "fileExists": ([NamedType("string")], NamedType("bool")),
+        }
+        signature = fixed.get(expr.name)
+        if signature is None:
+            return None
+        param_types, return_type = signature
+        return self._check_callable_args(
+            expr.name, expr.args, param_types, return_type,
+            expr.line, expr.col,
+        )
+
+    def _is_primitive_value_type(self, t: TypeNode) -> bool:
+        return (
+            isinstance(t, NamedType)
+            and t.name in ("int", "float", "bool", "char", "string")
+        )
+
+    def _check_assignable_target(self, expr: Expr) -> TypeNode:
+        if isinstance(expr, IndexExpr):
+            return self._check_index_expr(expr, require_lvalue=True)
+        return self._check_expr(expr)
+
+    def _check_index_expr(
+        self,
+        expr: IndexExpr,
+        *,
+        require_lvalue: bool = False,
+    ) -> TypeNode:
+        container_t = self._check_expr(expr.array)
+        idx_t = self._check_expr(expr.index)
+
+        if is_array(container_t):
+            if not is_integer(idx_t):
+                raise TypeError(
+                    f"array index must be int, got '{type_str(idx_t)}'",
+                    expr.line, expr.col,
+                )
+            return container_t.base
+
+        if is_pointer(container_t):
+            if not is_integer(idx_t):
+                raise TypeError(
+                    f"pointer index must be int, got '{type_str(idx_t)}'",
+                    expr.line, expr.col,
+                )
+            return pointer_base(container_t)
+
+        if is_string(container_t):
+            if not is_integer(idx_t):
+                raise TypeError(
+                    f"string index must be int, got '{type_str(idx_t)}'",
+                    expr.line, expr.col,
+                )
+            if require_lvalue:
+                raise TypeError("string index is not assignable", expr.line, expr.col)
+            return NamedType("char")
+
+        class_name = self._class_value_name(container_t)
+        if class_name is not None:
+            if require_lvalue:
+                raise TypeError("operator[] result is not assignable", expr.line, expr.col)
+            method, defining = self._find_instance_method(class_name, "operator[]")
+            if method is None:
+                raise TypeError(
+                    f"'{class_name}' has no operator[]",
+                    expr.line, expr.col,
+                )
+            self._check_access(defining, method.access, method.name,
+                               expr.line, expr.col)
+            return self._check_callable_args(
+                method.name, [expr.index], [method.params[0].type],
+                method.return_type, expr.line, expr.col,
+            )
+
+        raise TypeError(
+            f"'[]' requires an array or string, got '{type_str(container_t)}'",
+            expr.line, expr.col,
+        )
+
+    def _check_binary_operation_type(
+        self,
+        op: str,
+        left_t: TypeNode,
+        right_t: TypeNode,
+        line: int,
+        col: int,
+    ) -> TypeNode:
+        overload_t = self._check_binary_operator_overload(
+            op, left_t, right_t, line, col
+        )
+        if overload_t is not None:
+            return overload_t
+        try:
+            return binary_result_type(op, left_t, right_t)
+        except TypeError as e:
+            raise TypeError(e.msg, line, col) from None
+
+    def _check_binary_operator_overload(
+        self,
+        op: str,
+        left_t: TypeNode,
+        right_t: TypeNode,
+        line: int,
+        col: int,
+    ) -> Optional[TypeNode]:
+        if op not in _BINARY_OPERATOR_OVERLOADS:
+            return None
+        class_name = self._class_value_name(left_t)
+        if class_name is None:
+            return None
+        if not types_equal(left_t, right_t):
+            return None
+
+        method_name = f"operator{op}"
+        method, defining = self._find_instance_method(class_name, method_name)
+        if method is None and op == "!=":
+            method, defining = self._find_instance_method(class_name, "operator==")
+            if method is None:
+                return None
+            self._check_access(defining, method.access, method.name, line, col)
+            return NamedType("bool")
+
+        if method is None:
+            return None
+        self._check_access(defining, method.access, method.name, line, col)
+        return method.return_type
+
+    def _class_value_name(self, t: TypeNode) -> Optional[str]:
+        if isinstance(t, NamedType) and self._env.is_class(t.name):
+            return t.name
+        return None
+
+    def _find_instance_method(self, class_name: str, method_name: str):
+        info = self._env.classes.get(class_name)
+        if info is None:
+            return None, class_name
+        method = info.instance_methods.get(method_name)
+        if method is None:
+            return None, class_name
+        return method, self._method_declaring_class(class_name, method_name)
+
+    def _check_operator_method_decl(self, method) -> None:
+        if not method.name.startswith("operator"):
+            return
+        op = method.name[len("operator"):]
+        if op not in _ALL_OPERATOR_OVERLOADS:
+            raise TypeError(
+                f"unsupported operator overload '{method.name}'",
+                method.line, method.col,
+            )
+        if method.is_static:
+            raise TypeError(
+                "operator overloads must be instance methods",
+                method.line, method.col,
+            )
+        if len(method.params) != 1:
+            raise TypeError(
+                f"'{method.name}' expects exactly 1 parameter",
+                method.line, method.col,
+            )
+        if isinstance(method.return_type, NamedType) and method.return_type.name == "void":
+            raise TypeError(
+                f"'{method.name}' must return a value",
+                method.line, method.col,
+            )
+        if op in _COMPARISON_OPERATOR_OVERLOADS and not is_bool(method.return_type):
+            raise TypeError(
+                f"'{method.name}' must return bool",
+                method.line, method.col,
+            )
+        if op != "[]" and self._current_class is not None:
+            expected = NamedType(self._current_class.name)
+            if not types_equal(method.params[0].type, expected):
+                raise TypeError(
+                    f"'{method.name}' parameter must be '{self._current_class.name}'",
+                    method.params[0].line, method.params[0].col,
+                )
 
     def _check_closure(self, expr: ClosureExpr) -> FunctionPointerType:
         self._env.resolve_type(expr.return_type)
@@ -906,6 +1144,13 @@ class Pass2Checker:
         for cls in superclass_chain(class_name, self._env):
             info = self._env.classes.get(cls)
             if info and any(fd.name == field_name for fd in info.decl.fields):
+                return cls
+        return class_name
+
+    def _method_declaring_class(self, class_name: str, method_name: str) -> str:
+        for cls in superclass_chain(class_name, self._env):
+            info = self._env.classes.get(cls)
+            if info and any(md.name == method_name for md in info.decl.methods):
                 return cls
         return class_name
 

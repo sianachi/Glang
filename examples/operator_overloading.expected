@@ -1,0 +1,12 @@
+sum:
+4
+6
+difference:
+2
+2
+a after += b equals sum:
+true
+a differs from diff:
+true
+diff is shorter than sum:
+true

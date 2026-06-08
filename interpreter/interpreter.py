@@ -17,6 +17,7 @@ base-class or interface pointer.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -160,6 +161,7 @@ class ReturnSignal(Exception):
 # ---------------------------------------------------------------------------
 
 VOID = Value(NamedType("void"), None)
+_BINARY_OPERATOR_OVERLOADS = {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="}
 
 
 class Interpreter:
@@ -368,6 +370,18 @@ class Interpreter:
             return box.value
 
         if isinstance(expr, AllocExpr):
+            if expr.count is not None:
+                n = self._eval(expr.count).raw
+                if n < 0:
+                    raise GlangRuntimeError(
+                        "alloc count must be non-negative", expr.line, expr.col
+                    )
+                elements = [
+                    self._new_box(self._zero_value(expr.type)) for _ in range(n)
+                ]
+                block = Value(ArrayType(expr.type, n), elements)
+                box = self._heap.alloc(block)
+                return Value(PointerType(expr.type), Pointer(box))
             zero = self._zero_value(expr.type)
             box = self._heap.alloc(zero)
             return Value(PointerType(expr.type), Pointer(box))
@@ -404,7 +418,10 @@ class Interpreter:
                 return method_ref
             return self._resolve_lvalue(expr).value
 
-        if isinstance(expr, (ArrowAccessExpr, IndexExpr)):
+        if isinstance(expr, IndexExpr):
+            return self._eval_index(expr)
+
+        if isinstance(expr, ArrowAccessExpr):
             return self._resolve_lvalue(expr).value
 
         raise GlangRuntimeError(
@@ -442,6 +459,10 @@ class Interpreter:
         self, op: str, left: Value, right: Value, line: int, col: int
     ) -> Value:
         l, r = left.raw, right.raw
+
+        overloaded = self._try_apply_binary_operator(op, left, right, line, col)
+        if overloaded is not None:
+            return overloaded
 
         if op in ("==", "!="):
             eq = self._values_equal(left, right)
@@ -561,9 +582,8 @@ class Interpreter:
             args = [self._eval(a) for a in expr.args]
             return self._call_callable(box.value, args, expr.line, expr.col)
 
-        if expr.name == "print":
-            self._do_print(self._eval(expr.args[0]))
-            return VOID
+        if self._is_builtin_call(expr.name):
+            return self._eval_builtin_call(expr)
 
         fn = self._env.functions.get(expr.name)
         if fn is not None:
@@ -576,6 +596,105 @@ class Interpreter:
             this_val = self._instantiate(expr.name, on_heap=False)
             self._run_constructor(expr.name, this_val, args)
             return self._deref(this_val, expr.line, expr.col).value
+
+        raise GlangRuntimeError(f"undefined function '{expr.name}'", expr.line, expr.col)
+
+    def _is_builtin_call(self, name: str) -> bool:
+        return name in {
+            "print",
+            "len",
+            "substr",
+            "parseInt",
+            "parseFloat",
+            "toString",
+            "startsWith",
+            "endsWith",
+            "contains",
+            "indexOf",
+            "readFile",
+            "writeFile",
+            "fileExists",
+        }
+
+    def _eval_builtin_call(self, expr: CallExpr) -> Value:
+        if expr.name == "print":
+            self._do_print(self._eval(expr.args[0]))
+            return VOID
+
+        if expr.name == "len":
+            value = self._eval(expr.args[0])
+            return Value(NamedType("int"), len(value.raw))
+
+        if expr.name == "substr":
+            source = self._eval(expr.args[0]).raw
+            start = self._eval(expr.args[1]).raw
+            end = self._eval(expr.args[2]).raw
+            if start < 0 or end < start or end > len(source):
+                raise GlangRuntimeError(
+                    "substring range out of bounds", expr.line, expr.col
+                )
+            return Value(NamedType("string"), source[start:end])
+
+        if expr.name == "parseInt":
+            text = self._eval(expr.args[0]).raw
+            try:
+                return Value(NamedType("int"), int(text, 0))
+            except ValueError:
+                raise GlangRuntimeError(
+                    f"parseInt invalid integer '{text}'", expr.line, expr.col
+                ) from None
+
+        if expr.name == "parseFloat":
+            text = self._eval(expr.args[0]).raw
+            try:
+                return Value(NamedType("float"), float(text))
+            except ValueError:
+                raise GlangRuntimeError(
+                    f"parseFloat invalid float '{text}'", expr.line, expr.col
+                ) from None
+
+        if expr.name == "toString":
+            value = self._eval(expr.args[0])
+            return Value(NamedType("string"), self._value_to_string(value))
+
+        if expr.name == "readFile":
+            path = self._eval(expr.args[0]).raw
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return Value(NamedType("string"), f.read())
+            except OSError as e:
+                raise GlangRuntimeError(
+                    f"readFile failed for '{path}': {e.strerror or e}",
+                    expr.line, expr.col,
+                ) from None
+
+        if expr.name == "writeFile":
+            path = self._eval(expr.args[0]).raw
+            content = self._eval(expr.args[1]).raw
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+            except OSError as e:
+                raise GlangRuntimeError(
+                    f"writeFile failed for '{path}': {e.strerror or e}",
+                    expr.line, expr.col,
+                ) from None
+            return VOID
+
+        if expr.name == "fileExists":
+            path = self._eval(expr.args[0]).raw
+            return Value(NamedType("bool"), os.path.isfile(path))
+
+        source = self._eval(expr.args[0]).raw
+        needle = self._eval(expr.args[1]).raw
+        if expr.name == "startsWith":
+            return Value(NamedType("bool"), source.startswith(needle))
+        if expr.name == "endsWith":
+            return Value(NamedType("bool"), source.endswith(needle))
+        if expr.name == "contains":
+            return Value(NamedType("bool"), needle in source)
+        if expr.name == "indexOf":
+            return Value(NamedType("int"), source.find(needle))
 
         raise GlangRuntimeError(f"undefined function '{expr.name}'", expr.line, expr.col)
 
@@ -756,6 +875,109 @@ class Interpreter:
             return value.raw, this_val
         raise GlangRuntimeError("receiver is not an object", line, col)
 
+    def _eval_index(self, expr: IndexExpr) -> Value:
+        container = self._eval(expr.array)
+        idx_value = self._eval(expr.index)
+
+        overloaded = self._try_apply_index_operator(
+            container, idx_value, expr.line, expr.col
+        )
+        if overloaded is not None:
+            return overloaded
+
+        idx = idx_value.raw
+
+        if isinstance(container.raw, str):
+            if idx < 0 or idx >= len(container.raw):
+                raise GlangRuntimeError(
+                    "string index out of bounds", expr.line, expr.col
+                )
+            return Value(NamedType("char"), container.raw[idx])
+
+        return self._block_element(container, idx, expr.line, expr.col).value
+
+    def _block_element(self, container: Value, idx: int, line: int, col: int) -> Box:
+        """Resolve the element Box at `idx` for an array value or a pointer to a
+        contiguous block allocated with `alloc(T, n)`."""
+        elements = container.raw
+        if isinstance(elements, Pointer):
+            block = self._deref(container, line, col)
+            elements = block.value.raw
+        if not isinstance(elements, list):
+            raise GlangRuntimeError(
+                "cannot index a non-array value", line, col
+            )
+        if idx < 0 or idx >= len(elements):
+            raise GlangRuntimeError(
+                "array index out of bounds", line, col
+            )
+        return elements[idx]
+
+    def _try_apply_binary_operator(
+        self,
+        op: str,
+        left: Value,
+        right: Value,
+        line: int,
+        col: int,
+    ) -> Optional[Value]:
+        if op not in _BINARY_OPERATOR_OVERLOADS:
+            return None
+        class_name = self._class_value_name(left)
+        if class_name is None or not self._same_named_class(left, right):
+            return None
+
+        method_name = f"operator{op}"
+        invert = False
+        if not self._has_instance_method(class_name, method_name):
+            if op != "!=" or not self._has_instance_method(class_name, "operator=="):
+                return None
+            method_name = "operator=="
+            invert = True
+
+        result = self._call_operator_method(left, method_name, [right], line, col)
+        if invert:
+            return Value(NamedType("bool"), not result.raw)
+        return result
+
+    def _try_apply_index_operator(
+        self,
+        container: Value,
+        index: Value,
+        line: int,
+        col: int,
+    ) -> Optional[Value]:
+        class_name = self._class_value_name(container)
+        if class_name is None or not self._has_instance_method(class_name, "operator[]"):
+            return None
+        return self._call_operator_method(container, "operator[]", [index], line, col)
+
+    def _call_operator_method(
+        self,
+        receiver: Value,
+        method_name: str,
+        args: List[Value],
+        line: int,
+        col: int,
+    ) -> Value:
+        instance, this_val = self._receiver(receiver, line, col)
+        method, defining = self._resolve_virtual(instance.class_name, method_name)
+        return self._call_method(method, defining, this_val, args)
+
+    def _class_value_name(self, value: Value) -> Optional[str]:
+        if isinstance(value.type, NamedType) and self._env.is_class(value.type.name):
+            return value.type.name
+        return None
+
+    def _same_named_class(self, left: Value, right: Value) -> bool:
+        left_name = self._class_value_name(left)
+        right_name = self._class_value_name(right)
+        return left_name is not None and left_name == right_name
+
+    def _has_instance_method(self, class_name: str, method_name: str) -> bool:
+        info = self._env.classes.get(class_name)
+        return bool(info and method_name in info.instance_methods)
+
     # -- lvalues ---------------------------------------------------------
 
     def _resolve_lvalue(self, expr: Expr) -> Box:
@@ -800,12 +1022,7 @@ class Interpreter:
         if isinstance(expr, IndexExpr):
             arr = self._eval(expr.array)
             idx = self._eval(expr.index).raw
-            elements = arr.raw
-            if not isinstance(elements, list) or idx < 0 or idx >= len(elements):
-                raise GlangRuntimeError(
-                    "array index out of bounds", expr.line, expr.col
-                )
-            return elements[idx]
+            return self._block_element(arr, idx, expr.line, expr.col)
 
         raise GlangRuntimeError(
             f"'{type(expr).__name__}' is not an lvalue", 0, 0
@@ -908,14 +1125,15 @@ class Interpreter:
         return -r if a < 0 else r
 
     def _do_print(self, value: Value) -> None:
-        raw = value.raw
-        if self._is(value, "bool"):
-            text = "true" if raw else "false"
-        else:
-            text = str(raw)
+        text = self._value_to_string(value)
         self.output.append(text)
         if self._out is not None:
             self._out.write(text + "\n")
+
+    def _value_to_string(self, value: Value) -> str:
+        if self._is(value, "bool"):
+            return "true" if value.raw else "false"
+        return str(value.raw)
 
 
 def _as_method(dtor: DestructorDecl) -> MethodDecl:

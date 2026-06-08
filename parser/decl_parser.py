@@ -27,6 +27,21 @@ except ImportError:
     )
 
 
+_OVERLOADABLE_OPERATOR_TOKENS = {
+    TokenType.PLUS,
+    TokenType.MINUS,
+    TokenType.STAR,
+    TokenType.SLASH,
+    TokenType.PERCENT,
+    TokenType.EQ,
+    TokenType.NEQ,
+    TokenType.LT,
+    TokenType.LTE,
+    TokenType.GT,
+    TokenType.GTE,
+}
+
+
 class DeclParser:
     def __init__(
         self,
@@ -94,12 +109,24 @@ class DeclParser:
     def _parse_function(self) -> FunctionDecl:
         ret_type = self._tp.parse_type()
         name_tok = self._s.expect(TokenType.IDENT)
+        type_params = self._parse_type_params()
         params = self._parse_param_list()
         body = self._sp.parse_block()
         return FunctionDecl(
             name=name_tok.value, params=params, return_type=ret_type, body=body,
-            line=name_tok.line, col=name_tok.col,
+            type_params=type_params, line=name_tok.line, col=name_tok.col,
         )
+
+    def _parse_type_params(self) -> List[str]:
+        """Parse an optional ``<T, U, ...>`` type-parameter list. Returns the
+        list of parameter names, or an empty list when absent."""
+        if not self._s.match(TokenType.LT):
+            return []
+        params = [self._s.expect(TokenType.IDENT).value]
+        while self._s.match(TokenType.COMMA):
+            params.append(self._s.expect(TokenType.IDENT).value)
+        self._s.expect(TokenType.GT)
+        return params
 
     # ------------------------------------------------------------------
     # Classes
@@ -108,6 +135,7 @@ class DeclParser:
     def _parse_class(self, access: str = "public") -> ClassDecl:
         tok = self._s.advance()  # consume 'class'
         name_tok = self._s.expect(TokenType.IDENT)
+        type_params = self._parse_type_params()
 
         superclass: Optional[str] = None
         if self._s.match(TokenType.KW_EXTENDS):
@@ -132,6 +160,7 @@ class DeclParser:
             constructor=constructor,
             destructor=destructor,
             access=access,
+            type_params=type_params,
             line=tok.line,
             col=tok.col,
         )
@@ -168,18 +197,20 @@ class DeclParser:
                 self._s.advance()  # consume 'static'
                 is_const = bool(self._s.match(TokenType.KW_CONST))
                 ret_type = self._tp.parse_type()
-                member_name = self._s.expect(TokenType.IDENT)
+                member_name, member_line, member_col = self._parse_member_name()
                 if self._s.check(TokenType.LPAREN):
                     # Static method — belongs in the methods section
                     phase = 3
                     params = self._parse_param_list()
                     body = self._sp.parse_block()
                     methods.append(MethodDecl(
-                        name=member_name.value, params=params, return_type=ret_type,
+                        name=member_name, params=params, return_type=ret_type,
                         body=body, is_static=True, access=access,
-                        line=member_name.line, col=member_name.col,
+                        line=member_line, col=member_col,
                     ))
                 else:
+                    if member_name.startswith("operator"):
+                        raise self._s.error("operator overload must be a method")
                     # Static field
                     if phase > 0:
                         raise self._s.error(
@@ -189,9 +220,9 @@ class DeclParser:
                     init = self._ep.parse_expr()
                     self._s.expect(TokenType.SEMICOLON)
                     static_fields.append(StaticFieldDecl(
-                        name=member_name.value, type=ret_type, initializer=init,
+                        name=member_name, type=ret_type, initializer=init,
                         is_const=is_const, access=access,
-                        line=member_name.line, col=member_name.col,
+                        line=member_line, col=member_col,
                     ))
                 continue
 
@@ -236,18 +267,20 @@ class DeclParser:
             # Type-led member: instance field or instance method
             is_const = bool(self._s.match(TokenType.KW_CONST))
             ret_type = self._tp.parse_type()
-            member_name = self._s.expect(TokenType.IDENT)
+            member_name, member_line, member_col = self._parse_member_name()
 
             if self._s.check(TokenType.LPAREN):
                 phase = 3
                 params = self._parse_param_list()
                 body = self._sp.parse_block()
                 methods.append(MethodDecl(
-                    name=member_name.value, params=params, return_type=ret_type,
+                    name=member_name, params=params, return_type=ret_type,
                     body=body, is_static=False, access=access,
-                    line=member_name.line, col=member_name.col,
+                    line=member_line, col=member_col,
                 ))
             else:
+                if member_name.startswith("operator"):
+                    raise self._s.error("operator overload must be a method")
                 if phase > 1:
                     raise self._s.error(
                         "Instance fields must appear before constructor/destructor/methods"
@@ -255,9 +288,9 @@ class DeclParser:
                 phase = max(phase, 1)
                 self._s.expect(TokenType.SEMICOLON)
                 fields.append(FieldDecl(
-                    name=member_name.value, type=ret_type,
+                    name=member_name, type=ret_type,
                     is_const=is_const, access=access,
-                    line=member_name.line, col=member_name.col,
+                    line=member_line, col=member_col,
                 ))
 
         self._s.expect(TokenType.RBRACE)
@@ -275,13 +308,13 @@ class DeclParser:
         methods: List[MethodDecl] = []
         while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
             ret_type = self._tp.parse_type()
-            m_name = self._s.expect(TokenType.IDENT)
+            m_name, m_line, m_col = self._parse_member_name()
             params = self._parse_param_list()
             self._s.expect(TokenType.SEMICOLON)
             methods.append(MethodDecl(
-                name=m_name.value, params=params, return_type=ret_type,
+                name=m_name, params=params, return_type=ret_type,
                 body=None, is_static=False,  # type: ignore[arg-type]
-                line=m_name.line, col=m_name.col,
+                line=m_line, col=m_col,
             ))
 
         self._s.expect(TokenType.RBRACE)
@@ -291,6 +324,25 @@ class DeclParser:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _parse_member_name(self) -> Tuple[str, int, int]:
+        name_tok = self._s.expect(TokenType.IDENT)
+        if name_tok.value != "operator":
+            return name_tok.value, name_tok.line, name_tok.col
+
+        op_tok = self._s.peek()
+        if op_tok.type == TokenType.LBRACKET:
+            self._s.advance()
+            self._s.expect(TokenType.RBRACKET)
+            return "operator[]", name_tok.line, name_tok.col
+
+        if op_tok.type not in _OVERLOADABLE_OPERATOR_TOKENS:
+            raise ParseError(
+                "Expected overloadable operator after 'operator'",
+                op_tok.line, op_tok.col,
+            )
+        self._s.advance()
+        return f"operator{op_tok.value}", name_tok.line, name_tok.col
 
     def _parse_param_list(self) -> List[Param]:
         self._s.expect(TokenType.LPAREN)

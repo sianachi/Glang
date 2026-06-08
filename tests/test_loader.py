@@ -37,6 +37,43 @@ def run(root_path: str) -> int:
 # Basic resolution & merging
 # ---------------------------------------------------------------------------
 
+class TestStdlibResolution:
+    def test_std_prefix_resolves_to_stdlib_dir(self, tmp_path):
+        stdlib = tmp_path / "stdlib"
+        write(stdlib, "math.lang", "int answer() { return 42; }\n")
+        root = write(
+            tmp_path, "main.lang",
+            'import "std/math.lang";\n'
+            "int main() { return answer(); }\n",
+        )
+        loader = Loader(stdlib_dir=str(stdlib))
+        prog = loader.load(root)
+        assert decl_names(prog) == {"answer", "main"}
+        env = Analyser().analyse(prog)
+        assert Interpreter(env).run(prog) == 42
+
+    def test_std_prefix_is_not_relative_to_importer(self, tmp_path):
+        # A sibling math.lang next to main must NOT be picked up for std/ imports.
+        write(tmp_path, "math.lang", "int answer() { return 1; }\n")
+        stdlib = tmp_path / "lib"
+        write(stdlib, "math.lang", "int answer() { return 2; }\n")
+        root = write(
+            tmp_path, "main.lang",
+            'import "std/math.lang";\nint main() { return answer(); }\n',
+        )
+        env = Analyser().analyse(Loader(stdlib_dir=str(stdlib)).load(root))
+        prog = Loader(stdlib_dir=str(stdlib)).load(root)
+        assert Interpreter(env).run(prog) == 2
+
+    def test_missing_std_file_raises(self, tmp_path):
+        root = write(
+            tmp_path, "main.lang",
+            'import "std/nope.lang";\nint main() { return 0; }\n',
+        )
+        with pytest.raises(GImportError):
+            Loader(stdlib_dir=str(tmp_path / "stdlib")).load(root)
+
+
 class TestBasicImport:
     def test_imported_declarations_are_merged(self, tmp_path):
         write(tmp_path, "helper.lang", "int helper() { return 7; }\n")

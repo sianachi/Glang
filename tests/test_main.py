@@ -54,6 +54,60 @@ class TestRun:
 
 
 # ---------------------------------------------------------------------------
+# File I/O builtins (run with cwd at the temp dir so relative paths resolve)
+# ---------------------------------------------------------------------------
+
+class TestFileIO:
+    def test_write_then_read_round_trip(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = write(
+            tmp_path, "p.lang",
+            'int main() {\n'
+            '    writeFile("data.txt", "hello world");\n'
+            '    print(fileExists("data.txt"));\n'
+            '    print(readFile("data.txt"));\n'
+            '    return 0;\n'
+            '}\n',
+        )
+        code = cli.main(["run", path])
+        assert code == 0
+        assert capsys.readouterr().out == "true\nhello world\n"
+
+    def test_file_exists_false_for_missing(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = write(
+            tmp_path, "p.lang",
+            'int main() { print(fileExists("nope.txt")); return 0; }\n',
+        )
+        assert cli.main(["run", path]) == 0
+        assert capsys.readouterr().out == "false\n"
+
+    def test_read_missing_file_errors(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = write(
+            tmp_path, "p.lang",
+            'int main() { string s = readFile("nope.txt"); return 0; }\n',
+        )
+        assert cli.main(["run", path]) == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_stdlib_io_helpers(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = write(
+            tmp_path, "p.lang",
+            'import "std/io.lang";\n'
+            'int main() {\n'
+            '    writeFile("log.txt", "a\\n");\n'
+            '    appendFile("log.txt", "b\\n");\n'
+            '    print(readLineCount("log.txt"));\n'
+            '    return 0;\n'
+            '}\n',
+        )
+        assert cli.main(["run", path]) == 0
+        assert capsys.readouterr().out == "2\n"
+
+
+# ---------------------------------------------------------------------------
 # Usage errors -> exit 2
 # ---------------------------------------------------------------------------
 

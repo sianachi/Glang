@@ -1,0 +1,18 @@
+scale:
+10
+clamp(25, 0, 10):
+10
+clamp(-3, 0, 10):
+0
+data set size:
+4
+min:
+7
+max:
+99
+manhattan distance (0,0) to (3,4):
+7
+color (public):
+blue
+area (protected, via subclass method):
+42
