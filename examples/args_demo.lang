@@ -1,0 +1,22 @@
+// Demonstrates getArgCount() and getArg(i): command-line arguments passed
+// after the filename are available inside the Glang program.
+//
+// Run with no args:   python3 main.py run examples/args_demo.lang
+// Run with args:      python3 main.py run examples/args_demo.lang foo bar baz
+
+int main() {
+    int n = getArgCount();
+    print("arg count: " + toString(n));
+
+    if (n == 0) {
+        print("no args provided — running in demo mode");
+        return 0;
+    }
+
+    // Echo each argument with its index.
+    for (int i = 0; i < n; ++i) {
+        print("arg[" + toString(i) + "] = " + getArg(i));
+    }
+
+    return 0;
+}

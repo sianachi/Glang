@@ -156,6 +156,12 @@ class ReturnSignal(Exception):
         self.value = value
 
 
+class GlangExitException(Exception):
+    """Raised by the `exit(code)` builtin to unwind the call stack cleanly."""
+    def __init__(self, code: int) -> None:
+        self.code = code
+
+
 # ---------------------------------------------------------------------------
 # Interpreter
 # ---------------------------------------------------------------------------
@@ -165,7 +171,13 @@ _BINARY_OPERATOR_OVERLOADS = {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">
 
 
 class Interpreter:
-    def __init__(self, env: GlobalEnv, out=None) -> None:
+    def __init__(
+        self,
+        env: GlobalEnv,
+        out=None,
+        err=None,
+        prog_args: Optional[List[str]] = None,
+    ) -> None:
         self._env = env
         self._heap = Heap()
         self._frames: List[Frame] = []
@@ -175,6 +187,10 @@ class Interpreter:
         # also written to it live, so output survives a mid-run error.
         self.output: List[str] = []
         self._out = out
+        # `printErr` mirrors `print` but goes to stderr / self.err_output.
+        self.err_output: List[str] = []
+        self._err = err
+        self._args: List[str] = prog_args if prog_args is not None else []
         self._stack_addr = -1  # negative addresses for non-heap boxes
 
     # -- public entry ----------------------------------------------------
@@ -184,7 +200,10 @@ class Interpreter:
         main = self._env.functions.get("main")
         if main is None:
             raise GlangRuntimeError("no 'main' function", 0, 0)
-        result = self._call_function(main.decl, [])
+        try:
+            result = self._call_function(main.decl, [])
+        except GlangExitException as e:
+            return e.code
         if isinstance(result.raw, int) and not isinstance(result.raw, bool):
             return result.raw
         return 0
@@ -635,6 +654,7 @@ class Interpreter:
     def _is_builtin_call(self, name: str) -> bool:
         return name in {
             "print",
+            "printErr",
             "len",
             "substr",
             "parseInt",
@@ -649,12 +669,35 @@ class Interpreter:
             "fileExists",
             "bytesFromString",
             "stringFromBytes",
+            "getArgCount",
+            "getArg",
+            "exit",
         }
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
         if expr.name == "print":
             self._do_print(self._eval(expr.args[0]))
             return VOID
+
+        if expr.name == "printErr":
+            self._do_print_err(self._eval(expr.args[0]))
+            return VOID
+
+        if expr.name == "getArgCount":
+            return Value(NamedType("int"), len(self._args))
+
+        if expr.name == "getArg":
+            idx = int(self._eval(expr.args[0]).raw)
+            if idx < 0 or idx >= len(self._args):
+                raise GlangRuntimeError(
+                    f"getArg index {idx} out of range (have {len(self._args)} args)",
+                    expr.line, expr.col,
+                )
+            return Value(NamedType("string"), self._args[idx])
+
+        if expr.name == "exit":
+            code = int(self._eval(expr.args[0]).raw)
+            raise GlangExitException(code)
 
         if expr.name == "len":
             value = self._eval(expr.args[0])
@@ -1196,6 +1239,12 @@ class Interpreter:
         self.output.append(text)
         if self._out is not None:
             self._out.write(text + "\n")
+
+    def _do_print_err(self, value: Value) -> None:
+        text = self._value_to_string(value)
+        self.err_output.append(text)
+        if self._err is not None:
+            self._err.write(text + "\n")
 
     def _value_to_string(self, value: Value) -> str:
         if self._is(value, "bool"):

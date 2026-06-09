@@ -120,8 +120,8 @@ class TestUsage:
         assert cli.main(["build", "x.lang"]) == 2
         assert "usage:" in capsys.readouterr().err
 
-    def test_too_many_args(self, capsys):
-        assert cli.main(["run", "a.lang", "b.lang"]) == 2
+    def test_run_with_no_subcommand_is_error(self, capsys):
+        assert cli.main(["a.lang"]) == 2
         assert "usage:" in capsys.readouterr().err
 
 
@@ -174,3 +174,43 @@ class TestPartialOutput:
         assert code == 1
         assert "before\n" in captured.out
         assert "error:" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Compiler I/O builtins via CLI
+# ---------------------------------------------------------------------------
+
+class TestCompilerIO:
+    def test_extra_args_passed_as_prog_args(self, tmp_path, capsys):
+        path = write(
+            tmp_path, "p.lang",
+            "int main() { print(getArgCount()); print(getArg(0)); return 0; }\n",
+        )
+        code = cli.main(["run", path, "hello"])
+        captured = capsys.readouterr()
+        assert code == 0
+        assert captured.out == "1\nhello\n"
+
+    def test_multiple_extra_args(self, tmp_path, capsys):
+        path = write(
+            tmp_path, "p.lang",
+            "int main() { print(getArgCount()); return 0; }\n",
+        )
+        code = cli.main(["run", path, "a", "b", "c"])
+        assert code == 0
+        assert capsys.readouterr().out == "3\n"
+
+    def test_exit_builtin_propagates_code(self, tmp_path):
+        path = write(tmp_path, "p.lang", "int main() { exit(42); return 0; }\n")
+        assert cli.main(["run", path]) == 42
+
+    def test_print_err_goes_to_stderr(self, tmp_path, capsys):
+        path = write(
+            tmp_path, "p.lang",
+            'int main() { printErr("bad news"); return 0; }\n',
+        )
+        code = cli.main(["run", path])
+        captured = capsys.readouterr()
+        assert code == 0
+        assert "bad news\n" in captured.err
+        assert captured.out == ""

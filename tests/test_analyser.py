@@ -1834,3 +1834,42 @@ class TestWarningShadow:
         ok("void f() { int x = 1; int y = 2; }")
         captured = capsys.readouterr()
         assert "shadows" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# TestCompilerIO — type-checking for getArgCount/getArg/printErr/exit
+# ---------------------------------------------------------------------------
+
+class TestCompilerIO:
+    def test_get_arg_count_ok(self):
+        ok("int main() { int n = getArgCount(); return n; }")
+
+    def test_get_arg_count_no_args_required(self):
+        err("int main() { int n = getArgCount(42); return n; }", "expects")
+
+    def test_get_arg_ok(self):
+        ok("int main() { string s = getArg(0); return 0; }")
+
+    def test_get_arg_wrong_type_raises(self):
+        err('int main() { string s = getArg("x"); return 0; }', "")
+
+    def test_get_arg_wrong_arg_count_raises(self):
+        err("int main() { string s = getArg(0, 1); return 0; }", "expects")
+
+    def test_print_err_int_ok(self):
+        ok("int main() { printErr(42); return 0; }")
+
+    def test_print_err_string_ok(self):
+        ok('int main() { printErr("msg"); return 0; }')
+
+    def test_print_err_too_many_args(self):
+        err('int main() { printErr(1, 2); return 0; }', "expects 1")
+
+    def test_print_err_non_primitive_raises(self):
+        err("class C {} int main() { C c = C(); printErr(c); return 0; }", "primitive")
+
+    def test_exit_ok(self):
+        ok("int main() { exit(0); return 0; }")
+
+    def test_exit_wrong_type_raises(self):
+        err('int main() { exit("bad"); return 0; }', "")

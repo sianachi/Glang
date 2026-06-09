@@ -778,6 +778,20 @@ class Pass2Checker:
                 )
             return NamedType("void")
 
+        if expr.name == "printErr":
+            if len(expr.args) != 1:
+                raise TypeError(
+                    f"'printErr' expects 1 argument, got {len(expr.args)}",
+                    expr.line, expr.col,
+                )
+            arg_t = self._check_expr(expr.args[0])
+            if not self._is_primitive_value_type(arg_t):
+                raise TypeError(
+                    f"'printErr' requires a primitive argument, got '{type_str(arg_t)}'",
+                    expr.line, expr.col,
+                )
+            return NamedType("void")
+
         if expr.name == "len":
             if len(expr.args) != 1:
                 raise TypeError(
@@ -843,6 +857,9 @@ class Pass2Checker:
                 [PointerType(NamedType("byte")), NamedType("int")],
                 NamedType("string"),
             ),
+            "getArgCount": ([], NamedType("int")),
+            "getArg": ([NamedType("int")], NamedType("string")),
+            "exit": ([NamedType("int")], NamedType("void")),
         }
         signature = fixed.get(expr.name)
         if signature is None:

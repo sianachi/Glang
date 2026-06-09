@@ -1,0 +1,30 @@
+// Demonstrates exit(): terminates immediately from anywhere in the call stack,
+// skipping all remaining code in every active frame.
+// Run: python3 main.py run examples/exit_early.lang
+
+void checkBounds(int val, int lo, int hi) {
+    if (val < lo || val > hi) {
+        printErr("value " + toString(val) + " out of range [" +
+                 toString(lo) + ".." + toString(hi) + "]");
+        exit(1);
+    }
+}
+
+int main() {
+    // Process a series of values; exit() fires when a bad value is found,
+    // so "done" is never reached and later iterations never run.
+    int* data = alloc(int, 5);
+    data[0] = 10;
+    data[1] = 99;   // out of range — triggers exit
+    data[2] = 30;
+    data[3] = 40;
+    data[4] = 50;
+
+    for (int i = 0; i < 5; ++i) {
+        checkBounds(data[i], 0, 50);
+        print(data[i]);   // printed only for values that pass
+    }
+    print("done");        // never reached
+    free(data);
+    return 0;
+}

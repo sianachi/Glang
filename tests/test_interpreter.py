@@ -712,3 +712,74 @@ class TestByteInterop:
         with pytest.raises(GRE):
             run(main('byte* p = bytesFromString("hi"); '
                      'string s = stringFromBytes(p, 5); free(p); return 0;'))
+
+
+# ---------------------------------------------------------------------------
+# Compiler I/O: getArgCount / getArg / printErr / exit
+# ---------------------------------------------------------------------------
+
+def _build_with_args(src: str, prog_args=None):
+    tokens = Lexer(src).tokenize()
+    prog = Parser(tokens).parse()
+    env = Analyser().analyse(prog)
+    interp = Interpreter(env, prog_args=prog_args)
+    return prog, interp
+
+
+class TestCompilerIO:
+    def test_get_arg_count_zero_by_default(self):
+        prog, interp = _build_with_args(main("return getArgCount();"))
+        assert interp.run(prog) == 0
+
+    def test_get_arg_count_with_args(self):
+        prog, interp = _build_with_args(
+            main("return getArgCount();"), prog_args=["a", "b"]
+        )
+        assert interp.run(prog) == 2
+
+    def test_get_arg_returns_correct_value(self):
+        prog, interp = _build_with_args(
+            'int main() { print(getArg(0)); print(getArg(1)); return 0; }',
+            prog_args=["hello", "world"],
+        )
+        interp.run(prog)
+        assert interp.output == ["hello", "world"]
+
+    def test_get_arg_out_of_bounds_raises(self):
+        with pytest.raises(GRE):
+            prog, interp = _build_with_args(main("string s = getArg(5); return 0;"))
+            interp.run(prog)
+
+    def test_print_err_goes_to_err_output_not_output(self):
+        prog, interp = _build_with_args(main('printErr("oops"); return 0;'))
+        interp.run(prog)
+        assert interp.err_output == ["oops"]
+        assert interp.output == []
+
+    def test_print_err_int(self):
+        prog, interp = _build_with_args(main("printErr(42); return 0;"))
+        interp.run(prog)
+        assert interp.err_output == ["42"]
+
+    def test_exit_zero(self):
+        prog, interp = _build_with_args(main("exit(0); return 99;"))
+        assert interp.run(prog) == 0
+
+    def test_exit_nonzero(self):
+        prog, interp = _build_with_args(main("exit(42); return 0;"))
+        assert interp.run(prog) == 42
+
+    def test_exit_from_nested_function(self):
+        src = (
+            "void helper() { exit(7); }\n"
+            "int main() { helper(); return 0; }\n"
+        )
+        prog, interp = _build_with_args(src)
+        assert interp.run(prog) == 7
+
+    def test_exit_short_circuits_remaining_code(self):
+        prog, interp = _build_with_args(
+            main('exit(1); print("never reached"); return 0;')
+        )
+        interp.run(prog)
+        assert interp.output == []

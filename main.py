@@ -24,26 +24,26 @@ from analyser.analyser import Analyser
 from interpreter.interpreter import Interpreter
 from errors.errors import GlangError
 
-USAGE = "usage: glang run <file.lang>"
+USAGE = "usage: glang run <file.lang> [args...]"
 
 
-def run_file(path: str) -> int:
+def run_file(path: str, prog_args: list[str] | None = None) -> int:
     """Load, analyse, and execute ``path``; return the program's exit code."""
     program = Loader().load(path)
     env = Analyser().analyse(program)
-    interpreter = Interpreter(env, out=sys.stdout)
+    interpreter = Interpreter(env, out=sys.stdout, err=sys.stderr, prog_args=prog_args)
     return interpreter.run(program)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
-    if len(args) != 2 or args[0] != "run":
+    if len(args) < 2 or args[0] != "run":
         print(USAGE, file=sys.stderr)
         return 2
 
     try:
-        return run_file(args[1])
+        return run_file(args[1], prog_args=args[2:])
     except GlangError as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

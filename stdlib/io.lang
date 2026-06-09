@@ -33,3 +33,10 @@ int readLineCount(string path) {
     }
     return lines;
 }
+
+// Print `msg` to stderr then exit with `code`. Useful as a one-liner for
+// fatal compiler errors: dieWith("unexpected token at line 5", 1);
+void dieWith(string msg, int code) {
+    printErr(msg);
+    exit(code);
+}
