@@ -1,0 +1,67 @@
+// std/memory.lang — MemoryOwner<T>, an owning handle for a heap block.
+//
+// MemoryOwner<T> allocates a contiguous block of `n` elements with alloc(T, n)
+// and owns it: it frees the block when released. Unlike a Span<T> (a borrowed
+// view), the owner is responsible for the storage's lifetime.
+//
+// Glang has NO automatic scope-exit cleanup, so freeing is never implicit.
+// There are two release paths — pick one and do not mix them:
+//
+//   heap style (destructor runs on delete):
+//       MemoryOwner<int>* o = new MemoryOwner<int>(16);
+//       o->set(0, 42);
+//       delete o;                 // ~MemoryOwner() frees the block
+//
+//   value style (explicit dispose):
+//       MemoryOwner<int> o = MemoryOwner<int>(16);
+//       o.set(0, 42);
+//       o.dispose();              // frees the block
+//
+// Calling both delete and dispose() on the same owner is a double free.
+
+import "std/span.lang";
+
+class MemoryOwner<T> {
+    T* data;
+    int len;
+
+    MemoryOwner(int n) {
+        this.data = alloc(T, n);
+        this.len = n;
+    }
+
+    ~MemoryOwner() {
+        free(this.data);
+    }
+
+    int length() {
+        return this.len;
+    }
+
+    T get(int i) {
+        if (i < 0 || i >= this.len) {
+            // Out-of-range access: force a bounds error.
+            return this.data[0 - 1];
+        }
+        return this.data[i];
+    }
+
+    void set(int i, T v) {
+        if (i < 0 || i >= this.len) {
+            // Out-of-range access: force a bounds error.
+            this.data[0 - 1] = v;
+        }
+        this.data[i] = v;
+    }
+
+    // A borrowed view over the whole block. The span is valid only while this
+    // owner has not been released.
+    Span<T> span() {
+        return Span<T>(this.data, 0, this.len);
+    }
+
+    // Explicit release for the value-style usage (see file header).
+    void dispose() {
+        free(this.data);
+    }
+}

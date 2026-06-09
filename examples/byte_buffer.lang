@@ -1,0 +1,34 @@
+// Demonstrates the byte primitive: 8-bit wrapping arithmetic, bitwise ops,
+// byte blocks via alloc, and string <-> byte interop.
+// Run: python3 main.py run examples/byte_buffer.lang
+
+int main() {
+    // Arithmetic wraps modulo 256.
+    byte a = 200;
+    byte b = 100;
+    print(a + b);          // 44   (300 mod 256)
+
+    // Bitwise ops; int literals in 0..255 are accepted directly.
+    print(a & 0x0F);       // 8
+    print(b << 1);         // 200
+    print(~a);             // 55
+
+    // A heap byte block, zero-initialised, indexed through the pointer.
+    byte* buf = alloc(byte, 4);
+    buf[0] = 0xDE;
+    buf[1] = 0xAD;
+    buf[2] = (byte) 300;   // explicit cast from int wraps to 44
+    print(buf[0]);         // 222
+    print(buf[1]);         // 173
+    print(buf[2]);         // 44
+    print(buf[3]);         // 0   (zero-initialised)
+    free(buf);
+
+    // String <-> bytes interop.
+    byte* bytes = bytesFromString("Hi!");
+    print(bytes[0]);                       // 72  ('H')
+    string round = stringFromBytes(bytes, 3);
+    print(round);                          // Hi!
+    free(bytes);
+    return 0;
+}

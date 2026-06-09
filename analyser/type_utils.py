@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from analyser.symbol_table import GlobalEnv
 
 
-PRIMITIVES = {"int", "float", "bool", "char", "string", "void"}
+PRIMITIVES = {"int", "float", "bool", "char", "byte", "string", "void"}
 NULL_TYPE = NamedType("null")
 
 
@@ -70,6 +70,10 @@ def is_integer(t: TypeNode) -> bool:
     return isinstance(t, NamedType) and t.name == "int"
 
 
+def is_byte(t: TypeNode) -> bool:
+    return isinstance(t, NamedType) and t.name == "byte"
+
+
 def is_bool(t: TypeNode) -> bool:
     return isinstance(t, NamedType) and t.name == "bool"
 
@@ -120,6 +124,8 @@ def is_lvalue(expr: Expr) -> bool:
 def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
     l_int = is_integer(left)
     r_int = is_integer(right)
+    l_byte = is_byte(left)
+    r_byte = is_byte(right)
     l_float = isinstance(left, NamedType) and left.name == "float"
     r_float = isinstance(right, NamedType) and right.name == "float"
     l_str = is_string(left)
@@ -130,6 +136,8 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
     if op in ("+", "-", "*", "/"):
         if l_int and r_int:
             return NamedType("int")
+        if l_byte and r_byte:
+            return NamedType("byte")
         if l_float and r_float:
             return NamedType("float")
         if op == "+" and l_str and r_str:
@@ -147,10 +155,12 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
     if op == "%":
         if l_int and r_int:
             return NamedType("int")
+        if l_byte and r_byte:
+            return NamedType("byte")
         raise TypeError("operator '%' requires int operands", 0, 0)
 
     if op in ("<", ">", "<=", ">="):
-        if (l_int and r_int) or (l_float and r_float):
+        if (l_int and r_int) or (l_byte and r_byte) or (l_float and r_float):
             return NamedType("bool")
         ls, rs = type_str(left), type_str(right)
         raise TypeError(
@@ -186,6 +196,8 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
     if op in ("&", "|", "^", "<<", ">>"):
         if l_int and r_int:
             return NamedType("int")
+        if l_byte and r_byte:
+            return NamedType("byte")
         raise TypeError(f"operator '{op}' requires int operands", 0, 0)
 
     raise TypeError(f"unknown operator '{op}'", 0, 0)
@@ -199,10 +211,14 @@ def unary_result_type(op: str, operand: TypeNode) -> TypeNode:
             )
         return NamedType("bool")
     if op == "~":
+        if is_byte(operand):
+            return NamedType("byte")
         if not is_integer(operand):
             raise TypeError("operator '~' requires int operands", 0, 0)
         return NamedType("int")
     if op in ("++", "--"):
+        if is_byte(operand):
+            return NamedType("byte")
         if not is_integer(operand):
             raise TypeError(
                 f"operator '{op}' requires int operands", 0, 0
@@ -211,6 +227,8 @@ def unary_result_type(op: str, operand: TypeNode) -> TypeNode:
     if op in ("-", "unary-"):
         if is_integer(operand):
             return NamedType("int")
+        if is_byte(operand):
+            return NamedType("byte")
         if isinstance(operand, NamedType) and operand.name == "float":
             return NamedType("float")
         raise TypeError(

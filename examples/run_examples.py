@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run every example program and check its output against a golden file.
 
-Each ``examples/<name>.lang`` has a sibling ``examples/<name>.expected`` holding
-the exact stdout the program should produce. This runner executes each example
+Each ``examples/<name>.lang`` has a golden file ``examples/expected/<name>.expected``
+holding the exact stdout the program should produce. This runner executes each example
 end-to-end (load → analyse → interpret) in a throwaway working directory — so
 examples that touch the filesystem stay self-contained — and diffs the captured
 output against the golden file.
@@ -28,6 +28,7 @@ from analyser.analyser import Analyser
 from interpreter.interpreter import Interpreter
 
 EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
+EXPECTED_DIR = os.path.join(EXAMPLES_DIR, "expected")
 
 
 def discover() -> list[str]:
@@ -39,7 +40,8 @@ def discover() -> list[str]:
 
 
 def expected_path(lang_path: str) -> str:
-    return lang_path[: -len(".lang")] + ".expected"
+    name = os.path.basename(lang_path)[: -len(".lang")]
+    return os.path.join(EXPECTED_DIR, name + ".expected")
 
 
 def run_example(lang_path: str) -> tuple[int, list[str]]:
@@ -60,6 +62,8 @@ def run_example(lang_path: str) -> tuple[int, list[str]]:
 
 def main(argv: list[str]) -> int:
     generate = "--generate" in argv
+    if generate:
+        os.makedirs(EXPECTED_DIR, exist_ok=True)
     failures = 0
     for lang_path in discover():
         name = os.path.basename(lang_path)

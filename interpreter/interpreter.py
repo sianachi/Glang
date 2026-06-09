@@ -476,36 +476,59 @@ class Interpreter:
 
         l_int = self._is(left, "int")
         r_int = self._is(right, "int")
+        l_byte = self._is(left, "byte")
+        r_byte = self._is(right, "byte")
+        # A byte computes like int but stays byte, wrapping modulo 256. Pass2
+        # guarantees a byte only ever meets a byte or an int *literal*, so any
+        # byte/int pairing at runtime is a byte operation.
+        byte_op = (l_byte or r_byte) and (l_byte or l_int) and (r_byte or r_int)
+        both_int = l_int and r_int
 
         if op == "+":
             if self._is(left, "string"):
                 return Value(NamedType("string"), l + r)
-            if l_int and r_int:
+            if both_int:
                 return Value(NamedType("int"), l + r)
+            if byte_op:
+                return Value(NamedType("byte"), (l + r) & 0xFF)
             return Value(NamedType("float"), l + r)
         if op == "-":
-            t = "int" if (l_int and r_int) else "float"
+            if byte_op:
+                return Value(NamedType("byte"), (l - r) & 0xFF)
+            t = "int" if both_int else "float"
             return Value(NamedType(t), l - r)
         if op == "*":
-            t = "int" if (l_int and r_int) else "float"
+            if byte_op:
+                return Value(NamedType("byte"), (l * r) & 0xFF)
+            t = "int" if both_int else "float"
             return Value(NamedType(t), l * r)
         if op == "/":
-            if l_int and r_int:
+            if both_int:
                 return Value(NamedType("int"), self._cdiv(l, r, line, col))
+            if byte_op:
+                return Value(NamedType("byte"), self._cdiv(l, r, line, col) & 0xFF)
             return Value(NamedType("float"), l / r)
         if op == "%":
+            if byte_op:
+                return Value(NamedType("byte"), self._cmod(l, r, line, col) & 0xFF)
             return Value(NamedType("int"), self._cmod(l, r, line, col))
 
+        bit_t = "byte" if byte_op else "int"
+        bit_mask = 0xFF if byte_op else None
+
+        def _bit(v: int) -> Value:
+            return Value(NamedType(bit_t), v & bit_mask if bit_mask is not None else v)
+
         if op == "&":
-            return Value(NamedType("int"), l & r)
+            return _bit(l & r)
         if op == "|":
-            return Value(NamedType("int"), l | r)
+            return _bit(l | r)
         if op == "^":
-            return Value(NamedType("int"), l ^ r)
+            return _bit(l ^ r)
         if op == "<<":
-            return Value(NamedType("int"), l << r)
+            return _bit(l << r)
         if op == ">>":
-            return Value(NamedType("int"), l >> r)
+            return _bit(l >> r)
 
         raise GlangRuntimeError(f"unknown operator '{op}'", line, col)
 
@@ -533,16 +556,22 @@ class Interpreter:
     def _eval_unary(self, expr: UnaryExpr) -> Value:
         if expr.op in ("++", "--"):
             box = self._resolve_lvalue(expr.operand)
+            operand_t = box.value.type
             new = box.value.raw + (1 if expr.op == "++" else -1)
-            self._store(box, Value(NamedType("int"), new))
-            return Value(NamedType("int"), new)
+            # Preserve the operand's static type; _store masks byte to 0..255.
+            self._store(box, Value(operand_t, new))
+            return box.value
 
         operand = self._eval(expr.operand)
         if expr.op == "!":
             return Value(NamedType("bool"), not operand.raw)
         if expr.op == "~":
+            if self._is(operand, "byte"):
+                return Value(NamedType("byte"), (~operand.raw) & 0xFF)
             return Value(NamedType("int"), ~operand.raw)
         if expr.op == "-":
+            if self._is(operand, "byte"):
+                return Value(NamedType("byte"), (-operand.raw) & 0xFF)
             t = "int" if self._is(operand, "int") else "float"
             return Value(NamedType(t), -operand.raw)
         if expr.op == "+":
@@ -567,10 +596,14 @@ class Interpreter:
                 if self._is(src, "char"):
                     return Value(target, ord(src.raw))
                 return Value(target, int(src.raw))
+            if target.name == "byte":
+                if self._is(src, "char"):
+                    return Value(target, ord(src.raw) & 0xFF)
+                return Value(target, int(src.raw) & 0xFF)
             if target.name == "float":
                 return Value(target, float(src.raw))
             if target.name == "char":
-                if self._is(src, "int"):
+                if self._is(src, "int") or self._is(src, "byte"):
                     return Value(target, chr(src.raw & 0xFF))
                 return Value(target, src.raw)
         # pointer reinterpret-cast: keep the raw pointer, retag the type
@@ -614,6 +647,8 @@ class Interpreter:
             "readFile",
             "writeFile",
             "fileExists",
+            "bytesFromString",
+            "stringFromBytes",
         }
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
@@ -634,6 +669,32 @@ class Interpreter:
                     "substring range out of bounds", expr.line, expr.col
                 )
             return Value(NamedType("string"), source[start:end])
+
+        if expr.name == "bytesFromString":
+            text = self._eval(expr.args[0]).raw
+            byte_t = NamedType("byte")
+            elements = [
+                self._new_box(Value(byte_t, ord(ch) & 0xFF)) for ch in text
+            ]
+            block = Value(ArrayType(byte_t, len(elements)), elements)
+            box = self._heap.alloc(block)
+            return Value(PointerType(byte_t), Pointer(box))
+
+        if expr.name == "stringFromBytes":
+            data = self._eval(expr.args[0])
+            n = self._eval(expr.args[1]).raw
+            if n < 0:
+                raise GlangRuntimeError(
+                    "stringFromBytes length must be non-negative", expr.line, expr.col
+                )
+            block = self._deref(data, expr.line, expr.col)
+            elements = block.value.raw
+            if not isinstance(elements, list) or n > len(elements):
+                raise GlangRuntimeError(
+                    "stringFromBytes length out of bounds", expr.line, expr.col
+                )
+            chars = [chr(elements[i].value.raw & 0xFF) for i in range(n)]
+            return Value(NamedType("string"), "".join(chars))
 
         if expr.name == "parseInt":
             text = self._eval(expr.args[0]).raw
@@ -1083,6 +1144,10 @@ class Interpreter:
                 return Value(target_type, None)
             if isinstance(target_type, PointerType):
                 return Value(target_type, Pointer(None))
+        # A byte is always kept in 0..255; this also realises implicit
+        # int-literal → byte coercion on every store / param bind / return.
+        if isinstance(target_type, NamedType) and target_type.name == "byte":
+            return Value(target_type, int(value.raw) & 0xFF)
         return Value(target_type, value.raw)
 
     def _is(self, value: Value, name: str) -> bool:
@@ -1104,6 +1169,8 @@ class Interpreter:
                 return Value(t, False)
             if t.name == "char":
                 return Value(t, "\0")
+            if t.name == "byte":
+                return Value(t, 0)
             if t.name == "string":
                 return Value(t, "")
             if self._env.is_enum(t.name):

@@ -20,6 +20,7 @@ _TYPE_KEYWORDS = {
     TokenType.KW_FLOAT,
     TokenType.KW_BOOL,
     TokenType.KW_CHAR,
+    TokenType.KW_BYTE,
     TokenType.KW_STRING,
     TokenType.KW_VOID,
 }
@@ -29,6 +30,7 @@ _TYPE_KEYWORD_NAMES = {
     TokenType.KW_FLOAT:  "float",
     TokenType.KW_BOOL:   "bool",
     TokenType.KW_CHAR:   "char",
+    TokenType.KW_BYTE:   "byte",
     TokenType.KW_STRING: "string",
     TokenType.KW_VOID:   "void",
 }

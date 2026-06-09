@@ -236,6 +236,28 @@ class TestBinaryResultType:
         for op in ("&", "|", "^", "<<", ">>"):
             assert types_equal(binary_result_type(op, named("int"), named("int")), named("int"))
 
+    def test_byte_arithmetic_returns_byte(self):
+        for op in ("+", "-", "*", "/", "%"):
+            assert types_equal(
+                binary_result_type(op, named("byte"), named("byte")), named("byte")
+            )
+
+    def test_byte_bitwise_returns_byte(self):
+        for op in ("&", "|", "^", "<<", ">>"):
+            assert types_equal(
+                binary_result_type(op, named("byte"), named("byte")), named("byte")
+            )
+
+    def test_byte_comparison_returns_bool(self):
+        for op in ("<", ">", "<=", ">="):
+            assert types_equal(
+                binary_result_type(op, named("byte"), named("byte")), named("bool")
+            )
+
+    def test_byte_int_mismatch_raises(self):
+        with pytest.raises(GTE):
+            binary_result_type("+", named("byte"), named("int"))
+
     def test_int_float_mismatch_raises(self):
         with pytest.raises(GTE):
             binary_result_type("+", named("int"), named("float"))
@@ -424,7 +446,7 @@ class TestSymbolTable:
 class TestGlobalEnv:
     def test_primitive_types_valid(self):
         env = GlobalEnv()
-        for prim in ("int", "float", "bool", "char", "string", "void"):
+        for prim in ("int", "float", "bool", "char", "byte", "string", "void"):
             env.resolve_type(named(prim))  # must not raise
 
     def test_unknown_type_raises(self):
@@ -1219,6 +1241,55 @@ class TestPass2Cast:
 
     def test_string_to_int_raises(self):
         err('int f() { return (int) "hi"; }', "invalid cast")
+
+
+class TestPass2Byte:
+    def test_byte_var_and_arithmetic(self):
+        ok("void main() { byte a = 1; byte b = 2; byte c = a + b; }")
+
+    def test_byte_bitwise_with_literal(self):
+        ok("void main() { byte a = 200; byte m = a & 0x0F; byte s = a << 1; }")
+
+    def test_byte_literal_in_range(self):
+        ok("void main() { byte b = 255; byte z = 0; }")
+
+    def test_byte_literal_out_of_range_raises(self):
+        err("void main() { byte b = 300; }", "byte literal out of range")
+
+    def test_negative_into_byte_requires_cast(self):
+        # -1 is a unary expression, not a byte literal, so it needs a cast.
+        err("void main() { byte b = -1; }", "cannot initialise 'byte'")
+
+    def test_int_var_to_byte_requires_cast(self):
+        err("void main() { int i = 5; byte b = i; }", "cannot initialise 'byte'")
+
+    def test_byte_int_mixing_requires_cast(self):
+        err("void main() { byte b = 5; int i = 3; byte c = b + i; }", "type mismatch")
+
+    def test_byte_int_casts(self):
+        ok("void main() { byte b = 5; int i = (int) b; byte c = (byte) i; }")
+
+    def test_byte_char_casts(self):
+        ok("void main() { byte b = 65; char c = (char) b; byte d = (byte) c; }")
+
+    def test_byte_to_float_cast_raises(self):
+        err("void main() { byte b = 5; float f = (float) b; }", "invalid cast")
+
+    def test_byte_to_bool_cast_raises(self):
+        err("void main() { byte b = 5; bool x = (bool) b; }", "invalid cast")
+
+    def test_byte_array_and_alloc(self):
+        ok("void main() { byte* p = alloc(byte, 4); p[0] = 0xFF; free(p); }")
+
+    def test_byte_compound_assign_with_literal(self):
+        ok("void main() { byte b = 5; b += 10; b <<= 1; }")
+
+    def test_bytes_from_string_returns_byte_ptr(self):
+        ok('void main() { byte* p = bytesFromString("hi"); free(p); }')
+
+    def test_string_from_bytes(self):
+        ok('void main() { byte* p = bytesFromString("hi"); '
+           'string s = stringFromBytes(p, 2); free(p); }')
 
 
 class TestPass2Memory:

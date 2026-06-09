@@ -1,0 +1,57 @@
+// std/span.lang — a non-owning, bounds-checked view over contiguous storage.
+//
+// A Span<T> is a (pointer, offset, length) triple into a block allocated with
+// alloc(T, n) (e.g. the backing block of a MemoryOwner<T> or a List<T>). It
+// does NOT own that storage: the backing block must outlive every span over it,
+// and freeing the block leaves existing spans dangling. Spans never allocate or
+// free.
+//
+// Indexing is done as data[off + i] so that slice() can produce a narrower
+// sub-view without any pointer arithmetic. Out-of-range get/set/slice trigger a
+// runtime error (a deliberate negative-index access, which the interpreter
+// always rejects).
+
+class Span<T> {
+    T* data;   // backing block (not owned)
+    int off;   // start index of this view within the block
+    int len;   // number of elements in this view
+
+    Span(T* data, int off, int len) {
+        this.data = data;
+        this.off = off;
+        this.len = len;
+    }
+
+    int length() {
+        return this.len;
+    }
+
+    bool isEmpty() {
+        return this.len == 0;
+    }
+
+    T get(int i) {
+        if (i < 0 || i >= this.len) {
+            // Out-of-range view access: force a bounds error.
+            return this.data[0 - 1];
+        }
+        return this.data[this.off + i];
+    }
+
+    void set(int i, T v) {
+        if (i < 0 || i >= this.len) {
+            // Out-of-range view access: force a bounds error.
+            this.data[0 - 1] = v;
+        }
+        this.data[this.off + i] = v;
+    }
+
+    // A sub-view [start, end) of this span, sharing the same backing block.
+    Span<T> slice(int start, int end) {
+        if (start < 0 || end < start || end > this.len) {
+            // Invalid slice bounds: force a bounds error.
+            T junk = this.data[0 - 1];
+        }
+        return Span<T>(this.data, this.off + start, end - start);
+    }
+}

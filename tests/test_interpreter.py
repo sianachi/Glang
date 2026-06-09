@@ -646,3 +646,69 @@ class TestCasts:
 
     def test_char_to_int(self):
         assert run(main("char c = 'A'; int n = (int) c; return n;")) == 65
+
+
+class TestByte:
+    def test_add_wraps(self):
+        assert run(main("byte a = 200; byte b = 100; byte c = a + b; return (int) c;")) == 44
+
+    def test_subtract_wraps(self):
+        assert run(main("byte a = 10; byte b = 20; byte c = a - b; return (int) c;")) == 246
+
+    def test_multiply_wraps(self):
+        assert run(main("byte a = 100; byte b = 3; byte c = a * b; return (int) c;")) == 44
+
+    def test_and_with_literal(self):
+        assert run(main("byte a = 200; byte m = a & 0x0F; return (int) m;")) == 8
+
+    def test_shift_left_wraps(self):
+        assert run(main("byte a = 200; byte s = a << 1; return (int) s;")) == 144
+
+    def test_bitwise_not_masks(self):
+        assert run(main("byte a = 200; byte n = ~a; return (int) n;")) == 55
+
+    def test_increment_wraps(self):
+        assert run(main("byte a = 255; ++a; return (int) a;")) == 0
+
+    def test_compound_assign_wraps(self):
+        assert run(main("byte a = 250; a += 10; return (int) a;")) == 4
+
+    def test_literal_coercion_masks_on_cast(self):
+        assert run(main("byte a = (byte) 300; return (int) a;")) == 44
+
+    def test_int_to_byte_masks(self):
+        assert run(main("int i = 511; byte b = (byte) i; return (int) b;")) == 255
+
+    def test_byte_to_char_roundtrip(self):
+        assert run(main("byte b = 65; char c = (char) b; if (c == 'A') { return 1; } return 0;")) == 1
+
+    def test_alloc_block_zero_init(self):
+        assert run(main("byte* p = alloc(byte, 3); byte v = p[1]; free(p); return (int) v;")) == 0
+
+    def test_alloc_block_write_read(self):
+        body = (
+            "byte* p = alloc(byte, 3); p[0] = 10; p[1] = (byte) 300; p[2] = 0xFF;"
+            "byte v = p[2]; free(p); return (int) v;"
+        )
+        assert run(main(body)) == 255
+
+    def test_comparison(self):
+        assert run(main("byte a = 5; byte b = 9; if (a < b) { return 1; } return 0;")) == 1
+
+
+class TestByteInterop:
+    def test_bytes_from_string_codepoints(self):
+        body = "byte* p = bytesFromString(\"Hi!\"); byte b = p[0]; free(p); return (int) b;"
+        assert run(main(body)) == ord("H")
+
+    def test_string_from_bytes_roundtrip(self):
+        _, out = run_out(
+            'int main() { byte* p = bytesFromString("Hi!"); '
+            'string s = stringFromBytes(p, 3); print(s); free(p); return 0; }'
+        )
+        assert out == ["Hi!"]
+
+    def test_string_from_bytes_out_of_bounds_raises(self):
+        with pytest.raises(GRE):
+            run(main('byte* p = bytesFromString("hi"); '
+                     'string s = stringFromBytes(p, 5); free(p); return 0;'))

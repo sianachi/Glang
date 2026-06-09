@@ -109,9 +109,20 @@ class TestTopLevel:
 
 class TestTypes:
     def test_primitive_types(self):
-        for kw in ("int", "float", "bool", "char", "string", "void"):
+        for kw in ("int", "float", "bool", "char", "byte", "string", "void"):
             prog = parse(f"{kw} f() {{ return; }}")
             assert type_matches(prog.declarations[0].return_type, named(kw))
+
+    def test_byte_pointer_and_array(self):
+        prog = parse("byte* f() { return null; }")
+        assert type_matches(
+            prog.declarations[0].return_type, PointerType(NamedType("byte"))
+        )
+        prog = parse("byte[8] g() { return; }")
+        t = prog.declarations[0].return_type
+        assert isinstance(t, ArrayType)
+        assert isinstance(t.base, NamedType) and t.base.name == "byte"
+        assert t.size == 8
 
     def test_pointer_type(self):
         prog = parse("int* f() { return; }")

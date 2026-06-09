@@ -1,0 +1,32 @@
+// Demonstrates Span<T>: a non-owning, bounds-checked view over a contiguous
+// block, plus zero-copy sub-slicing that aliases the same backing storage.
+// Run: python3 main.py run examples/span_demo.lang
+
+import "std/memory.lang";
+
+int main() {
+    // Own a block of 8 ints: 0, 10, 20, ... 70.
+    MemoryOwner<int> owner = MemoryOwner<int>(8);
+    for (int i = 0; i < 8; ++i) {
+        owner.set(i, i * 10);
+    }
+
+    // A view over the whole block.
+    Span<int> view = owner.span();
+    print(view.length());   // 8
+    print(view.get(5));     // 50
+
+    // A sub-view [2, 6): elements 20, 30, 40, 50.
+    Span<int> mid = view.slice(2, 6);
+    print(mid.length());    // 4
+    print(mid.get(0));      // 20
+    print(mid.get(3));      // 50
+
+    // The slice aliases the backing block: writing through it is visible to
+    // the owner.
+    mid.set(0, 999);
+    print(owner.get(2));    // 999
+
+    owner.dispose();
+    return 0;
+}

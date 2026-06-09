@@ -58,11 +58,11 @@ Identifiers start with a letter or underscore, followed by any number of letters
 ### 2.3 Keywords
 
 ```
-alloc     bool      break     char      class     continue
-delete    else      enum      extends   false     float
-for       free      if        implements  import  int
-interface new       null      return    static    string
-super     this      true      void      while
+alloc     bool      break     byte      char      class
+continue  delete    else      enum      extends   false
+float     for       free      if        implements  import
+int       interface new       null      return    static
+string    super     this      true      void      while
 ```
 
 ### 2.4 Literals
@@ -102,9 +102,24 @@ Integer literals may use `_` as a visual separator: `1_000_000`.
 | `int`    | 64-bit signed    | Integer division when both operands are int|
 | `float`  | 64-bit IEEE 754  |                                            |
 | `bool`   | 1 byte           | Not an alias of int                        |
-| `char`   | 1 byte           | ASCII only                                 |
+| `char`   | 1 byte           | ASCII only; *text*, not arithmetic         |
+| `byte`   | unsigned 8-bit   | Octet for binary data; wraps modulo 256    |
 | `string` | Heap (ptr + len) | Immutable; `+` allocates a new string      |
 | `null`   | —                | Only assignable to pointer/object types    |
+
+**`byte`** is an unsigned 8-bit integer (`0..255`), distinct from both `int`
+(width-unspecified text-free integer) and `char` (a text character). It is the
+substrate for binary data — buffers, octets, and `byte[]` blocks.
+
+- Arithmetic (`+ - * / %`), bitwise (`& | ^ ~ << >>`), comparisons, and
+  `++`/`--` are all supported. Results stay `byte` and **wrap modulo 256**
+  (e.g. `(byte)200 + (byte)100` is `44`).
+- An integer **literal** in `0..255` may be used directly where a `byte` is
+  expected; the range is checked at compile time (`byte b = 0xFF;` is fine,
+  `byte b = 300;` is an error). An `int` *variable* still needs an explicit
+  `(byte)` cast.
+- `byte` does not mix with `int` variables in one expression without a cast,
+  matching the no-implicit-conversion rule for `int`/`float`.
 
 ### 3.2 Pointer types
 
@@ -138,11 +153,19 @@ All casts are explicit:
 float f = 3.9;
 int i = (int) f;       // truncates to 3
 
+byte b = (byte) 511;   // masks to low 8 bits -> 255
+int  n = (int) b;      // 255
+char c = (char) b;     // byte <-> char also allowed
+
 void* p = (void*) myPtr;
 Dog* d = (Dog*) p;
 ```
 
-No implicit numeric widening or narrowing. No implicit bool/int conversion.
+No implicit numeric widening or narrowing. No implicit bool/int conversion. The
+allowed primitive casts are `int <-> float`, `int <-> char`, `int <-> byte`, and
+`char <-> byte`; casting *to* `byte` masks the value to `0..255`. As a
+convenience, an integer *literal* in range coerces to `byte` without a cast
+(see §3.1).
 
 ### 3.5 Enum types
 
@@ -208,7 +231,10 @@ A `const` keyword is reserved for a future version.
 | `-`      | Subtraction                              |
 | `*`      | Multiplication                           |
 | `/`      | Division (integer if both sides are int) |
-| `%`      | Modulo (int only)                        |
+| `%`      | Modulo (int or byte operands)            |
+
+When both operands are `byte`, every arithmetic operator yields a `byte` that
+wraps modulo 256 (§3.1).
 
 ### 5.2 Comparison
 
@@ -230,13 +256,15 @@ Comparing a pointer to `null` is valid. Comparing two pointers checks address eq
 
 Operands must be `bool`. Integers are not truthy.
 
-### 5.4 Bitwise (int only)
+### 5.4 Bitwise (int or byte)
 
 ```
 &   |   ^   ~   <<   >>
 ```
 
-Right shift is arithmetic (sign-extending) for signed ints.
+Operands must both be `int` or both be `byte`. Right shift is arithmetic
+(sign-extending) for signed ints. When the operands are `byte`, the result is a
+`byte` masked to `0..255` (so `~` and `<<` stay in range).
 
 ### 5.5 Assignment
 
@@ -246,7 +274,7 @@ Right shift is arithmetic (sign-extending) for signed ints.
 
 Assignment is a statement, not an expression. It does not return a value. Chained assignment (`a = b = 5`) is not allowed.
 
-The bitwise compound assignments (`&=`, `|=`, `^=`, `<<=`, `>>=`) are only valid on `int` operands, matching the restriction on their non-compound counterparts (§5.4).
+The bitwise compound assignments (`&=`, `|=`, `^=`, `<<=`, `>>=`) are valid on `int` or `byte` operands, matching the restriction on their non-compound counterparts (§5.4).
 
 ### 5.6 Increment / decrement
 
@@ -396,7 +424,7 @@ print('a');         // a
 print("hello");     // hello
 ```
 
-- `print` takes exactly one argument of a primitive type (`int`, `float`, `bool`, `char`, or `string`) and returns `void`.
+- `print` takes exactly one argument of a primitive type (`int`, `float`, `bool`, `char`, `byte`, or `string`) and returns `void`. A `byte` prints as its numeric value (`0..255`).
 - It writes the value followed by a newline. `bool` prints as `true`/`false`.
 - `print` is not a keyword and not overloadable; it occupies the global function namespace and may not be redefined.
 
@@ -407,6 +435,20 @@ writeFile("out.txt", "hello\n");   // (string, string) -> void
 bool ok = fileExists("out.txt");   // (string) -> bool
 string s = readFile("out.txt");    // (string) -> string  (errors if missing)
 ```
+
+The runtime also provides two `byte`/`string` interop built-ins (no import
+required):
+
+```c
+byte* bs = bytesFromString("Hi!");      // (string) -> byte*  (heap block)
+string s = stringFromBytes(bs, 3);      // (byte*, int) -> string
+free(bs);
+```
+
+`bytesFromString` allocates a heap `byte` block holding the string's code units
+(masked to 8 bits); the caller owns it and must `free` it. `stringFromBytes`
+rebuilds a string from the first `len` bytes of a block (out-of-bounds `len` is a
+runtime error).
 
 Higher-level, line-oriented helpers built on these live in `std/io.lang` (see the Standard Library section).
 
@@ -763,8 +805,10 @@ runtime error (a `RuntimeError` diagnostic) rather than continuing:
 Since v1, the following have shipped: `const`, access modifiers, string
 operations, the import system (with a `std/` prefix), function pointers,
 closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
-file-I/O built-ins, and **generics** (monomorphized) with a generic standard
-library. The remaining items reserved for later versions:
+file-I/O built-ins, **generics** (monomorphized) with a generic standard
+library, the `byte` primitive with `byte[]` blocks and `string`/`byte` interop,
+and the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views. The
+remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
@@ -795,6 +839,8 @@ prefix (e.g. `import "std/list.lang";`). The file-I/O built-ins (`readFile`,
 | `std/queue.lang`  | `Queue<T>` — ring buffer: `enqueue`, `dequeue`, `peek`, `length`, `isEmpty` |
 | `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length`  |
 | `std/option.lang` | `Option<T>` — `setSome`/`setNone`, `isSome`/`isNone`, `get`, `getOr`      |
+| `std/span.lang`   | `Span<T>` — non-owning bounds-checked view: `get`, `set`, `slice`, `length`, `isEmpty` |
+| `std/memory.lang` | `MemoryOwner<T>` — owning heap block: `get`, `set`, `span`, `length`, `dispose` (frees; also `~MemoryOwner` on `delete`) |
 
 The collections are growable and generic: each one is backed by a contiguous
 `alloc(T, cap)` block that doubles when full. The map uses linear search, so it
@@ -809,6 +855,32 @@ int main() {
     xs.add(10);
     xs.add(20);
     print(xs.get(1));   // 20
+    return 0;
+}
+```
+
+**Contiguous memory: `MemoryOwner<T>` and `Span<T>`.** A `MemoryOwner<T>` owns a
+heap block (`alloc(T, n)`) and frees it when released; a `Span<T>` is a
+non-owning, bounds-checked view (`pointer + offset + length`) over a block.
+`slice` produces zero-copy sub-views that alias the same storage. Because Glang
+has no scope-exit cleanup, freeing is explicit: call `dispose()` on a value
+handle, or `delete` a `new`'d handle (which runs `~MemoryOwner`). Do not do both
+on the same owner (double free). A span is valid only while its backing owner
+is live.
+
+```c
+import "std/memory.lang";
+
+int main() {
+    MemoryOwner<int> o = MemoryOwner<int>(8);
+    for (int i = 0; i < 8; ++i) { o.set(i, i * 10); }
+
+    Span<int> mid = o.span().slice(2, 6);  // view of o[2..6)
+    print(mid.get(0));                     // 20
+    mid.set(0, 999);                       // aliases the backing block
+    print(o.get(2));                       // 999
+
+    o.dispose();                           // free the block
     return 0;
 }
 ```

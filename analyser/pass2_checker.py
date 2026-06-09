@@ -18,7 +18,7 @@ from parser.ast_nodes import (
 from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
 from analyser.type_utils import (
-    NULL_TYPE, is_assignable, is_integer, is_bool,
+    NULL_TYPE, is_assignable, is_integer, is_byte, is_bool,
     is_pointer, is_array, is_string, pointer_base, type_str,
     is_lvalue, binary_result_type, unary_result_type,
     superclass_chain, types_equal,
@@ -93,7 +93,7 @@ class Pass2Checker:
         # Static field initializers
         for sfd in cls.static_fields:
             init_t = self._check_expr(sfd.initializer)
-            if not is_assignable(init_t, sfd.type, self._env):
+            if not self._assignable(init_t, sfd.type, sfd.initializer):
                 raise TypeError(
                     f"cannot initialise '{type_str(sfd.type)}' with '{type_str(init_t)}'",
                     sfd.line, sfd.col,
@@ -129,7 +129,7 @@ class Pass2Checker:
                         )
                     for arg, param in zip(ctor.super_args, parent_info.constructor.params):
                         arg_t = self._check_expr(arg)
-                        if not is_assignable(arg_t, param.type, self._env):
+                        if not self._assignable(arg_t, param.type, arg):
                             raise TypeError(
                                 f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
                                 ctor.line, ctor.col,
@@ -212,7 +212,7 @@ class Pass2Checker:
             self._env.resolve_type(stmt.type)
             self._check_class_access(stmt.type, stmt.line, stmt.col)
             init_t = self._check_expr(stmt.initializer)
-            if not is_assignable(init_t, stmt.type, self._env):
+            if not self._assignable(init_t, stmt.type, stmt.initializer):
                 raise TypeError(
                     f"cannot initialise '{type_str(stmt.type)}' with '{type_str(init_t)}'",
                     stmt.line, stmt.col,
@@ -234,11 +234,14 @@ class Pass2Checker:
             if stmt.op != "=":
                 # Compound assignment: validate the op makes sense for target_t
                 op_symbol = stmt.op[:-1]  # e.g. "+=" → "+"
+                lhs_t, rhs_t = self._coerce_byte_literals(
+                    target_t, value_t, stmt.target, stmt.value
+                )
                 value_t = self._check_binary_operation_type(
-                    op_symbol, target_t, value_t, stmt.line, stmt.col
+                    op_symbol, lhs_t, rhs_t, stmt.line, stmt.col
                 )
 
-            if not is_assignable(value_t, target_t, self._env):
+            if not self._assignable(value_t, target_t, stmt.value):
                 raise TypeError(
                     f"cannot assign '{type_str(value_t)}' to '{type_str(target_t)}'",
                     stmt.line, stmt.col,
@@ -334,7 +337,7 @@ class Pass2Checker:
                         stmt.line, stmt.col,
                     )
                 val_t = self._check_expr(stmt.value)
-                if not is_assignable(val_t, rt, self._env):
+                if not self._assignable(val_t, rt, stmt.value):
                     raise TypeError(
                         f"cannot assign '{type_str(val_t)}' to '{type_str(rt)}'",
                         stmt.line, stmt.col,
@@ -434,6 +437,9 @@ class Pass2Checker:
         if isinstance(expr, BinaryExpr):
             left_t = self._check_expr(expr.left)
             right_t = self._check_expr(expr.right)
+            left_t, right_t = self._coerce_byte_literals(
+                left_t, right_t, expr.left, expr.right
+            )
             return self._check_binary_operation_type(
                 expr.op, left_t, right_t, expr.line, expr.col
             )
@@ -477,7 +483,7 @@ class Pass2Checker:
                         )
                     for arg, param in zip(expr.args, ctor.params):
                         arg_t = self._check_expr(arg)
-                        if not is_assignable(arg_t, param.type, self._env):
+                        if not self._assignable(arg_t, param.type, arg):
                             raise TypeError(
                                 f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
                                 expr.line, expr.col,
@@ -530,7 +536,7 @@ class Pass2Checker:
                     )
                 for arg, param in zip(expr.args, method.params):
                     arg_t = self._check_expr(arg)
-                    if not is_assignable(arg_t, param.type, self._env):
+                    if not self._assignable(arg_t, param.type, arg):
                         raise TypeError(
                             f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
                             expr.line, expr.col,
@@ -579,7 +585,7 @@ class Pass2Checker:
                 )
             for arg, param in zip(expr.args, method.params):
                 arg_t = self._check_expr(arg)
-                if not is_assignable(arg_t, param.type, self._env):
+                if not self._assignable(arg_t, param.type, arg):
                     raise TypeError(
                         f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
                         expr.line, expr.col,
@@ -704,7 +710,7 @@ class Pass2Checker:
                     )
                 for arg, param in zip(expr.args, class_info.constructor.params):
                     arg_t = self._check_expr(arg)
-                    if not is_assignable(arg_t, param.type, self._env):
+                    if not self._assignable(arg_t, param.type, arg):
                         raise TypeError(
                             f"cannot assign '{type_str(arg_t)}' to '{type_str(param.type)}'",
                             expr.line, expr.col,
@@ -829,6 +835,14 @@ class Pass2Checker:
                 NamedType("void"),
             ),
             "fileExists": ([NamedType("string")], NamedType("bool")),
+            "bytesFromString": (
+                [NamedType("string")],
+                PointerType(NamedType("byte")),
+            ),
+            "stringFromBytes": (
+                [PointerType(NamedType("byte")), NamedType("int")],
+                NamedType("string"),
+            ),
         }
         signature = fixed.get(expr.name)
         if signature is None:
@@ -842,8 +856,53 @@ class Pass2Checker:
     def _is_primitive_value_type(self, t: TypeNode) -> bool:
         return (
             isinstance(t, NamedType)
-            and t.name in ("int", "float", "bool", "char", "string")
+            and t.name in ("int", "float", "bool", "char", "byte", "string")
         )
+
+    def _is_byte_literal(self, e: Expr) -> bool:
+        """True if `e` is an integer literal usable as a byte (0..255).
+        Raises on an out-of-range literal."""
+        if isinstance(e, LiteralExpr) and e.kind == "int":
+            val = int(e.value)
+            if val < 0 or val > 255:
+                raise TypeError(
+                    f"byte literal out of range 0..255: {val}", e.line, e.col
+                )
+            return True
+        return False
+
+    def _coerce_byte_literals(
+        self, left_t: TypeNode, right_t: TypeNode, left_e: Expr, right_e: Expr
+    ) -> tuple:
+        """For a binary op mixing a `byte` operand with an integer *literal*,
+        treat the literal as `byte` so idioms like `b & 0x0F` and `b << 1`
+        type-check (a byte never meets a non-literal int — that needs a cast)."""
+        if is_byte(left_t) and not is_byte(right_t) and self._is_byte_literal(right_e):
+            return left_t, NamedType("byte")
+        if is_byte(right_t) and not is_byte(left_t) and self._is_byte_literal(left_e):
+            return NamedType("byte"), right_t
+        return left_t, right_t
+
+    def _assignable(self, from_t: TypeNode, to_t: TypeNode, from_expr: Expr) -> bool:
+        """Like ``is_assignable``, but also accepts an integer *literal* in the
+        range 0..255 where a ``byte`` is expected (implicit byte-literal
+        coercion). An out-of-range literal is a compile-time error; an ``int``
+        *variable* still needs an explicit ``(byte)`` cast."""
+        if is_assignable(from_t, to_t, self._env):
+            return True
+        if (
+            is_byte(to_t)
+            and isinstance(from_expr, LiteralExpr)
+            and from_expr.kind == "int"
+        ):
+            val = int(from_expr.value)
+            if val < 0 or val > 255:
+                raise TypeError(
+                    f"byte literal out of range 0..255: {val}",
+                    from_expr.line, from_expr.col,
+                )
+            return True
+        return False
 
     def _check_assignable_target(self, expr: Expr) -> TypeNode:
         if isinstance(expr, IndexExpr):
@@ -1091,7 +1150,7 @@ class Pass2Checker:
             )
         for arg, param_t in zip(args, param_types):
             arg_t = self._check_expr(arg)
-            if not is_assignable(arg_t, param_t, self._env):
+            if not self._assignable(arg_t, param_t, arg):
                 raise TypeError(
                     f"cannot assign '{type_str(arg_t)}' to '{type_str(param_t)}'",
                     line, col,
@@ -1230,6 +1289,8 @@ class Pass2Checker:
         numeric_pairs = {
             ("int", "float"), ("float", "int"),
             ("int", "char"), ("char", "int"),
+            ("int", "byte"), ("byte", "int"),
+            ("char", "byte"), ("byte", "char"),
         }
         if (
             isinstance(src, NamedType)
