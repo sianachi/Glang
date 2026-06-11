@@ -426,6 +426,13 @@ class TestStatements:
         assert isinstance(s.type, NamedType) and s.type.name == "int"
         assert isinstance(s.initializer, LiteralExpr)
 
+    def test_var_inferred_decl(self):
+        s = parse_stmt("var x = 5;")
+        assert isinstance(s, VarDecl)
+        assert s.name == "x"
+        assert isinstance(s.type, NamedType) and s.type.name == "var"
+        assert isinstance(s.initializer, LiteralExpr)
+
     def test_var_decl_requires_initializer(self):
         with pytest.raises(ParseError, match="initialiser"):
             parse_stmt("int x;")

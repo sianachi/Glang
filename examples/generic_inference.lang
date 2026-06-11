@@ -1,0 +1,56 @@
+// generic_inference.lang - generic bounds, inferred generic calls, and var.
+//
+// Run:
+//   python3 main.py run examples/generic_inference.lang
+
+interface Named {
+    string name();
+}
+
+class Person implements Named {
+    string label;
+
+    Person(string label) {
+        this.label = label;
+    }
+
+    string name() {
+        return this.label;
+    }
+}
+
+class Box<T extends Named> {
+    T value;
+
+    Box(T value) {
+        this.value = value;
+    }
+
+    T get() {
+        return this.value;
+    }
+}
+
+T identity<T>(T value) {
+    return value;
+}
+
+T choose<T extends Named>(T first, T second) {
+    return first;
+}
+
+int main() {
+    var ada = Person("Ada");
+    var grace = Person("Grace");
+
+    var chosen = choose(ada, grace);
+    print(chosen.name());
+
+    var boxed = Box(chosen);
+    print(boxed.get().name());
+
+    var answer = identity(42);
+    print(answer);
+
+    return answer;
+}

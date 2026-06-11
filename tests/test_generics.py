@@ -63,16 +63,33 @@ class TestGenericParsing:
         decl = prog.declarations[0]
         assert isinstance(decl, ClassDecl)
         assert decl.type_params == ["T"]
+        assert decl.type_param_bounds == {}
 
     def test_multiple_type_params(self):
         prog = parse("class Pair<K, V> { K k; V v; Pair() {} }")
         assert prog.declarations[0].type_params == ["K", "V"]
+
+    def test_generic_class_records_bounds(self):
+        prog = parse("class Box<T extends Named> { T value; Box(T v) { this.value = v; } }")
+        decl = prog.declarations[0]
+        assert isinstance(decl, ClassDecl)
+        assert decl.type_params == ["T"]
+        assert isinstance(decl.type_param_bounds["T"], NamedType)
+        assert decl.type_param_bounds["T"].name == "Named"
 
     def test_generic_function_records_type_params(self):
         prog = parse("T identity<T>(T x) { return x; }")
         decl = prog.declarations[0]
         assert isinstance(decl, FunctionDecl)
         assert decl.type_params == ["T"]
+
+    def test_generic_function_records_bounds(self):
+        prog = parse("T keep<T extends Named>(T x) { return x; }")
+        decl = prog.declarations[0]
+        assert isinstance(decl, FunctionDecl)
+        assert decl.type_params == ["T"]
+        assert isinstance(decl.type_param_bounds["T"], NamedType)
+        assert decl.type_param_bounds["T"].name == "Named"
 
     def test_generic_type_in_field(self):
         prog = parse("class C { List<int> xs; C() {} }")
@@ -146,6 +163,90 @@ class TestGenericExecution:
         code, out = run_out(src)
         assert out == ["42"]
 
+    def test_generic_function_infers_type_args(self):
+        src = "T identity<T>(T x) { return x; }\n"
+        src += "int main() { print(identity(42)); return identity(7); }"
+        code, out = run_out(src)
+        assert code == 7
+        assert out == ["42"]
+
+    def test_generic_function_infers_nested_generic_arg(self):
+        src = BOX + """
+        T unwrap<T>(Box<T> box) { return box.get(); }
+        int main() {
+            Box<int> b = Box<int>(11);
+            return unwrap(b);
+        }
+        """
+        code, out = run_out(src)
+        assert code == 11
+
+    def test_generic_class_constructor_infers_type_args(self):
+        src = BOX + """
+        int main() {
+            Box<int> b = Box(9);
+            return b.get();
+        }
+        """
+        code, out = run_out(src)
+        assert code == 9
+
+    def test_var_local_type_inference(self):
+        src = "T identity<T>(T x) { return x; }\n"
+        src += "int main() { var x = identity(42); print(x); return x; }"
+        code, out = run_out(src)
+        assert code == 42
+        assert out == ["42"]
+
+    def test_var_infers_generic_class_construction(self):
+        src = BOX + """
+        int main() {
+            var b = Box(7);
+            return b.get();
+        }
+        """
+        code, out = run_out(src)
+        assert code == 7
+
+    def test_generic_bound_accepts_interface_implementation(self):
+        src = """
+        interface Named { string name(); }
+        class Person implements Named {
+            Person() {}
+            string name() { return "Ada"; }
+        }
+        T keep<T extends Named>(T x) { return x; }
+        int main() {
+            Person p = Person();
+            var q = keep(p);
+            print(q.name());
+            return 0;
+        }
+        """
+        code, out = run_out(src)
+        assert out == ["Ada"]
+
+    def test_generic_class_bound_accepts_interface_implementation(self):
+        src = """
+        interface Named { string name(); }
+        class Person implements Named {
+            Person() {}
+            string name() { return "Ada"; }
+        }
+        class Box<T extends Named> {
+            T value;
+            Box(T v) { this.value = v; }
+            T get() { return this.value; }
+        }
+        int main() {
+            var box = Box(Person());
+            print(box.get().name());
+            return 0;
+        }
+        """
+        code, out = run_out(src)
+        assert out == ["Ada"]
+
     def test_growable_generic_list(self):
         src = """
         class List<T> {
@@ -207,3 +308,29 @@ class TestGenericErrors:
         # Box<int>.get() returns int; assigning to a string must fail.
         err(BOX + 'int main() { Box<int> a = Box<int>(1); string s = a.get(); return 0; }',
             "")
+
+    def test_inference_conflict_raises(self):
+        err(
+            'T choose<T>(T a, T b) { return a; } int main() { choose(1, "x"); return 0; }',
+            "cannot infer type argument 'T'",
+        )
+
+    def test_inference_requires_evidence(self):
+        err(
+            "T make<T>() { return T(); } int main() { make(); return 0; }",
+            "cannot infer type argument 'T'",
+        )
+
+    def test_bound_rejects_non_implementation(self):
+        err(
+            """
+            interface Named { string name(); }
+            class Rock { Rock() {} }
+            T keep<T extends Named>(T x) { return x; }
+            int main() { Rock r = Rock(); keep(r); return 0; }
+            """,
+            "does not satisfy bound",
+        )
+
+    def test_var_cannot_infer_from_null(self):
+        err("int main() { var x = null; return 0; }", "cannot infer type of 'var'")

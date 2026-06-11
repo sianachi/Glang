@@ -20,6 +20,7 @@ class TokenType(Enum):
     KW_BYTE      = auto()  # byte
     KW_STRING    = auto()  # string
     KW_VOID      = auto()  # void
+    KW_VAR       = auto()  # var
     # Boolean literals
     KW_TRUE      = auto()  # true
     KW_FALSE     = auto()  # false
@@ -135,6 +136,7 @@ KEYWORDS: dict[str, TokenType] = {
     "byte":       TokenType.KW_BYTE,
     "string":     TokenType.KW_STRING,
     "void":       TokenType.KW_VOID,
+    "var":        TokenType.KW_VAR,
     "true":       TokenType.KW_TRUE,
     "false":      TokenType.KW_FALSE,
     "null":       TokenType.KW_NULL,

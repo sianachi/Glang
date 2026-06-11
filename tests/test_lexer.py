@@ -210,6 +210,7 @@ class TestIdentsAndKeywords:
             ("byte",       TokenType.KW_BYTE),
             ("string",     TokenType.KW_STRING),
             ("void",       TokenType.KW_VOID),
+            ("var",        TokenType.KW_VAR),
             ("true",       TokenType.KW_TRUE),
             ("false",      TokenType.KW_FALSE),
             ("null",       TokenType.KW_NULL),

@@ -209,9 +209,22 @@ class Pass2Checker:
             self._check_block(stmt)
 
         elif isinstance(stmt, VarDecl):
-            self._env.resolve_type(stmt.type)
-            self._check_class_access(stmt.type, stmt.line, stmt.col)
             init_t = self._check_expr(stmt.initializer)
+            if self._is_var_type(stmt.type):
+                if self._is_null_type(init_t):
+                    raise TypeError(
+                        "cannot infer type of 'var' from null",
+                        stmt.line, stmt.col,
+                    )
+                if isinstance(init_t, NamedType) and init_t.name == "void":
+                    raise TypeError(
+                        "cannot infer type of 'var' from void",
+                        stmt.line, stmt.col,
+                    )
+                stmt.type = init_t
+            else:
+                self._env.resolve_type(stmt.type)
+                self._check_class_access(stmt.type, stmt.line, stmt.col)
             if not self._assignable(init_t, stmt.type, stmt.initializer):
                 raise TypeError(
                     f"cannot initialise '{type_str(stmt.type)}' with '{type_str(init_t)}'",
@@ -334,10 +347,13 @@ class Pass2Checker:
             self._scope = saved_scope
 
         elif isinstance(stmt, ForeachStmt):
-            self._env.resolve_type(stmt.var_type)
-            self._check_class_access(stmt.var_type, stmt.line, stmt.col)
             iterable_t = self._check_expr(stmt.iterable)
             elem_t = self._foreach_element_type(iterable_t, stmt.line, stmt.col)
+            if self._is_var_type(stmt.var_type):
+                stmt.var_type = elem_t
+            else:
+                self._env.resolve_type(stmt.var_type)
+                self._check_class_access(stmt.var_type, stmt.line, stmt.col)
             if not is_assignable(elem_t, stmt.var_type, self._env):
                 raise TypeError(
                     f"cannot iterate '{type_str(iterable_t)}' as '{type_str(stmt.var_type)}'",
@@ -1148,6 +1164,12 @@ class Pass2Checker:
         if isinstance(t, NamedType) and self._env.is_class(t.name):
             return t.name
         return None
+
+    def _is_var_type(self, t: TypeNode) -> bool:
+        return isinstance(t, NamedType) and t.name == "var"
+
+    def _is_null_type(self, t: TypeNode) -> bool:
+        return isinstance(t, NamedType) and t.name == "null"
 
     def _check_operator_method_decl(self, method) -> None:
         if not method.name.startswith("operator"):

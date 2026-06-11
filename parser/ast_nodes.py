@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +176,7 @@ class FunctionDecl(Decl):
     return_type: TypeNode
     body: Block
     type_params: List[str] = field(default_factory=list)
+    type_param_bounds: Dict[str, TypeNode] = field(default_factory=dict)
     line: int = 0
     col: int = 0
 
@@ -306,6 +307,7 @@ class ClassDecl(Decl):
     destructor: Optional[DestructorDecl] = None
     access: str = "public"
     type_params: List[str] = field(default_factory=list)
+    type_param_bounds: Dict[str, TypeNode] = field(default_factory=dict)
     line: int = 0
     col: int = 0
 

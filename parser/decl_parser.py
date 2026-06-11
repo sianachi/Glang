@@ -162,24 +162,36 @@ class DeclParser:
     def _parse_function(self) -> FunctionDecl:
         ret_type = self._tp.parse_type()
         name_tok = self._s.expect(TokenType.IDENT)
-        type_params = self._parse_type_params()
+        type_params, type_param_bounds = self._parse_type_params()
         params = self._parse_param_list()
         body = self._sp.parse_block()
         return FunctionDecl(
             name=name_tok.value, params=params, return_type=ret_type, body=body,
-            type_params=type_params, line=name_tok.line, col=name_tok.col,
+            type_params=type_params, type_param_bounds=type_param_bounds,
+            line=name_tok.line, col=name_tok.col,
         )
 
-    def _parse_type_params(self) -> List[str]:
-        """Parse an optional ``<T, U, ...>`` type-parameter list. Returns the
-        list of parameter names, or an empty list when absent."""
+    def _parse_type_params(self) -> Tuple[List[str], dict]:
+        """Parse an optional ``<T, U, ...>`` type-parameter list.
+
+        Bounds use ``T extends Bound``. The returned names list intentionally
+        stays plain strings for compatibility with older tests and passes.
+        """
         if not self._s.match(TokenType.LT):
-            return []
-        params = [self._s.expect(TokenType.IDENT).value]
+            return [], {}
+        params: List[str] = []
+        bounds = {}
+        self._parse_one_type_param(params, bounds)
         while self._s.match(TokenType.COMMA):
-            params.append(self._s.expect(TokenType.IDENT).value)
+            self._parse_one_type_param(params, bounds)
         self._s.expect(TokenType.GT)
-        return params
+        return params, bounds
+
+    def _parse_one_type_param(self, params: List[str], bounds: dict) -> None:
+        name_tok = self._s.expect(TokenType.IDENT)
+        params.append(name_tok.value)
+        if self._s.match(TokenType.KW_EXTENDS):
+            bounds[name_tok.value] = self._tp.parse_type()
 
     # ------------------------------------------------------------------
     # Classes
@@ -188,7 +200,7 @@ class DeclParser:
     def _parse_class(self, access: str = "public") -> ClassDecl:
         tok = self._s.advance()  # consume 'class'
         name_tok = self._s.expect(TokenType.IDENT)
-        type_params = self._parse_type_params()
+        type_params, type_param_bounds = self._parse_type_params()
 
         superclass: Optional[str] = None
         if self._s.match(TokenType.KW_EXTENDS):
@@ -214,6 +226,7 @@ class DeclParser:
             destructor=destructor,
             access=access,
             type_params=type_params,
+            type_param_bounds=type_param_bounds,
             line=tok.line,
             col=tok.col,
         )

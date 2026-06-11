@@ -26,7 +26,7 @@ except ImportError:
 _TYPE_KWS = {
     TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL,
     TokenType.KW_CHAR, TokenType.KW_BYTE, TokenType.KW_STRING, TokenType.KW_VOID,
-    TokenType.KW_FN,
+    TokenType.KW_FN, TokenType.KW_VAR,
 }
 
 
@@ -162,7 +162,7 @@ class StmtParser:
 
     def _parse_var_decl(self) -> VarDecl:
         is_const = bool(self._s.match(TokenType.KW_CONST))
-        type_node = self._tp.parse_type()
+        type_node = self._parse_var_or_type()
         name_tok = self._s.expect(TokenType.IDENT)
 
         if not self._s.check(TokenType.ASSIGN):
@@ -179,6 +179,12 @@ class StmtParser:
             is_const=is_const,
             line=name_tok.line, col=name_tok.col,
         )
+
+    def _parse_var_or_type(self):
+        tok = self._s.peek()
+        if self._s.match(TokenType.KW_VAR):
+            return NamedType("var", line=tok.line, col=tok.col)
+        return self._tp.parse_type()
 
     def _parse_assign_or_expr_stmt(self, *, consume_semi: bool = True) -> Stmt:
         expr = self._ep.parse_expr()
@@ -250,7 +256,7 @@ class StmtParser:
         tok = self._s.advance()  # consume 'foreach'
         self._s.expect(TokenType.LPAREN)
         is_const = bool(self._s.match(TokenType.KW_CONST))
-        var_type = self._tp.parse_type()
+        var_type = self._parse_var_or_type()
         name_tok = self._s.expect(TokenType.IDENT)
         self._s.expect(TokenType.KW_IN)
         iterable = self._ep.parse_expr()
