@@ -1,0 +1,67 @@
+// loops.lang - while, do-while, for, and foreach.
+//
+// Run:
+//   python3 main.py run examples/loops.lang
+
+import "std/list.lang";
+
+class Scores {
+    int[3] values;
+
+    Scores() {}
+}
+
+int main() {
+    print("while:");
+    int w = 0;
+    while (w < 3) {
+        print(w);
+        w = w + 1;
+    }
+
+    print("do while:");
+    int d = 3;
+    do {
+        print(d);
+        d = d - 1;
+    } while (d > 3);
+
+    print("for:");
+    for (int i = 1; i <= 3; ++i) {
+        print(i);
+    }
+
+    print("foreach string:");
+    foreach (char c in "abc") {
+        print(c);
+    }
+
+    Scores scores = Scores();
+    scores.values[0] = 2;
+    scores.values[1] = 4;
+    scores.values[2] = 6;
+
+    print("foreach array:");
+    int array_sum = 0;
+    foreach (int score in scores.values) {
+        array_sum = array_sum + score;
+    }
+    print(array_sum);
+
+    List<int> nums = List<int>();
+    nums.add(4);
+    nums.add(5);
+    nums.add(6);
+
+    print("foreach list:");
+    int list_sum = 0;
+    foreach (int n in nums) {
+        if (n == 5) {
+            continue;
+        }
+        list_sum = list_sum + n;
+    }
+    print(list_sum);
+
+    return 0;
+}

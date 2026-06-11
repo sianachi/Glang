@@ -19,14 +19,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from parser.ast_nodes import (
     Program, Stmt, Expr,
     FunctionDecl, ClassDecl, StaticFieldDecl, EnumDecl,
     MethodDecl, ConstructorDecl, DestructorDecl,
-    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
-    ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
+    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
+    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -314,6 +314,17 @@ class Interpreter:
                 except ContinueSignal:
                     continue
 
+        elif isinstance(stmt, DoWhileStmt):
+            while True:
+                try:
+                    self._exec_block(stmt.body)
+                except BreakSignal:
+                    break
+                except ContinueSignal:
+                    pass
+                if not self._eval(stmt.condition).raw:
+                    break
+
         elif isinstance(stmt, ForStmt):
             self._frame.push_scope()
             try:
@@ -329,6 +340,23 @@ class Interpreter:
                         self._exec_stmt(stmt.post)
                     else:
                         self._eval(stmt.post)
+            finally:
+                self._frame.pop_scope()
+
+        elif isinstance(stmt, ForeachStmt):
+            iterable = self._eval(stmt.iterable)
+            self._frame.push_scope()
+            try:
+                box = self._new_box(self._zero_value(stmt.var_type))
+                self._frame.define(stmt.var_name, box)
+                for item in self._foreach_values(iterable, stmt.line, stmt.col):
+                    self._store(box, item)
+                    try:
+                        self._exec_block(stmt.body)
+                    except BreakSignal:
+                        break
+                    except ContinueSignal:
+                        continue
             finally:
                 self._frame.pop_scope()
 
@@ -1103,7 +1131,45 @@ class Interpreter:
             return None
         return self._call_operator_method(container, "operator[]", [index], line, col)
 
+    def _foreach_values(self, iterable: Value, line: int, col: int) -> Iterator[Value]:
+        if isinstance(iterable.raw, str):
+            for ch in iterable.raw:
+                yield Value(NamedType("char"), ch)
+            return
+
+        if isinstance(iterable.type, ArrayType):
+            if not isinstance(iterable.raw, list):
+                raise GlangRuntimeError("foreach expected an array value", line, col)
+            for box in iterable.raw:
+                yield box.value
+            return
+
+        class_name = self._class_value_name(iterable)
+        if class_name is not None or isinstance(iterable.raw, Pointer):
+            length = self._call_instance_method(iterable, "length", [], line, col)
+            for i in range(length.raw):
+                yield self._call_instance_method(
+                    iterable,
+                    "get",
+                    [Value(NamedType("int"), i)],
+                    line,
+                    col,
+                )
+            return
+
+        raise GlangRuntimeError("foreach expected an iterable value", line, col)
+
     def _call_operator_method(
+        self,
+        receiver: Value,
+        method_name: str,
+        args: List[Value],
+        line: int,
+        col: int,
+    ) -> Value:
+        return self._call_instance_method(receiver, method_name, args, line, col)
+
+    def _call_instance_method(
         self,
         receiver: Value,
         method_name: str,

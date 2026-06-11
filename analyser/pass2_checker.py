@@ -5,8 +5,8 @@ from typing import Dict, List, Optional
 from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
-    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
-    ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
+    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
+    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -304,6 +304,18 @@ class Pass2Checker:
             self._check_block(stmt.body)
             self._in_loop = saved_loop
 
+        elif isinstance(stmt, DoWhileStmt):
+            saved_loop = self._in_loop
+            self._in_loop = True
+            self._check_block(stmt.body)
+            self._in_loop = saved_loop
+            cond_t = self._check_expr(stmt.condition)
+            if not is_bool(cond_t):
+                raise TypeError(
+                    f"condition must be bool, got '{type_str(cond_t)}'",
+                    stmt.line, stmt.col,
+                )
+
         elif isinstance(stmt, ForStmt):
             saved_scope = self._scope
             self._scope = self._scope.child()
@@ -315,6 +327,31 @@ class Pass2Checker:
                     stmt.line, stmt.col,
                 )
             self._check_stmt(stmt.post)
+            saved_loop = self._in_loop
+            self._in_loop = True
+            self._check_block(stmt.body)
+            self._in_loop = saved_loop
+            self._scope = saved_scope
+
+        elif isinstance(stmt, ForeachStmt):
+            self._env.resolve_type(stmt.var_type)
+            self._check_class_access(stmt.var_type, stmt.line, stmt.col)
+            iterable_t = self._check_expr(stmt.iterable)
+            elem_t = self._foreach_element_type(iterable_t, stmt.line, stmt.col)
+            if not is_assignable(elem_t, stmt.var_type, self._env):
+                raise TypeError(
+                    f"cannot iterate '{type_str(iterable_t)}' as '{type_str(stmt.var_type)}'",
+                    stmt.line, stmt.col,
+                )
+            saved_scope = self._scope
+            self._scope = self._scope.child()
+            self._scope.define(
+                stmt.var_name,
+                stmt.var_type,
+                stmt.line,
+                stmt.col,
+                stmt.is_const,
+            )
             saved_loop = self._in_loop
             self._in_loop = True
             self._check_block(stmt.body)
@@ -1073,6 +1110,44 @@ class Pass2Checker:
         if method is None:
             return None, class_name
         return method, self._method_declaring_class(class_name, method_name)
+
+    def _foreach_element_type(self, iterable_t: TypeNode, line: int, col: int) -> TypeNode:
+        if is_array(iterable_t):
+            return iterable_t.base
+        if is_string(iterable_t):
+            return NamedType("char")
+
+        class_name = self._iterable_class_name(iterable_t)
+        if class_name is None:
+            raise TypeError(
+                f"foreach requires an array, string, or iterable class, got '{type_str(iterable_t)}'",
+                line, col,
+            )
+
+        length_method, length_defining = self._find_instance_method(class_name, "length")
+        get_method, get_defining = self._find_instance_method(class_name, "get")
+        if (
+            length_method is None
+            or len(length_method.params) != 0
+            or not is_integer(length_method.return_type)
+            or get_method is None
+            or len(get_method.params) != 1
+            or not is_integer(get_method.params[0].type)
+        ):
+            raise TypeError(
+                f"foreach requires '{class_name}' to define length() and get(int)",
+                line, col,
+            )
+        self._check_access(length_defining, length_method.access, "length", line, col)
+        self._check_access(get_defining, get_method.access, "get", line, col)
+        return get_method.return_type
+
+    def _iterable_class_name(self, t: TypeNode) -> Optional[str]:
+        if isinstance(t, PointerType):
+            t = t.base
+        if isinstance(t, NamedType) and self._env.is_class(t.name):
+            return t.name
+        return None
 
     def _check_operator_method_decl(self, method) -> None:
         if not method.name.startswith("operator"):

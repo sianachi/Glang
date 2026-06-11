@@ -43,6 +43,9 @@ class TokenType(Enum):
     KW_ELSE      = auto()  # else
     KW_WHILE     = auto()  # while
     KW_FOR       = auto()  # for
+    KW_DO        = auto()  # do
+    KW_FOREACH   = auto()  # foreach
+    KW_IN        = auto()  # in
     KW_BREAK     = auto()  # break
     KW_CONTINUE  = auto()  # continue
     KW_RETURN    = auto()  # return
@@ -150,6 +153,9 @@ KEYWORDS: dict[str, TokenType] = {
     "else":       TokenType.KW_ELSE,
     "while":      TokenType.KW_WHILE,
     "for":        TokenType.KW_FOR,
+    "do":         TokenType.KW_DO,
+    "foreach":    TokenType.KW_FOREACH,
+    "in":         TokenType.KW_IN,
     "break":      TokenType.KW_BREAK,
     "continue":   TokenType.KW_CONTINUE,
     "return":     TokenType.KW_RETURN,

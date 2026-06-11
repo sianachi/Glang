@@ -1,0 +1,18 @@
+while:
+0
+1
+2
+do while:
+3
+for:
+1
+2
+3
+foreach string:
+a
+b
+c
+foreach array:
+12
+foreach list:
+10

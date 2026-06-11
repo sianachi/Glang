@@ -9,7 +9,8 @@ from parser.parser import Parser
 from parser.ast_nodes import (
     Program, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
     FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
+    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
+    ForeachStmt,
     BreakStmt, ContinueStmt, ReturnStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
@@ -498,6 +499,24 @@ class TestStatements:
         s = parse_stmt("for (int i = 0; i < 10; ++i) { break; }")
         assert isinstance(s, ForStmt)
         assert isinstance(s.post, UnaryExpr)
+
+    def test_do_while(self):
+        s = parse_stmt("do { n += 1; } while (n < 10);")
+        assert isinstance(s, DoWhileStmt)
+        assert isinstance(s.condition, BinaryExpr)
+
+    def test_foreach(self):
+        s = parse_stmt("foreach (int n in nums) { break; }")
+        assert isinstance(s, ForeachStmt)
+        assert s.var_name == "n"
+        assert type_matches(s.var_type, named("int"))
+        assert isinstance(s.iterable, IdentifierExpr)
+
+    def test_const_foreach(self):
+        s = parse_stmt("foreach (const char c in text) { continue; }")
+        assert isinstance(s, ForeachStmt)
+        assert s.is_const
+        assert s.var_name == "c"
 
     def test_expr_stmt_call(self):
         s = parse_stmt("foo();")

@@ -297,6 +297,54 @@ class TestControlFlow:
     def test_for(self):
         assert run(main("int s = 0; for (int i = 0; i < 5; ++i) { s = s + i; } return s;")) == 10
 
+    def test_do_while_runs_at_least_once(self):
+        assert run(main("int i = 0; do { i = i + 1; } while (false); return i;")) == 1
+
+    def test_do_while_continue_checks_condition(self):
+        assert run(main(
+            "int i = 0; int s = 0;"
+            "do { ++i; if (i == 2) { continue; } s = s + i; } while (i < 3);"
+            "return s;"
+        )) == 4
+
+    def test_foreach_string(self):
+        assert run(main(
+            'int count = 0; foreach (char c in "abcd") { count = count + 1; } return count;'
+        )) == 4
+
+    def test_foreach_array(self):
+        assert run(
+            "class Buf { int[3] data; Buf() {} }\n"
+            + main(
+                "Buf b = Buf();"
+                "b.data[0] = 1; b.data[1] = 2; b.data[2] = 3;"
+                "int sum = 0;"
+                "foreach (int x in b.data) { sum = sum + x; }"
+                "return sum;"
+            )
+        ) == 6
+
+    def test_foreach_iterable_class(self):
+        assert run(
+            "class Bag { Bag() {} int length() { return 3; } int get(int i) { return i + 2; } }\n"
+            + main(
+                "Bag b = Bag(); int sum = 0;"
+                "foreach (int x in b) { sum = sum + x; }"
+                "return sum;"
+            )
+        ) == 9
+
+    def test_foreach_break_and_continue(self):
+        assert run(main(
+            "int count = 0;"
+            "foreach (char c in \"abcd\") {"
+            "  if (c == 'b') { continue; }"
+            "  if (c == 'd') { break; }"
+            "  count = count + 1;"
+            "}"
+            "return count;"
+        )) == 2
+
     def test_break(self):
         assert run(main(
             "int s = 0; for (int i = 0; i < 10; ++i) { if (i == 5) { break; } s = s + 1; } return s;"

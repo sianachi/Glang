@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import List
 
 from parser.ast_nodes import (
-    Stmt, ReturnStmt, IfStmt, WhileStmt, ForStmt, Block, UsingStmt,
+    Stmt, ReturnStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt, ForeachStmt,
+    Block, UsingStmt,
 )
 
 
@@ -32,7 +33,7 @@ def _stmt_always_returns(stmt: Stmt) -> bool:
         # that always returns makes the using statement always return.
         return always_returns(stmt.body.stmts)
 
-    if isinstance(stmt, (WhileStmt, ForStmt)):
+    if isinstance(stmt, (WhileStmt, DoWhileStmt, ForStmt, ForeachStmt)):
         return False
 
     return False

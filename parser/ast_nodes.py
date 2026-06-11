@@ -493,6 +493,19 @@ class WhileStmt(Stmt):
 
 
 @dataclass
+class DoWhileStmt(Stmt):
+    """A do-while loop.
+
+    Example:
+      do { ... } while (cond);
+    """
+    body: Block
+    condition: Expr
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class ForStmt(Stmt):
     """A for loop with mandatory init, condition, and post sections.
 
@@ -507,6 +520,24 @@ class ForStmt(Stmt):
     condition: Expr
     post: Any  # AssignStmt | UnaryExpr
     body: Block
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class ForeachStmt(Stmt):
+    """A foreach loop over an iterable value.
+
+    The loop variable is a scoped local copy of each element.
+
+    Example:
+      foreach (int x in numbers) { ... }
+    """
+    var_type: TypeNode
+    var_name: str
+    iterable: Expr
+    body: Block
+    is_const: bool = False
     line: int = 0
     col: int = 0
 

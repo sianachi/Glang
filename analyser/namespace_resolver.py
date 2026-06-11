@@ -40,8 +40,8 @@ from parser.ast_nodes import (
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
-    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt, ReturnStmt,
-    UsingStmt,
+    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
+    ForeachStmt, ReturnStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -313,11 +313,20 @@ class NamespaceResolver:
         elif isinstance(s, WhileStmt):
             self._r_expr(s.condition, p)
             self._r_block(s.body, p)
+        elif isinstance(s, DoWhileStmt):
+            self._r_block(s.body, p)
+            self._r_expr(s.condition, p)
         elif isinstance(s, ForStmt):
             self._scopes.append(set())
             self._r_stmt(s.init, p)
             self._r_expr(s.condition, p)
             self._r_post(s.post, p)
+            self._r_block(s.body, p)
+            self._scopes.pop()
+        elif isinstance(s, ForeachStmt):
+            self._r_type(s.var_type, p)
+            self._r_expr(s.iterable, p)
+            self._scopes.append({s.var_name})
             self._r_block(s.body, p)
             self._scopes.pop()
         elif isinstance(s, UsingStmt):

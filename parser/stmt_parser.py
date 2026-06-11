@@ -8,8 +8,8 @@ try:
     from ..errors.errors import ParseError
     from .ast_nodes import (
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
-        UsingStmt,
+        DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
+        ReturnStmt, NamedType, UsingStmt,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -19,8 +19,8 @@ except ImportError:
     from errors.errors import ParseError  # type: ignore
     from parser.ast_nodes import (  # type: ignore
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
-        UsingStmt,
+        DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
+        ReturnStmt, NamedType, UsingStmt,
     )
 
 _TYPE_KWS = {
@@ -64,6 +64,10 @@ class StmtParser:
             return self._parse_while()
         if tok.type == TokenType.KW_FOR:
             return self._parse_for()
+        if tok.type == TokenType.KW_DO:
+            return self._parse_do_while()
+        if tok.type == TokenType.KW_FOREACH:
+            return self._parse_foreach()
         if tok.type == TokenType.KW_RETURN:
             return self._parse_return()
         if tok.type == TokenType.KW_USING:
@@ -231,6 +235,36 @@ class StmtParser:
         body = self.parse_block()
         return ForStmt(init=init, condition=cond, post=post, body=body,
                        line=tok.line, col=tok.col)
+
+    def _parse_do_while(self) -> DoWhileStmt:
+        tok = self._s.advance()  # consume 'do'
+        body = self.parse_block()
+        self._s.expect(TokenType.KW_WHILE)
+        self._s.expect(TokenType.LPAREN)
+        cond = self._ep.parse_expr()
+        self._s.expect(TokenType.RPAREN)
+        self._s.expect(TokenType.SEMICOLON)
+        return DoWhileStmt(body=body, condition=cond, line=tok.line, col=tok.col)
+
+    def _parse_foreach(self) -> ForeachStmt:
+        tok = self._s.advance()  # consume 'foreach'
+        self._s.expect(TokenType.LPAREN)
+        is_const = bool(self._s.match(TokenType.KW_CONST))
+        var_type = self._tp.parse_type()
+        name_tok = self._s.expect(TokenType.IDENT)
+        self._s.expect(TokenType.KW_IN)
+        iterable = self._ep.parse_expr()
+        self._s.expect(TokenType.RPAREN)
+        body = self.parse_block()
+        return ForeachStmt(
+            var_type=var_type,
+            var_name=name_tok.value,
+            iterable=iterable,
+            body=body,
+            is_const=is_const,
+            line=tok.line,
+            col=tok.col,
+        )
 
     def _parse_using(self) -> UsingStmt:
         tok = self._s.advance()  # consume 'using'

@@ -27,8 +27,8 @@ from parser.ast_nodes import (
     Program, Decl, Expr, FunctionDecl, ClassDecl, FieldDecl, StaticFieldDecl,
     ConstructorDecl, DestructorDecl, MethodDecl,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
-    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt, ReturnStmt,
-    UsingStmt,
+    Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
+    ForeachStmt, ReturnStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -201,10 +201,17 @@ class Monomorphizer:
         elif isinstance(s, WhileStmt):
             self._t_expr(s.condition, m)
             self._t_block(s.body, m)
+        elif isinstance(s, DoWhileStmt):
+            self._t_block(s.body, m)
+            self._t_expr(s.condition, m)
         elif isinstance(s, ForStmt):
             self._t_stmt(s.init, m)
             self._t_expr(s.condition, m)
             self._t_post(s.post, m)
+            self._t_block(s.body, m)
+        elif isinstance(s, ForeachStmt):
+            s.var_type = self._t_type(s.var_type, m)
+            self._t_expr(s.iterable, m)
             self._t_block(s.body, m)
         elif isinstance(s, UsingStmt):
             self._t_stmt(s.decl, m)

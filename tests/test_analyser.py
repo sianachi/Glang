@@ -9,7 +9,8 @@ from parser.parser import Parser
 from parser.ast_nodes import (
     NamedType, PointerType, ArrayType, FunctionPointerType,
     Block, ReturnStmt, IfStmt,
-    WhileStmt, ForStmt, VarDecl, IdentifierExpr, LiteralExpr,
+    WhileStmt, DoWhileStmt, ForStmt, ForeachStmt,
+    VarDecl, IdentifierExpr, LiteralExpr,
     BinaryExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
 )
 from errors.errors import TypeError as GTE
@@ -981,14 +982,59 @@ class TestPass2ControlFlow:
     def test_for_non_bool_condition_raises(self):
         err("void f() { for (int i = 0; i; i += 1) {} }", "condition must be bool")
 
+    def test_do_while_bool_ok(self):
+        ok("void f(bool b) { do {} while (b); }")
+
+    def test_do_while_non_bool_condition_raises(self):
+        err("void f() { do {} while (1); }", "condition must be bool")
+
+    def test_foreach_string_ok(self):
+        ok('void f() { foreach (char c in "abc") {} }')
+
+    def test_foreach_array_ok(self):
+        ok(
+            "class Buf { int[3] data; Buf() {} }\n"
+            "void f() { Buf b = Buf(); foreach (int x in b.data) {} }"
+        )
+
+    def test_foreach_iterable_class_ok(self):
+        ok(
+            "class Bag { Bag() {} int length() { return 2; } int get(int i) { return i; } }\n"
+            "void f() { Bag b = Bag(); foreach (int x in b) {} }"
+        )
+
+    def test_foreach_non_iterable_raises(self):
+        err("void f() { foreach (int x in 1) {} }", "foreach requires")
+
+    def test_foreach_type_mismatch_raises(self):
+        err('void f() { foreach (int x in "abc") {} }', "cannot iterate")
+
+    def test_foreach_var_scoped_to_loop(self):
+        err(
+            'int f() { foreach (char c in "a") {} return c; }',
+            "undefined variable 'c'",
+        )
+
+    def test_const_foreach_var_cannot_be_assigned(self):
+        err(
+            'void f() { foreach (const char c in "a") { c = \'b\'; } }',
+            "cannot assign to const 'c'",
+        )
+
     def test_break_in_loop_ok(self):
         ok("void f() { while (true) { break; } }")
+
+    def test_break_in_do_while_ok(self):
+        ok("void f() { do { break; } while (true); }")
 
     def test_break_outside_loop_raises(self):
         err("void f() { break; }", "'break' outside a loop")
 
     def test_continue_in_loop_ok(self):
         ok("void f() { while (true) { continue; } }")
+
+    def test_continue_in_foreach_ok(self):
+        ok('void f() { foreach (char c in "a") { continue; } }')
 
     def test_continue_outside_loop_raises(self):
         err("void f() { continue; }", "'continue' outside a loop")
