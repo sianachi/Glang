@@ -1,14 +1,18 @@
 // std/string.lang — string helpers built on the string builtins (len, substr,
-// indexOf, ...) and std/char.lang. Strings are immutable, so transforming
-// functions build a fresh result one character at a time via toString(char).
+// indexOf, ...) and std/char.lang, in namespace strings (`string` itself is a
+// type keyword, so the namespace is pluralised). Strings are immutable, so
+// transforming functions build a fresh result one character at a time via
+// toString(char).
 
 import "std/char.lang";
+
+namespace strings {
 
 string toUpperStr(string s) {
     string out = "";
     int n = len(s);
     for (int i = 0; i < n; ++i) {
-        out = out + toString(toUpper(s[i]));
+        out = out + toString(chars::toUpper(s[i]));
     }
     return out;
 }
@@ -17,7 +21,7 @@ string toLowerStr(string s) {
     string out = "";
     int n = len(s);
     for (int i = 0; i < n; ++i) {
-        out = out + toString(toLower(s[i]));
+        out = out + toString(chars::toLower(s[i]));
     }
     return out;
 }
@@ -43,11 +47,11 @@ string repeat(string s, int times) {
 string trim(string s) {
     int n = len(s);
     int start = 0;
-    while (start < n && isSpace(s[start])) {
+    while (start < n && chars::isSpace(s[start])) {
         start = start + 1;
     }
     int end = n;
-    while (end > start && isSpace(s[end - 1])) {
+    while (end > start && chars::isSpace(s[end - 1])) {
         end = end - 1;
     }
     return substr(s, start, end);
@@ -91,4 +95,6 @@ string replaceChar(string s, char from, char to) {
 
 bool equalsIgnoreCase(string a, string b) {
     return toLowerStr(a) == toLowerStr(b);
+}
+
 }

@@ -197,18 +197,21 @@ class ExprParser:
 
         if tok.type == TokenType.IDENT:
             self._s.advance()
-            generic = self._try_parse_generic_call(tok)
+            name = tok.value
+            while self._s.match(TokenType.COLONCOLON):
+                name += "::" + self._s.expect(TokenType.IDENT).value
+            generic = self._try_parse_generic_call(name, tok.line, tok.col)
             if generic is not None:
                 return generic
-            return IdentifierExpr(name=tok.value, line=tok.line, col=tok.col)
+            return IdentifierExpr(name=name, line=tok.line, col=tok.col)
 
         raise self._s.error(f"Unexpected token {tok.type.name!r} in expression")
 
-    def _try_parse_generic_call(self, name_tok) -> Optional[Expr]:
-        """After consuming an identifier, attempt to parse an explicit generic
-        call or stack construction: ``name<T, ...>(args)``. Returns the CallExpr
-        on success, or None (restoring the stream) when the ``<`` was an
-        ordinary comparison."""
+    def _try_parse_generic_call(self, name: str, line: int, col: int) -> Optional[Expr]:
+        """After consuming a (possibly qualified) identifier, attempt to parse
+        an explicit generic call or stack construction: ``name<T, ...>(args)``.
+        Returns the CallExpr on success, or None (restoring the stream) when
+        the ``<`` was an ordinary comparison."""
         if not self._s.check(TokenType.LT):
             return None
         mark = self._s.mark()
@@ -222,8 +225,8 @@ class ExprParser:
             self._s.reset(mark)
             return None
         args = self.parse_arg_list()
-        return CallExpr(name=name_tok.value, args=args, type_args=type_args,
-                        line=name_tok.line, col=name_tok.col)
+        return CallExpr(name=name, args=args, type_args=type_args,
+                        line=line, col=col)
 
     def _parse_paren_or_cast(self) -> Expr:
         lparen = self._s.advance()  # consume '('
@@ -233,6 +236,17 @@ class ExprParser:
             is_cast = True
         elif next_tok.type == TokenType.IDENT and self._s.peek(1).type == TokenType.RPAREN:
             is_cast = True
+        elif next_tok.type == TokenType.IDENT and self._s.peek(1).type == TokenType.COLONCOLON:
+            # Qualified cast: `(ns::T)x` / `(ns::T*)x`. Trial-parse the type;
+            # it is a cast only when the whole parenthesis is a type.
+            mark = self._s.mark()
+            try:
+                self._tp.parse_type()
+                is_cast = self._s.check(TokenType.RPAREN)
+            except ParseError:
+                is_cast = False
+            finally:
+                self._s.reset(mark)
 
         if is_cast:
             t = self._tp.parse_type()
@@ -296,12 +310,14 @@ class ExprParser:
 
     def _parse_new(self) -> Expr:
         tok = self._s.advance()  # consume 'new'
-        name_tok = self._s.expect(TokenType.IDENT)
+        name = self._s.expect(TokenType.IDENT).value
+        while self._s.match(TokenType.COLONCOLON):
+            name += "::" + self._s.expect(TokenType.IDENT).value
         type_args = []
         if self._s.check(TokenType.LT):
             type_args = self._tp.parse_type_args()
         args = self.parse_arg_list()
-        return NewExpr(class_name=name_tok.value, args=args, type_args=type_args,
+        return NewExpr(class_name=name, args=args, type_args=type_args,
                        line=tok.line, col=tok.col)
 
     def _parse_postfix(self, left: Expr, right_bp: int) -> Expr:

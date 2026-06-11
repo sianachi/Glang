@@ -1,8 +1,21 @@
 // Demonstrates generics: a List<T> that grows past its initial capacity, used
-// at two different element types in the same program.
+// at two different element types in the same program. A namespaced helper
+// (`seq::total`) takes the generic container as a parameter.
 // Run: python3 main.py run examples/generic_list.lang
 
 import "std/list.lang";
+
+namespace seq {
+
+int total(List<int> xs) {
+    int sum = 0;
+    for (int i = 0; i < xs.length(); ++i) {
+        sum = sum + xs.get(i);
+    }
+    return sum;
+}
+
+}
 
 int main() {
     // Starts at capacity 4, so adding 10 elements forces it to grow.
@@ -14,11 +27,7 @@ int main() {
     print(nums.get(9));       // 81
     print(nums.contains(49)); // true
 
-    int sum = 0;
-    for (int i = 0; i < nums.length(); ++i) {
-        sum = sum + nums.get(i);
-    }
-    print(sum);               // 285
+    print(seq::total(nums));  // 285
 
     nums.removeAt(0);
     print(nums.length());     // 9

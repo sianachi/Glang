@@ -59,9 +59,10 @@ Identifiers start with a letter or underscore, followed by any number of letters
 
 ```
 alloc     bool      break     byte      char      class
-continue  delete    else      enum      extends   false
-float     for       free      if        implements  import
-int       interface new       null      return    static
+const     continue  delete    else      enum      extends
+false     float     fn        for       free      if
+implements  import  int       interface namespace new
+null      private   protected public    return    static
 string    super     this      true      void      while
 ```
 
@@ -749,9 +750,47 @@ import "std/list.lang";   // resolves to <project>/stdlib/list.lang
 import "std/math.lang";
 ```
 
-### 13.2 No namespaces
+### 13.2 Namespaces
 
-All top-level names share a single global namespace in v1. Naming conventions (e.g. `List_create`) are used to avoid collisions.
+Top-level declarations — functions, classes, interfaces, enums, and nested
+namespaces — may be grouped in a `namespace` block. Members are referenced
+from outside with the qualified `ns::name` form:
+
+```c
+namespace geo {
+    class Point {
+        int x;
+        Point(int x) { this.x = x; }
+    }
+    int getX(Point p) { return p.x; }   // sibling reference needs no prefix
+}
+
+int main() {
+    geo::Point p = geo::Point(7);
+    return geo::getX(p);
+}
+```
+
+Resolution rules:
+
+- Inside a namespace, an unqualified name is looked up in the enclosing
+  namespaces innermost-first, then falls back to the global scope and the
+  builtins. Local variables and parameters always shadow namespace members.
+- Outside a namespace, members must be fully qualified (`math::abs(x)`).
+  There is no `using` import (yet).
+- Qualified names work everywhere a name does: types (`geo::Point* p`),
+  construction (`new geo::Point(7)`), casts (`(traffic::Light)1`), enum
+  variants (`traffic::Light.GREEN`), static members (`cfg::Defaults.get()`),
+  generics (`col::Pair<int>`), `extends`/`implements` clauses, and function
+  references (`fn(int) -> int f = math::twice;`).
+- Re-declaring a namespace extends it — in the same file or another file —
+  so a namespace can span multiple modules. Duplicate *members* remain a
+  compile error.
+- `namespace a::b { ... }` is shorthand for nesting `b` inside `a`.
+
+Namespaces compile away before type checking: every member becomes an
+ordinary top-level declaration whose name carries the prefix, so the rest of
+the pipeline (and error messages) see plain qualified names like `math::abs`.
 
 ---
 
@@ -807,17 +846,18 @@ operations, the import system (with a `std/` prefix), function pointers,
 closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
 file-I/O built-ins, **generics** (monomorphized) with a generic standard
 library, the `byte` primitive with `byte[]` blocks and `string`/`byte` interop,
-and the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views. The
+the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views, and
+**namespaces** (section 13.2) with a namespaced standard library. The
 remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
 | Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
 | Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
-| Namespaces           | All top-level names still share one global namespace |
+| `using` declarations | Namespace members must be fully qualified outside their namespace |
 | Exceptions           | Error handling via return values for now           |
-| Garbage collection   | Planned as a pure-GScript standard-library module  |
-| Command-line args    | `main(int argc, string[] argv)`                    |
+| Garbage collection   | Planned as a pure-Glang standard-library module    |
+| Command-line args    | `main(int argc, string[] argv)` — the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
 
 ---
@@ -828,12 +868,17 @@ The bundled standard library lives in `stdlib/` and is imported with the `std/`
 prefix (e.g. `import "std/list.lang";`). The file-I/O built-ins (`readFile`,
 `writeFile`, `fileExists`) are part of the runtime and need no import.
 
+The function modules are wrapped in namespaces — `math`, `chars`, `strings`,
+`io` (the latter three pluralised or shortened because `char` and `string` are
+type keywords) — so their members are called as `math::abs(x)`,
+`chars::isDigit(c)`, and so on. The collection classes remain global.
+
 | Module            | Provides                                                                 |
 |-------------------|--------------------------------------------------------------------------|
-| `std/math.lang`   | `abs`, `fabs`, `min`/`max`, `fmin`/`fmax`, `clamp`, `sign`, `ipow`, `gcd`, `lcm`, `isqrt`, `factorial` |
-| `std/char.lang`   | `isDigit`/`isAlpha`/`isAlnum`/`isSpace`/`isUpper`/`isLower`, `toUpper`/`toLower`, `digitToInt` |
-| `std/string.lang` | `toUpperStr`/`toLowerStr`, `reverse`, `repeat`, `trim`, `padLeft`, `count`, `replaceChar`, `equalsIgnoreCase` |
-| `std/io.lang`     | `appendFile`, `readLineCount` (built on the I/O built-ins)                |
+| `std/math.lang`   | `math::` — `abs`, `fabs`, `min`/`max`, `fmin`/`fmax`, `clamp`, `sign`, `ipow`, `gcd`, `lcm`, `isqrt`, `factorial` |
+| `std/char.lang`   | `chars::` — `isDigit`/`isAlpha`/`isAlnum`/`isSpace`/`isUpper`/`isLower`, `toUpper`/`toLower`, `digitToInt` |
+| `std/string.lang` | `strings::` — `toUpperStr`/`toLowerStr`, `reverse`, `repeat`, `trim`, `padLeft`, `count`, `replaceChar`, `equalsIgnoreCase` |
+| `std/io.lang`     | `io::` — `appendFile`, `readLineCount`, `dieWith` (built on the I/O built-ins) |
 | `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `isEmpty`, `clear` |
 | `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek`, `length`, `isEmpty`                   |
 | `std/queue.lang`  | `Queue<T>` — ring buffer: `enqueue`, `dequeue`, `peek`, `length`, `isEmpty` |

@@ -6,14 +6,18 @@
 //   - private / protected / public members
 //   - private class (usable only inside other class bodies)
 //   - public class (usable anywhere)
+//   - related declarations grouped into namespaces (`data`, `util`,
+//     `geometry`, `shapes`) and referenced with the qualified `ns::Name` form
 //
 // Run with:
 //     python3 main.py run examples/access_const.lang
 
 // -------------------------------------------------------------------------
-// private class — Stat can only be named inside a class body.
-// Holds a single running min/max pair; not part of the public API.
+// namespace data — Stat is a private class: it can only be named inside
+// other class bodies. DataSet wraps it and exposes a clean API.
 // -------------------------------------------------------------------------
+
+namespace data {
 
 private class Stat {
     int lo;
@@ -27,10 +31,6 @@ private class Stat {
         if (v > this.hi) { this.hi = v; }
     }
 }
-
-// -------------------------------------------------------------------------
-// public class — DataSet wraps Stat and exposes a clean API.
-// -------------------------------------------------------------------------
 
 public class DataSet {
     private Stat* stats;
@@ -53,9 +53,13 @@ public class DataSet {
     int size() { return this.count; }
 }
 
+}
+
 // -------------------------------------------------------------------------
-// const parameter: the bounds are read-only inside the function.
+// namespace util — const parameters: the bounds are read-only inside.
 // -------------------------------------------------------------------------
+
+namespace util {
 
 int clamp(const int val, const int lo, const int hi) {
     if (val < lo) { return lo; }
@@ -63,9 +67,14 @@ int clamp(const int val, const int lo, const int hi) {
     return val;
 }
 
+}
+
 // -------------------------------------------------------------------------
-// Immutable point — x and y can only be set in the constructor.
+// namespace geometry — immutable point: x and y can only be set in the
+// constructor.
 // -------------------------------------------------------------------------
+
+namespace geometry {
 
 class Point {
     const int x;
@@ -81,9 +90,13 @@ class Point {
     }
 }
 
+}
+
 // -------------------------------------------------------------------------
-// Access hierarchy: private / protected / public members.
+// namespace shapes — access hierarchy: private / protected / public members.
 // -------------------------------------------------------------------------
+
+namespace shapes {
 
 class Shape {
     private   string kind;
@@ -107,6 +120,8 @@ class Rectangle extends Shape {
     }
 }
 
+}
+
 // -------------------------------------------------------------------------
 // main
 // -------------------------------------------------------------------------
@@ -119,12 +134,12 @@ int main() {
 
     // --- clamp with const params ---
     print("clamp(25, 0, 10):");
-    print(clamp(25, 0, SCALE));
+    print(util::clamp(25, 0, SCALE));
     print("clamp(-3, 0, 10):");
-    print(clamp(-3, 0, SCALE));
+    print(util::clamp(-3, 0, SCALE));
 
     // --- DataSet hides Stat behind private ---
-    DataSet* ds = new DataSet(42);
+    data::DataSet* ds = new data::DataSet(42);
     ds->add(7);
     ds->add(99);
     ds->add(15);
@@ -137,15 +152,15 @@ int main() {
     delete ds;
 
     // --- immutable Point ---
-    Point* p1 = new Point(0, 0);
-    Point* p2 = new Point(3, 4);
+    geometry::Point* p1 = new geometry::Point(0, 0);
+    geometry::Point* p2 = new geometry::Point(3, 4);
     print("manhattan distance (0,0) to (3,4):");
     print(p1->manhattan(p2->x, p2->y));
     delete p1;
     delete p2;
 
     // --- access modifiers on Shape hierarchy ---
-    Rectangle* r = new Rectangle("blue", 6, 7);
+    shapes::Rectangle* r = new shapes::Rectangle("blue", 6, 7);
     print("color (public):");
     print(r->get_color());
     print("area (protected, via subclass method):");

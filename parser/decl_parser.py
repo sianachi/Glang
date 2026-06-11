@@ -11,7 +11,7 @@ try:
     from .ast_nodes import (
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant,
+        EnumDecl, EnumVariant, NamespaceDecl,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -23,7 +23,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant,
+        EnumDecl, EnumVariant, NamespaceDecl,
     )
 
 
@@ -66,6 +66,8 @@ class DeclParser:
         return ImportDecl(path=path_tok.value, line=tok.line, col=tok.col)
 
     def parse_top_level_decl(self) -> Decl:
+        if self._s.check(TokenType.KW_NAMESPACE):
+            return self._parse_namespace()
         access = "public"
         if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
             access = self._s.advance().value
@@ -76,6 +78,29 @@ class DeclParser:
         if self._s.check(TokenType.KW_ENUM):
             return self._parse_enum()
         return self._parse_function()
+
+    # ------------------------------------------------------------------
+    # Namespaces
+    # ------------------------------------------------------------------
+
+    def _parse_namespace(self) -> NamespaceDecl:
+        tok = self._s.advance()  # consume 'namespace'
+        name = self._parse_qualified_name()
+        self._s.expect(TokenType.LBRACE)
+        declarations: List[Decl] = []
+        while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            if self._s.check(TokenType.KW_IMPORT):
+                raise self._s.error("imports are not allowed inside a namespace")
+            declarations.append(self.parse_top_level_decl())
+        self._s.expect(TokenType.RBRACE)
+        return NamespaceDecl(name=name, declarations=declarations,
+                             line=tok.line, col=tok.col)
+
+    def _parse_qualified_name(self) -> str:
+        name = self._s.expect(TokenType.IDENT).value
+        while self._s.match(TokenType.COLONCOLON):
+            name += "::" + self._s.expect(TokenType.IDENT).value
+        return name
 
     # ------------------------------------------------------------------
     # Enums
@@ -139,13 +164,13 @@ class DeclParser:
 
         superclass: Optional[str] = None
         if self._s.match(TokenType.KW_EXTENDS):
-            superclass = self._s.expect(TokenType.IDENT).value
+            superclass = self._parse_qualified_name()
 
         interfaces: List[str] = []
         if self._s.match(TokenType.KW_IMPLEMENTS):
-            interfaces.append(self._s.expect(TokenType.IDENT).value)
+            interfaces.append(self._parse_qualified_name())
             while self._s.match(TokenType.COMMA):
-                interfaces.append(self._s.expect(TokenType.IDENT).value)
+                interfaces.append(self._parse_qualified_name())
 
         static_fields, fields, constructor, destructor, methods = \
             self._parse_class_body(name_tok.value)

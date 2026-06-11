@@ -1,18 +1,30 @@
 // Demonstrates printErr(): writes to stderr while print() writes to stdout.
 // The two streams are independent — printErr lines don't appear in stdout
 // and won't interfere with structured output a compiler sends to a file.
+// The diagnostic helpers live in a `diag` namespace.
 // Run: python3 main.py run examples/stderr_demo.lang
+
+namespace diag {
+
+void warn(string msg) {
+    printErr("stderr: " + msg);
+}
+
+// A non-fatal diagnostic with a formatted message.
+void noteUnusedVariable(int lineNum) {
+    printErr("stderr: note at line " + toString(lineNum) + " — unused variable");
+}
+
+}
 
 int main() {
     print("stdout: starting");
 
-    printErr("stderr: warning — low memory");
+    diag::warn("warning — low memory");
 
     print("stdout: processing");
 
-    // Simulate a non-fatal diagnostic with a formatted message.
-    int lineNum = 42;
-    printErr("stderr: note at line " + toString(lineNum) + " — unused variable");
+    diag::noteUnusedVariable(42);
 
     print("stdout: done");
     return 0;

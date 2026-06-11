@@ -1,9 +1,12 @@
 // Demonstrates MemoryOwner<T>: an owning handle for a heap block, with both
 // release styles — explicit dispose() for value handles, and delete (which
-// runs the ~MemoryOwner destructor) for heap handles.
+// runs the ~MemoryOwner destructor) for heap handles. The value-style helper
+// lives in an `owners` namespace.
 // Run: python3 main.py run examples/memory_owner_demo.lang
 
 import "std/memory.lang";
+
+namespace owners {
 
 // Fill an owner with a running sum and return the total.
 int sumTo(int n) {
@@ -17,8 +20,10 @@ int sumTo(int n) {
     return total;
 }
 
+}
+
 int main() {
-    print(sumTo(5));          // 15   (1+2+3+4+5)
+    print(owners::sumTo(5));  // 15   (1+2+3+4+5)
 
     // Heap style: new + delete; the destructor frees the backing block.
     MemoryOwner<byte>* buf = new MemoryOwner<byte>(3);

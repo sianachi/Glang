@@ -8,8 +8,10 @@ imports, and concatenates every file's top-level declarations into one
 ``Program``.
 
 The merged program is then handed to the existing analyser and interpreter
-unchanged. Glang has a single global namespace (spec section 12), so merging
-declarations is all that import resolution requires.
+unchanged. Top-level declarations either live in the global scope or inside
+``namespace`` blocks that the analyser flattens into qualified names (spec
+section 13.2), so merging declarations is all that import resolution
+requires — namespaces re-declared across files extend each other naturally.
 """
 
 from __future__ import annotations

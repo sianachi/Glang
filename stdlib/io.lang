@@ -1,8 +1,9 @@
 // std/io.lang — higher-level file helpers built on the interpreter's I/O
-// builtins (readFile, writeFile, fileExists). Those builtins are always
-// available without importing anything; this module adds conveniences on top
-// of them with distinct names (a same-named wrapper would just be shadowed by
-// the builtin at every call site).
+// builtins (readFile, writeFile, fileExists), in namespace io. The builtins
+// are always available without importing anything; this module adds
+// conveniences on top of them.
+
+namespace io {
 
 // Append `text` to the file at `path`, creating it if it does not yet exist.
 void appendFile(string path, string text) {
@@ -35,8 +36,10 @@ int readLineCount(string path) {
 }
 
 // Print `msg` to stderr then exit with `code`. Useful as a one-liner for
-// fatal compiler errors: dieWith("unexpected token at line 5", 1);
+// fatal compiler errors: io::dieWith("unexpected token at line 5", 1);
 void dieWith(string msg, int code) {
     printErr(msg);
     exit(code);
+}
+
 }

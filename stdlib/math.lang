@@ -1,7 +1,9 @@
-// std/math.lang — integer and float math helpers.
+// std/math.lang — integer and float math helpers, in namespace math.
 //
 // Glang has no ternary operator and its ordering comparisons work on int/float
 // only, so every function below is plain if/else over numeric values.
+
+namespace math {
 
 int abs(int x) {
     if (x < 0) { return -x; }
@@ -89,4 +91,6 @@ int factorial(int n) {
         result = result * i;
     }
     return result;
+}
+
 }

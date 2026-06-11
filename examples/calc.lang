@@ -1,4 +1,5 @@
-// calc.lang — a basic calculator in Glang.
+// calc.lang — a basic calculator in Glang, with the operations grouped in a
+// `calc` namespace and called via the qualified `calc::op` form.
 //
 // Run it with:
 //     python main.py run calc.lang
@@ -6,6 +7,8 @@
 // Note: v1 has no stdin/argv support, so the operands are set in main().
 // `print` takes one primitive value, and there is no int -> string
 // conversion, so labels and results are printed on separate lines.
+
+namespace calc {
 
 int add(int a, int b)      { return a + b; }
 int subtract(int a, int b) { return a - b; }
@@ -33,6 +36,8 @@ float fdivide(float a, float b) {
     return a / b;
 }
 
+}
+
 int main() {
     int x = 12;
     int y = 5;
@@ -40,25 +45,25 @@ int main() {
     print("x = 12, y = 5");
 
     print("x + y =");
-    print(add(x, y));
+    print(calc::add(x, y));
 
     print("x - y =");
-    print(subtract(x, y));
+    print(calc::subtract(x, y));
 
     print("x * y =");
-    print(multiply(x, y));
+    print(calc::multiply(x, y));
 
     print("x / y =");
-    print(divide(x, y));
+    print(calc::divide(x, y));
 
     print("x % y =");
-    print(modulo(x, y));
+    print(calc::modulo(x, y));
 
     print("x ^ 3 =");
-    print(power(x, 3));
+    print(calc::power(x, 3));
 
     print("10.0 / 4.0 =");
-    print(fdivide(10.0, 4.0));
+    print(calc::fdivide(10.0, 4.0));
 
     return 0;
 }

@@ -11,10 +11,10 @@ int main() {
 
     writeFile(path, "first\nsecond\n");
     print(fileExists(path));      // true
-    print(readLineCount(path));   // 2
+    print(io::readLineCount(path));   // 2
 
-    appendFile(path, "third\n");
-    print(readLineCount(path));   // 3
+    io::appendFile(path, "third\n");
+    print(io::readLineCount(path));   // 3
     print(readFile(path));        // first / second / third (3 lines)
 
     print(fileExists("does_not_exist.txt"));  // false

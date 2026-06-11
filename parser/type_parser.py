@@ -59,13 +59,16 @@ class TypeParser:
             )
         elif tok.type == TokenType.IDENT:
             self._s.advance()
+            name = tok.value
+            while self._s.match(TokenType.COLONCOLON):
+                name += "::" + self._s.expect(TokenType.IDENT).value
             if self._s.check(TokenType.LT):
                 node = GenericType(
-                    name=tok.value, type_args=self.parse_type_args(),
+                    name=name, type_args=self.parse_type_args(),
                     line=tok.line, col=tok.col,
                 )
             else:
-                node = NamedType(name=tok.value, line=tok.line, col=tok.col)
+                node = NamedType(name=name, line=tok.line, col=tok.col)
         else:
             raise self._s.error(f"Expected type, got {tok.type.name!r}")
 

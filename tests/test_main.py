@@ -98,8 +98,8 @@ class TestFileIO:
             'import "std/io.lang";\n'
             'int main() {\n'
             '    writeFile("log.txt", "a\\n");\n'
-            '    appendFile("log.txt", "b\\n");\n'
-            '    print(readLineCount("log.txt"));\n'
+            '    io::appendFile("log.txt", "b\\n");\n'
+            '    print(io::readLineCount("log.txt"));\n'
             '    return 0;\n'
             '}\n',
         )

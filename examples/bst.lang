@@ -1,13 +1,18 @@
-// bst.lang — binary search tree using self-referential class pointers.
+// bst.lang — binary search tree using self-referential class pointers,
+// packaged in a `collections` namespace.
 //
 // Demonstrates:
 //   - a class with fields of its own pointer type (`Node* left`, `Node* right`)
 //   - recursive helper methods that accept and return `Node*`
 //   - building and searching a tree
 //   - recursive cleanup through a destructor
+//   - namespaced classes: inside `collections` the tree refers to `Node`
+//     unqualified; main names the tree as `collections::BinarySearchTree`
 //
 // Run with:
 //     python3 main.py run examples/bst.lang
+
+namespace collections {
 
 private class Node {
     int value;
@@ -147,8 +152,10 @@ public class BinarySearchTree {
     }
 }
 
+}
+
 int main() {
-    BinarySearchTree* tree = new BinarySearchTree();
+    collections::BinarySearchTree* tree = new collections::BinarySearchTree();
 
     tree->insert(8);
     tree->insert(3);

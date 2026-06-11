@@ -1,8 +1,18 @@
 // Demonstrates Span<T>: a non-owning, bounds-checked view over a contiguous
 // block, plus zero-copy sub-slicing that aliases the same backing storage.
+// The slicing helper lives in a `views` namespace.
 // Run: python3 main.py run examples/span_demo.lang
 
 import "std/memory.lang";
+
+namespace views {
+
+// The middle window [2, 6) of a span — still a zero-copy alias.
+Span<int> middle(Span<int> s) {
+    return s.slice(2, 6);
+}
+
+}
 
 int main() {
     // Own a block of 8 ints: 0, 10, 20, ... 70.
@@ -17,7 +27,7 @@ int main() {
     print(view.get(5));     // 50
 
     // A sub-view [2, 6): elements 20, 30, 40, 50.
-    Span<int> mid = view.slice(2, 6);
+    Span<int> mid = views::middle(view);
     print(mid.length());    // 4
     print(mid.get(0));      // 20
     print(mid.get(3));      // 50

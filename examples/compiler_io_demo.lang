@@ -1,17 +1,26 @@
 // Demonstrates the three compiler-I/O builtins: getArgCount/getArg,
-// printErr, and exit.
+// printErr, and exit — with the arg-echo helper in a `cli` namespace.
 // Run: python3 main.py run examples/compiler_io_demo.lang
 // Run with args: python3 main.py run examples/compiler_io_demo.lang Alice
+
+namespace cli {
+
+// Print the first argument, then terminate immediately; code after the
+// exit() call is never reached — not even in main.
+void echoFirstArgAndExit() {
+    print(getArg(0));
+    exit(0);
+}
+
+}
 
 int main() {
     print(getArgCount());          // 0 when invoked with no extra args
 
     printErr("compiler_io_demo: stderr line");  // goes to stderr
 
-    // exit() terminates immediately; code after it is never reached.
     if (getArgCount() > 0) {
-        print(getArg(0));
-        exit(0);
+        cli::echoFirstArgAndExit();
     }
 
     return 0;

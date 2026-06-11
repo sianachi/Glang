@@ -424,7 +424,9 @@ class Lexer:
         if ch == ";": return Token(TokenType.SEMICOLON, ";",  line, col)
         if ch == ",": return Token(TokenType.COMMA,     ",",  line, col)
         if ch == ".": return Token(TokenType.DOT,       ".",  line, col)
-        if ch == ":": return Token(TokenType.COLON,     ":",  line, col)
+        if ch == ":":
+            if self._match(":"): return Token(TokenType.COLONCOLON, "::", line, col)
+            return Token(TokenType.COLON, ":", line, col)
 
         raise LexError(f"unexpected character {ch!r}", line, col)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from parser.ast_nodes import Program
 from analyser.symbol_table import GlobalEnv
 from analyser.monomorphize import Monomorphizer
+from analyser.namespace_resolver import NamespaceResolver
 from analyser.pass1_collector import Pass1Collector
 from analyser.pass2_checker import Pass2Checker
 
@@ -12,7 +13,11 @@ class Analyser:
         self.global_env = GlobalEnv()
 
     def analyse(self, program: Program) -> GlobalEnv:
-        # Resolve generics first: rewrites templates and uses into concrete,
+        # Flatten namespaces first: members become ordinary top-level
+        # declarations with qualified names ("math::abs"), so generics and
+        # everything after run completely unaware of namespaces.
+        NamespaceResolver().run(program)
+        # Resolve generics next: rewrites templates and uses into concrete,
         # mangled instantiations in place, so the rest of the pipeline never
         # sees a type parameter or a GenericType.
         Monomorphizer().run(program)

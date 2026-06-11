@@ -1,29 +1,44 @@
 // Demonstrates the low-level memory primitives that back the containers:
 // alloc(T, n) for a contiguous block and p[i] indexing through a pointer.
+// The block helpers live in a `blocks` namespace.
 // Run: python3 main.py run examples/dynamic_alloc.lang
 
-int main() {
-    int n = 8;
+namespace blocks {
+
+// A heap block holding the first n Fibonacci numbers.
+int* fibonacci(int n) {
     int* fib = alloc(int, n);
     fib[0] = 0;
     fib[1] = 1;
     for (int i = 2; i < n; ++i) {
         fib[i] = fib[i - 1] + fib[i - 2];
     }
+    return fib;
+}
+
+// Reverse a block in place through the pointer.
+void reverse(int* p, int n) {
+    int lo = 0;
+    int hi = n - 1;
+    while (lo < hi) {
+        int tmp = p[lo];
+        p[lo] = p[hi];
+        p[hi] = tmp;
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+}
+
+}
+
+int main() {
+    int n = 8;
+    int* fib = blocks::fibonacci(n);
     for (int i = 0; i < n; ++i) {
         print(fib[i]);   // 0 1 1 2 3 5 8 13
     }
 
-    // Reverse the block in place through the pointer.
-    int lo = 0;
-    int hi = n - 1;
-    while (lo < hi) {
-        int tmp = fib[lo];
-        fib[lo] = fib[hi];
-        fib[hi] = tmp;
-        lo = lo + 1;
-        hi = hi - 1;
-    }
+    blocks::reverse(fib, n);
     print(fib[0]);       // 13
     free(fib);
     return 0;

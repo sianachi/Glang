@@ -365,6 +365,27 @@ class InterfaceDecl(Decl):
     col: int = 0
 
 
+@dataclass
+class NamespaceDecl(Decl):
+    """A namespace block grouping top-level declarations under a qualified
+    prefix.
+
+    The name may itself be qualified (``namespace a::b { ... }``). Namespaces
+    never reach Pass1: the NamespaceResolver flattens every member into an
+    ordinary top-level declaration whose name is prefixed with the namespace
+    path (``math::abs``) and rewrites references accordingly. Re-declaring a
+    namespace (in the same or another file) extends it.
+
+    Example:
+      namespace math { int abs(int x) { ... } }
+      →  NamespaceDecl("math", [FunctionDecl("abs", ...)])
+    """
+    name: str
+    declarations: List['Decl']
+    line: int = 0
+    col: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Statements
 # ---------------------------------------------------------------------------

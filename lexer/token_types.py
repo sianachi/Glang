@@ -52,6 +52,8 @@ class TokenType(Enum):
     KW_FN        = auto()  # fn
     # Enum
     KW_ENUM      = auto()  # enum
+
+    KW_NAMESPACE = auto()  # namespace
     # Qualifiers / visibility
     KW_CONST     = auto()  # const
     KW_PRIVATE   = auto()  # private
@@ -115,6 +117,7 @@ class TokenType(Enum):
     DOT       = auto()  # .
     ARROW     = auto()  # ->
     COLON     = auto()  # :
+    COLONCOLON = auto() # ::
 
     # --- Special ---
     EOF = auto()  # end of input
@@ -152,6 +155,7 @@ KEYWORDS: dict[str, TokenType] = {
     "import":     TokenType.KW_IMPORT,
     "fn":         TokenType.KW_FN,
     "enum":       TokenType.KW_ENUM,
+    "namespace":  TokenType.KW_NAMESPACE,
     "const":      TokenType.KW_CONST,
     "private":    TokenType.KW_PRIVATE,
     "protected":  TokenType.KW_PROTECTED,

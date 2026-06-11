@@ -4,15 +4,15 @@
 import "std/math.lang";
 
 int main() {
-    print(abs(-7));            // 7
-    print(min(3, 9));          // 3
-    print(max(3, 9));          // 9
-    print(clamp(42, 0, 10));   // 10
-    print(sign(-5));           // -1
-    print(ipow(3, 4));         // 81
-    print(gcd(54, 24));        // 6
-    print(lcm(4, 6));          // 12
-    print(isqrt(99));          // 9
-    print(factorial(6));       // 720
+    print(math::abs(-7));            // 7
+    print(math::min(3, 9));          // 3
+    print(math::max(3, 9));          // 9
+    print(math::clamp(42, 0, 10));   // 10
+    print(math::sign(-5));           // -1
+    print(math::ipow(3, 4));         // 81
+    print(math::gcd(54, 24));        // 6
+    print(math::lcm(4, 6));          // 12
+    print(math::isqrt(99));          // 9
+    print(math::factorial(6));       // 720
     return 0;
 }

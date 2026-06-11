@@ -1,9 +1,19 @@
 // Demonstrates a generic Map<K, V> plus Stack<T> and Queue<T> working together.
+// The stock lookup lives in a `shop` namespace: present items report their
+// count, missing items report -1.
 // Run: python3 main.py run examples/generic_map.lang
 
 import "std/map.lang";
 import "std/stack.lang";
 import "std/queue.lang";
+
+namespace shop {
+
+int stockOf(Map<string, int> inv, string item) {
+    return inv.getOr(item, -1);
+}
+
+}
 
 int main() {
     Map<string, int> inventory = Map<string, int>();
@@ -11,8 +21,8 @@ int main() {
     inventory.set("pears", 2);
     inventory.set("apples", 8);     // overwrite
     print(inventory.length());      // 2
-    print(inventory.getOr("apples", 0)); // 8
-    print(inventory.getOr("kiwis", -1)); // -1
+    print(shop::stockOf(inventory, "apples")); // 8
+    print(shop::stockOf(inventory, "kiwis"));  // -1
     print(inventory.has("pears"));  // true
     inventory.remove("pears");
     print(inventory.has("pears"));  // false

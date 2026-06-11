@@ -1,8 +1,11 @@
-// std/char.lang — character classification and conversion.
+// std/char.lang — character classification and conversion, in namespace
+// chars (`char` itself is a type keyword, so the namespace is pluralised).
 //
 // Glang's ordering operators (< <= > >=) accept int/float only, so chars are
 // compared by first casting to their integer code point. The relevant ASCII
 // code points: '0'..'9' = 48..57, 'A'..'Z' = 65..90, 'a'..'z' = 97..122.
+
+namespace chars {
 
 bool isDigit(char c) {
     int code = (int) c;
@@ -55,4 +58,6 @@ int digitToInt(char c) {
         return (int) c - 48;
     }
     return -1;
+}
+
 }

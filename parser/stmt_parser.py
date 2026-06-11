@@ -8,7 +8,7 @@ try:
     from ..errors.errors import ParseError
     from .ast_nodes import (
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        ForStmt, BreakStmt, ContinueStmt, ReturnStmt,
+        ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -18,7 +18,7 @@ except ImportError:
     from errors.errors import ParseError  # type: ignore
     from parser.ast_nodes import (  # type: ignore
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        ForStmt, BreakStmt, ContinueStmt, ReturnStmt,
+        ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
     )
 
 _TYPE_KWS = {
@@ -98,6 +98,9 @@ class StmtParser:
         # comparison statement (`a < b > c;`) is not mistaken for a declaration.
         if self._s.peek(1).type == TokenType.LT:
             return self._looks_like_generic_var_decl()
+        # Qualified type declaration: `ns::Color c = ...`, `ns::List<int>* p = ...`.
+        if self._s.peek(1).type == TokenType.COLONCOLON:
+            return self._looks_like_qualified_var_decl()
         # User-defined pointer type: `Dog* d = ...`, `Dog** d = ...`.
         # We require the trailing `=` to disambiguate from a multiplication
         # expression statement (`a * b;`): `IDENT STAR+ IDENT =` is never a
@@ -122,6 +125,27 @@ class StmtParser:
                 self._s.check(TokenType.IDENT)
                 and self._s.peek(1).type == TokenType.ASSIGN
             )
+        except ParseError:
+            return False
+        finally:
+            self._s.reset(mark)
+            self._tp._pending_gt = saved_pending
+
+    def _looks_like_qualified_var_decl(self) -> bool:
+        """Disambiguate `ns::Type x = ...` from an expression statement that
+        starts with a qualified name (`ns::fn();`, `ns::x * y;`). Trial-parse
+        a type; it is a declaration only when a variable name follows — and,
+        for non-plain types, an `=` too, since `ns::x * y;` is a discarded
+        multiplication, never a declaration."""
+        mark = self._s.mark()
+        saved_pending = self._tp._pending_gt
+        try:
+            t = self._tp.parse_type()
+            if not self._s.check(TokenType.IDENT):
+                return False
+            if isinstance(t, NamedType):
+                return True
+            return self._s.peek(1).type == TokenType.ASSIGN
         except ParseError:
             return False
         finally:

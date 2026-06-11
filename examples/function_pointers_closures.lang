@@ -1,7 +1,9 @@
-// function_pointers_closures.lang — first-class callables in Glang.
+// function_pointers_closures.lang — first-class callables in Glang, grouped
+// in a `scoring` namespace.
 //
 // Demonstrates:
-//   - storing free functions in fn(...) -> ... variables
+//   - storing free functions in fn(...) -> ... variables, including
+//     namespaced ones (`fn(int, int) -> int op = scoring::add;`)
 //   - passing function pointers as parameters
 //   - returning closures from factory functions
 //   - closures capturing outer variables by value
@@ -9,6 +11,8 @@
 //
 // Run with:
 //     python3 main.py run examples/function_pointers_closures.lang
+
+namespace scoring {
 
 int add(int a, int b) {
     return a + b;
@@ -60,28 +64,30 @@ int evaluate(
     return 0;
 }
 
+}
+
 int main() {
     print("free function pointer:");
-    fn(int, int) -> int op = add;
-    print(combine(40, 2, op));         // 42
+    fn(int, int) -> int op = scoring::add;
+    print(scoring::combine(40, 2, op));         // 42
 
-    op = multiply;
-    print(combine(6, 7, op));          // 42
+    op = scoring::multiply;
+    print(scoring::combine(6, 7, op));          // 42
 
     print("direct call of returned closure:");
-    print((make_bonus(5))(10));        // 15
+    print((scoring::make_bonus(5))(10));        // 15
 
     int threshold = 70;
-    fn(int) -> bool eligible = make_minimum_filter(threshold);
+    fn(int) -> bool eligible = scoring::make_minimum_filter(threshold);
     threshold = 95;                    // eligible still uses captured 70
 
-    fn(int) -> int curve = make_bonus(12);
-    fn() -> int accepted_count = make_counter();
+    fn(int) -> int curve = scoring::make_bonus(12);
+    fn() -> int accepted_count = scoring::make_counter();
 
     print("accepted applicants:");
-    int ana = evaluate("Ana", 61, curve, eligible, accepted_count);  // 73, accepted
-    int bo = evaluate("Bo", 55, curve, eligible, accepted_count);    // 67, rejected
-    int cy = evaluate("Cy", 88, curve, eligible, accepted_count);    // 100, accepted
+    int ana = scoring::evaluate("Ana", 61, curve, eligible, accepted_count);  // 73, accepted
+    int bo = scoring::evaluate("Bo", 55, curve, eligible, accepted_count);    // 67, rejected
+    int cy = scoring::evaluate("Cy", 88, curve, eligible, accepted_count);    // 100, accepted
 
     print("accepted count:");
     print(cy);                         // 2

@@ -1,13 +1,18 @@
-// operator_overloading.lang — ergonomic class operators in Glang.
+// operator_overloading.lang — ergonomic class operators in Glang, with the
+// vector type living in a `vec` namespace.
 //
 // Demonstrates:
 //   - binary operator overloads on class values
 //   - compound assignment through an overloaded binary operator
 //   - operator== providing != automatically
 //   - read-only operator[] indexing
+//   - operators working on a namespaced class (`vec::Vec2`); the overloads
+//     need no qualification at the use site — `a + b` just works
 //
 // Run with:
 //     python3 main.py run examples/operator_overloading.lang
+
+namespace vec {
 
 class Vec2 {
     int x;
@@ -46,13 +51,15 @@ class Vec2 {
     }
 }
 
-int main() {
-    Vec2 a = Vec2(3, 4);
-    Vec2 b = Vec2(1, 2);
+}
 
-    Vec2 sum = a + b;       // Vec2(4, 6)
-    Vec2 diff = a - b;      // Vec2(2, 2)
-    a += b;                 // a now matches sum
+int main() {
+    vec::Vec2 a = vec::Vec2(3, 4);
+    vec::Vec2 b = vec::Vec2(1, 2);
+
+    vec::Vec2 sum = a + b;       // Vec2(4, 6)
+    vec::Vec2 diff = a - b;      // Vec2(2, 2)
+    a += b;                      // a now matches sum
 
     print("sum:");
     print(sum[0]);          // operator[](0) -> x
