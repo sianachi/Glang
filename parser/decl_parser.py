@@ -106,7 +106,7 @@ class DeclParser:
         tok = self._s.advance()  # consume 'using'
         if self._s.check(TokenType.LPAREN):
             raise self._s.error(
-                "'using (...)' resource blocks are reserved for a future release"
+                "'using (...)' is a statement; it must appear inside a function body"
             )
         if self._s.match(TokenType.KW_NAMESPACE):
             name = self._parse_qualified_name()

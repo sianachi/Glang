@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List
 
 from parser.ast_nodes import (
-    Stmt, ReturnStmt, IfStmt, WhileStmt, ForStmt, Block,
+    Stmt, ReturnStmt, IfStmt, WhileStmt, ForStmt, Block, UsingStmt,
 )
 
 
@@ -26,6 +26,11 @@ def _stmt_always_returns(stmt: Stmt) -> bool:
 
     if isinstance(stmt, Block):
         return always_returns(stmt.stmts)
+
+    if isinstance(stmt, UsingStmt):
+        # The resource is disposed before the return propagates, so a body
+        # that always returns makes the using statement always return.
+        return always_returns(stmt.body.stmts)
 
     if isinstance(stmt, (WhileStmt, ForStmt)):
         return False

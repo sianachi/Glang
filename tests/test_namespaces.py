@@ -409,10 +409,12 @@ class TestUsing:
         with pytest.raises(ParseError):
             parse("namespace a { using namespace b; }")
 
-    def test_using_paren_form_reserved(self):
+    def test_using_paren_form_not_allowed_at_top_level(self):
+        # `using (...)` is the resource-block statement; at the top level it
+        # gets a dedicated error pointing into function bodies.
         with pytest.raises(ParseError) as exc:
             parse("int main() { return 0; } using (x) { }")
-        assert "reserved" in str(exc.value)
+        assert "inside a function body" in str(exc.value)
 
     def test_ambiguous_member_rejected(self):
         err("""

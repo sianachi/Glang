@@ -1,0 +1,13 @@
+open notes.txt
+reading notes
+close notes.txt
+open missing.txt
+close missing.txt
+-1
+10
+99
+open log1
+close log1
+open log2
+close log2
+done

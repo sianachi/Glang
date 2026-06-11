@@ -28,6 +28,7 @@ from parser.ast_nodes import (
     ConstructorDecl, DestructorDecl, MethodDecl,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt, ReturnStmt,
+    UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -204,6 +205,9 @@ class Monomorphizer:
             self._t_stmt(s.init, m)
             self._t_expr(s.condition, m)
             self._t_post(s.post, m)
+            self._t_block(s.body, m)
+        elif isinstance(s, UsingStmt):
+            self._t_stmt(s.decl, m)
             self._t_block(s.body, m)
         elif isinstance(s, ReturnStmt):
             if s.value is not None:

@@ -1,0 +1,71 @@
+// Demonstrates `using` resource blocks: deterministic scope-exit disposal,
+// C#-style. The resource declared in the header is released when control
+// leaves the block — normally or via return/break/continue:
+//   - class pointers get `delete` semantics (destructor chain, then free)
+//   - raw pointers are freed
+//   - class values have their dispose() method called
+// Run: python3 main.py run examples/using_blocks.lang
+
+import "std/memory.lang";
+
+namespace fs {
+
+// A pretend file handle with an observable destructor.
+class File {
+    string path;
+    File(string path) {
+        this.path = path;
+        print("open " + this.path);
+    }
+    ~File() {
+        print("close " + this.path);
+    }
+}
+
+}
+
+using fs::File;
+
+// The destructor runs before an early return propagates.
+int countLines(string path) {
+    using (File* f = new File(path)) {
+        if (path == "missing.txt") {
+            return -1;       // close runs first
+        }
+        return 3;            // close runs first
+    }
+}
+
+int main() {
+    // Class pointer: delete semantics at the closing brace.
+    using (File* f = new File("notes.txt")) {
+        print("reading notes");
+    }
+
+    // Early return still disposes.
+    print(countLines("missing.txt"));
+
+    // Class value: dispose() is called — MemoryOwner frees its block.
+    int total = 0;
+    using (MemoryOwner<int> o = MemoryOwner<int>(4)) {
+        for (int i = 0; i < 4; ++i) { o.set(i, i + 1); }
+        for (int i = 0; i < 4; ++i) { total = total + o.get(i); }
+    }
+    print(total);            // 10
+
+    // Raw pointer: freed at the closing brace.
+    using (int* p = alloc(int, 8)) {
+        p[0] = 99;
+        print(p[0]);
+    }
+
+    // break disposes the current iteration's resource before leaving.
+    for (int i = 1; i <= 3; ++i) {
+        using (File* log = new File("log" + toString(i))) {
+            if (i == 2) { break; }
+        }
+    }
+
+    print("done");
+    return 0;
+}

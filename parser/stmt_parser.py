@@ -9,6 +9,7 @@ try:
     from .ast_nodes import (
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
+        UsingStmt,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -19,6 +20,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         ForStmt, BreakStmt, ContinueStmt, ReturnStmt, NamedType,
+        UsingStmt,
     )
 
 _TYPE_KWS = {
@@ -64,6 +66,8 @@ class StmtParser:
             return self._parse_for()
         if tok.type == TokenType.KW_RETURN:
             return self._parse_return()
+        if tok.type == TokenType.KW_USING:
+            return self._parse_using()
         if tok.type == TokenType.KW_BREAK:
             self._s.advance()
             self._s.expect(TokenType.SEMICOLON)
@@ -227,6 +231,29 @@ class StmtParser:
         body = self.parse_block()
         return ForStmt(init=init, condition=cond, post=post, body=body,
                        line=tok.line, col=tok.col)
+
+    def _parse_using(self) -> UsingStmt:
+        tok = self._s.advance()  # consume 'using'
+        if not self._s.check(TokenType.LPAREN):
+            raise self._s.error(
+                "expected '(' after 'using' "
+                "(namespace imports belong at the top level of a file)"
+            )
+        self._s.expect(TokenType.LPAREN)
+        type_node = self._tp.parse_type()
+        name_tok = self._s.expect(TokenType.IDENT)
+        if not self._s.check(TokenType.ASSIGN):
+            raise self._s.error("'using' resource requires an initialiser")
+        self._s.expect(TokenType.ASSIGN)
+        init = self._ep.parse_expr()
+        self._s.expect(TokenType.RPAREN)
+        body = self.parse_block()
+        # The resource variable is implicitly const, as in C#.
+        decl = VarDecl(
+            name=name_tok.value, type=type_node, initializer=init,
+            is_const=True, line=name_tok.line, col=name_tok.col,
+        )
+        return UsingStmt(decl=decl, body=body, line=tok.line, col=tok.col)
 
     def _parse_return(self) -> ReturnStmt:
         tok = self._s.advance()  # consume 'return'

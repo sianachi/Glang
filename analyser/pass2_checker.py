@@ -6,7 +6,7 @@ from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
-    ReturnStmt, BreakStmt, ContinueStmt,
+    ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -321,6 +321,14 @@ class Pass2Checker:
             self._in_loop = saved_loop
             self._scope = saved_scope
 
+        elif isinstance(stmt, UsingStmt):
+            saved_scope = self._scope
+            self._scope = self._scope.child()
+            self._check_stmt(stmt.decl)
+            self._validate_disposable(stmt.decl.type, stmt.line, stmt.col)
+            self._check_block(stmt.body)
+            self._scope = saved_scope
+
         elif isinstance(stmt, ReturnStmt):
             rt = self._return_type
             rt_name = rt.name if isinstance(rt, NamedType) else None
@@ -354,6 +362,27 @@ class Pass2Checker:
         else:
             # bare expression statement
             self._check_expr(stmt)
+
+    def _validate_disposable(self, t: TypeNode, line: int, col: int) -> None:
+        """A `using` resource must have a deterministic release action:
+        pointers are deleted/freed; class values need a dispose() method."""
+        if isinstance(t, PointerType):
+            return
+        if isinstance(t, NamedType) and self._env.is_class(t.name):
+            info = self._env.classes[t.name]
+            dispose = info.instance_methods.get("dispose")
+            if dispose is not None and len(dispose.params) == 0:
+                return
+            raise TypeError(
+                f"'using' value of class '{t.name}' needs a zero-argument "
+                f"dispose() method",
+                line, col,
+            )
+        raise TypeError(
+            f"'using' requires a pointer or a class value with dispose(), "
+            f"got '{type_str(t)}'",
+            line, col,
+        )
 
     # ------------------------------------------------------------------
     # Expressions

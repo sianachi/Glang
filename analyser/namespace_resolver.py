@@ -41,6 +41,7 @@ from parser.ast_nodes import (
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt, ReturnStmt,
+    UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -317,6 +318,11 @@ class NamespaceResolver:
             self._r_stmt(s.init, p)
             self._r_expr(s.condition, p)
             self._r_post(s.post, p)
+            self._r_block(s.body, p)
+            self._scopes.pop()
+        elif isinstance(s, UsingStmt):
+            self._scopes.append(set())
+            self._r_stmt(s.decl, p)
             self._r_block(s.body, p)
             self._scopes.pop()
         elif isinstance(s, ReturnStmt):

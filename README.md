@@ -516,7 +516,48 @@ The language has no ownership tracking. By convention:
 - A function that receives a pointer does not own it unless documented otherwise
 - The standard library will provide owning wrapper types
 
-### 8.6 `null`
+### 8.6 `using` resource blocks
+
+The C#-style `using` statement gives deterministic scope-exit cleanup: the
+resource declared in the header is released when control leaves the block,
+however it leaves — falling off the end, `return`, `break`, or `continue`.
+
+```c
+using (MemoryOwner<int> o = MemoryOwner<int>(8)) {
+    o.set(0, 42);
+}                          // o.dispose() runs here
+
+using (File* f = new File("log.txt")) {
+    if (bad) { return 1; } // ~File() runs before the return propagates
+}                          // ~File() runs here otherwise
+
+using (int* p = alloc(int, 64)) {
+    p[0] = 1;
+}                          // free(p) runs here
+```
+
+The release action depends on the declared type:
+
+| Header type | Scope-exit action |
+|---|---|
+| `T*` where `T` is a class | `delete` semantics — destructor chain, then free |
+| any other pointer | `free` |
+| class **value** | its zero-argument `dispose()` method (required; compile error without one) |
+
+Rules:
+
+- The resource variable is implicitly `const` (it cannot be reassigned) and
+  is scoped to the block.
+- A pointer resource that is `null`, or that was already released inside the
+  body (early `delete`/`free`), is skipped — no double free. Value handles
+  delegate to `dispose()`, so don't call `dispose()` manually inside the
+  block.
+- `exit(...)` terminates the program immediately without running disposals,
+  matching its skip-everything semantics.
+- Primitives and dispose-less class values are rejected at compile time:
+  `'using' requires a pointer or a class value with dispose()`.
+
+### 8.7 `null`
 
 `null` can be assigned to any pointer or object type. Dereferencing `null` is undefined behaviour. Null checks are explicit:
 
@@ -830,9 +871,10 @@ Rules:
   `using namespace geo;` makes `Point p = Point(3);` and `new Point(4)`
   valid without the `geo::` prefix.
 
-The parenthesised form `using (expr) { ... }` is **reserved** for a planned
-resource-management/GC feature and is rejected with a dedicated parse error
-today.
+The parenthesised form `using (T x = expr) { ... }` is a different construct:
+the resource-disposal statement documented in section 8.6. It appears inside
+function bodies, while the namespace-import forms above appear only at the
+top level of a file.
 
 ---
 
@@ -889,16 +931,16 @@ closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
 file-I/O built-ins, **generics** (monomorphized) with a generic standard
 library, the `byte` primitive with `byte[]` blocks and `string`/`byte` interop,
 the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views,
-**namespaces** (section 13.2) with a namespaced standard library, and
-**`using` declarations** (section 13.3). The remaining items reserved for
-later versions:
+**namespaces** (section 13.2) with a namespaced standard library, **`using`
+declarations** (section 13.3), and **`using` resource blocks** (section 8.6).
+The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
 | Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
 | Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
 | Exceptions           | Error handling via return values for now           |
-| Garbage collection   | Planned as a pure-Glang standard-library module; the `using (expr) { ... }` resource-block syntax is reserved for it |
+| Garbage collection   | Planned as a pure-Glang standard-library module; `using` blocks (section 8.6) already provide deterministic scope-exit disposal |
 | Command-line args    | `main(int argc, string[] argv)` — the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
 
@@ -949,11 +991,11 @@ int main() {
 **Contiguous memory: `MemoryOwner<T>` and `Span<T>`.** A `MemoryOwner<T>` owns a
 heap block (`alloc(T, n)`) and frees it when released; a `Span<T>` is a
 non-owning, bounds-checked view (`pointer + offset + length`) over a block.
-`slice` produces zero-copy sub-views that alias the same storage. Because Glang
-has no scope-exit cleanup, freeing is explicit: call `dispose()` on a value
-handle, or `delete` a `new`'d handle (which runs `~MemoryOwner`). Do not do both
-on the same owner (double free). A span is valid only while its backing owner
-is live.
+`slice` produces zero-copy sub-views that alias the same storage. Freeing is
+explicit — call `dispose()` on a value handle, or `delete` a `new`'d handle
+(which runs `~MemoryOwner`), but not both (double free) — or automatic with a
+`using` block (section 8.6), which calls `dispose()` at scope exit. A span is
+valid only while its backing owner is live.
 
 ```c
 import "std/memory.lang";

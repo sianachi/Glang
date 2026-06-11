@@ -26,7 +26,7 @@ from parser.ast_nodes import (
     FunctionDecl, ClassDecl, StaticFieldDecl, EnumDecl,
     MethodDecl, ConstructorDecl, DestructorDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, ForStmt,
-    ReturnStmt, BreakStmt, ContinueStmt,
+    ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -331,6 +331,9 @@ class Interpreter:
                         self._eval(stmt.post)
             finally:
                 self._frame.pop_scope()
+
+        elif isinstance(stmt, UsingStmt):
+            self._exec_using(stmt)
 
         elif isinstance(stmt, ReturnStmt):
             value = self._eval(stmt.value) if stmt.value is not None else VOID
@@ -882,22 +885,66 @@ class Interpreter:
         return this_val
 
     def _eval_delete(self, expr: DeleteExpr) -> Value:
-        ptr = self._eval(expr.operand).raw
+        value = self._eval(expr.operand)
+        ptr = value.raw
         if not isinstance(ptr, Pointer) or ptr.target is None:
             return VOID  # delete null is a no-op
-        box = ptr.target
-        if box.freed:
+        if ptr.target.freed:
             raise GlangRuntimeError("delete of a freed pointer", expr.line, expr.col)
+        self._delete_object(value)
+        return VOID
+
+    def _delete_object(self, value: Value) -> None:
+        """Run the destructor chain for a live class pointer, then free it."""
+        box = value.raw.target
         instance = box.value.raw
         # Destructor chain: most-derived class first, up to the base.
         for cls in superclass_chain(instance.class_name, self._env):
             info = self._env.classes.get(cls)
             if info is not None and info.destructor is not None:
-                self._call_method(
-                    _as_method(info.destructor), cls, self._eval(expr.operand), []
-                )
+                self._call_method(_as_method(info.destructor), cls, value, [])
         self._heap.free(box)
-        return VOID
+
+    # -- using blocks ------------------------------------------------------
+
+    def _exec_using(self, stmt: UsingStmt) -> None:
+        self._frame.push_scope()
+        try:
+            init = self._eval(stmt.decl.initializer)
+            box = self._new_box(self._coerce_value(init, stmt.decl.type))
+            self._frame.define(stmt.decl.name, box)
+            try:
+                self._exec_block(stmt.body)
+            except GlangExitException:
+                raise  # exit() terminates immediately; skip disposal
+            except BaseException:
+                self._dispose_resource(box.value, stmt)
+                raise
+            else:
+                self._dispose_resource(box.value, stmt)
+        finally:
+            self._frame.pop_scope()
+
+    def _dispose_resource(self, value: Value, stmt: UsingStmt) -> None:
+        raw = value.raw
+        if isinstance(raw, Pointer):
+            # Null or already released inside the body: nothing left to do,
+            # so early manual `delete`/`free` is safe.
+            if raw.target is None or raw.target.freed:
+                return
+            if isinstance(raw.target.value.raw, ObjectInstance):
+                self._delete_object(value)
+            else:
+                self._heap.free(raw.target)
+            return
+        if isinstance(raw, ObjectInstance):
+            instance, this_val = self._receiver(value, stmt.line, stmt.col)
+            method, defining = self._resolve_virtual(instance.class_name, "dispose")
+            self._call_method(method, defining, this_val, [])
+            return
+        raise GlangRuntimeError(
+            "using resource is not disposable", stmt.line, stmt.col
+        )
 
     # -- object construction / dispatch ----------------------------------
 

@@ -380,8 +380,8 @@ class UsingDecl(Decl):
     of the file they appear in and never leak into importing files. The
     NamespaceResolver consumes them — none survive into Pass1.
 
-    The parenthesised form `using (expr) { ... }` is reserved for a future
-    resource/GC feature and is rejected by the parser with a dedicated error.
+    The parenthesised statement form `using (T x = expr) { ... }` is a
+    different construct (resource disposal); see UsingStmt.
     """
     name: str
     is_namespace: bool
@@ -506,6 +506,34 @@ class ForStmt(Stmt):
     init: VarDecl
     condition: Expr
     post: Any  # AssignStmt | UnaryExpr
+    body: Block
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class UsingStmt(Stmt):
+    """A C#-style resource block: acquire in the header, dispose on scope
+    exit.
+
+    The header declares a const variable visible only inside the body. When
+    control leaves the body — normally, or via return / break / continue —
+    the resource is released:
+
+      - class pointer  → `delete` semantics (destructor chain, then free)
+      - other pointer  → `free` semantics
+      - class value    → its zero-argument `dispose()` method is called
+
+    A pointer resource already freed inside the body (or null) is skipped, so
+    early manual release is safe. `exit(...)` terminates immediately without
+    disposal.
+
+    Example:
+      using (MemoryOwner<int> o = MemoryOwner<int>(8)) {
+          o.set(0, 42);
+      }                             // o.dispose() runs here
+    """
+    decl: VarDecl
     body: Block
     line: int = 0
     col: int = 0
