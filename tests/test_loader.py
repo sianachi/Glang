@@ -73,6 +73,31 @@ class TestStdlibResolution:
         with pytest.raises(GImportError):
             Loader(stdlib_dir=str(tmp_path / "stdlib")).load(root)
 
+    def test_glang_stdlib_env_override(self, tmp_path, monkeypatch):
+        stdlib = tmp_path / "env_stdlib"
+        write(stdlib, "math.lang", "int answer() { return 11; }\n")
+        root = write(
+            tmp_path, "main.lang",
+            'import "std/math.lang";\nint main() { return answer(); }\n',
+        )
+        monkeypatch.setenv("GLANG_STDLIB", str(stdlib))
+        prog = Loader().load(root)
+        assert Interpreter(Analyser().analyse(prog)).run(prog) == 11
+
+    def test_finds_stdlib_next_to_executable(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("GLANG_STDLIB", raising=False)
+        bin_dir = tmp_path / "bin"
+        stdlib = bin_dir / "stdlib"
+        write(stdlib, "math.lang", "int answer() { return 13; }\n")
+        fake_exe = write(bin_dir, "glang", "")
+        root = write(
+            tmp_path, "main.lang",
+            'import "std/math.lang";\nint main() { return answer(); }\n',
+        )
+        monkeypatch.setattr(sys, "executable", fake_exe)
+        prog = Loader().load(root)
+        assert Interpreter(Analyser().analyse(prog)).run(prog) == 13
+
 
 class TestBasicImport:
     def test_imported_declarations_are_merged(self, tmp_path):

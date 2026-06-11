@@ -19,7 +19,7 @@ import sys
 # root (this file's directory) is importable.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from loader.loader import Loader
+from glang_loader.loader import Loader
 from analyser.analyser import Analyser
 from interpreter.interpreter import Interpreter
 from errors.errors import GlangError
