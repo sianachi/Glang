@@ -1,20 +1,24 @@
 // Demonstrates file I/O: the readFile/writeFile/fileExists builtins plus the
-// std/io.lang helpers. Self-contained — it writes a file, reads it back, and
-// appends to it, so it can run anywhere (the test harness runs it in a scratch
-// directory).
+// std/io.lang helpers, imported individually with single-member `using`
+// declarations. Self-contained — it writes a file, reads it back, and
+// appends to it, so it can run anywhere (the test harness runs it in a
+// scratch directory).
 // Run: python3 main.py run examples/file_io.lang
 
 import "std/io.lang";
+
+using io::appendFile;
+using io::readLineCount;
 
 int main() {
     string path = "glang_demo.txt";
 
     writeFile(path, "first\nsecond\n");
     print(fileExists(path));      // true
-    print(io::readLineCount(path));   // 2
+    print(readLineCount(path));   // 2
 
-    io::appendFile(path, "third\n");
-    print(io::readLineCount(path));   // 3
+    appendFile(path, "third\n");
+    print(readLineCount(path));   // 3
     print(readFile(path));        // first / second / third (3 lines)
 
     print(fileExists("does_not_exist.txt"));  // false

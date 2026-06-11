@@ -7,14 +7,25 @@ become ordinary top-level declarations whose names carry the namespace path
 
 Reference resolution searches enclosing namespaces innermost-first, so a
 member of ``a::b`` may refer to ``foo`` declared in ``a::b`` or in ``a``
-without qualification; anything else needs the explicit ``a::b::foo`` form.
-Local variables and parameters shadow namespace members, and a name that
-resolves to no namespace member is left untouched (it is a global, a builtin,
-or an error for Pass2 to report).
+without qualification. Outside the declaring namespace a member is reached
+with its qualified name, or unqualified under a ``using`` declaration:
 
-After this pass no ``NamespaceDecl`` remains, so the monomorphizer, Pass1,
-Pass2, and the interpreter run completely unaware of namespaces — a qualified
-name is just an ordinary name that happens to contain ``::``.
+- ``using namespace math;`` opens every member of ``math``
+- ``using math::abs;`` imports the single member ``abs``
+
+``using`` is file-scoped: it applies from its position to the end of the file
+it appears in (declaration origins are tagged by the loader), so a library's
+``using`` never leaks into the files that import it. An unqualified name is
+resolved in this order: local variables, enclosing namespaces (innermost
+first), explicit top-level declarations, single-member ``using`` imports,
+then opened namespaces — where a name found in two opened namespaces is an
+ambiguity error. A name that resolves to nothing is left untouched (it is a
+builtin or an error for Pass2 to report).
+
+After this pass no ``NamespaceDecl`` or ``UsingDecl`` remains, so the
+monomorphizer, Pass1, Pass2, and the interpreter run completely unaware of
+namespaces — a qualified name is just an ordinary name that happens to
+contain ``::``.
 
 Re-declaring a namespace (in the same or another file) extends it: flattening
 simply concatenates the members, and Pass1 still rejects genuine duplicates.
@@ -22,10 +33,10 @@ simply concatenates the members, and Pass1 still rejects genuine duplicates.
 
 from __future__ import annotations
 
-from typing import List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from parser.ast_nodes import (
-    Program, Decl, Expr, NamespaceDecl,
+    Program, Decl, Expr, NamespaceDecl, UsingDecl,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
@@ -35,17 +46,36 @@ from parser.ast_nodes import (
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
     IdentifierExpr,
 )
+from errors.errors import TypeError
+
+
+class _UsingContext:
+    """The `using` imports active for one source file."""
+
+    def __init__(self) -> None:
+        self.aliases: Dict[str, str] = {}  # last segment → qualified name
+        self.opened: List[str] = []        # namespaces opened by directives
+
+    def is_empty(self) -> bool:
+        return not self.aliases and not self.opened
 
 
 class NamespaceResolver:
     def __init__(self) -> None:
         # Every namespaced top-level name after flattening ("math::abs").
         self._declared: Set[str] = set()
+        # Every namespace path that has at least one member ("a", "a::b").
+        self._namespaces: Set[str] = set()
+        # Every non-namespaced top-level name.
+        self._globals: Set[str] = set()
         # Local-variable scope stack used while rewriting one declaration.
         self._scopes: List[Set[str]] = []
         # Generic type parameters of the declaration being rewritten; these
         # shadow namespace members in type position.
         self._type_params: Set[str] = set()
+        # The `using` context of the file owning the declaration being
+        # rewritten.
+        self._ctx = _UsingContext()
 
     def run(self, program: Program) -> Program:
         # (decl, prefixes) pairs; prefixes is the enclosing-namespace search
@@ -53,11 +83,19 @@ class NamespaceResolver:
         flattened: List[Tuple[Decl, List[str]]] = []
         for d in program.declarations:
             self._flatten(d, [], flattened)
-        program.declarations = [d for d, _ in flattened]
 
+        kept: List[Decl] = []
+        contexts: Dict[Optional[str], _UsingContext] = {}
         for d, prefixes in flattened:
-            if prefixes:
+            ctx = contexts.setdefault(getattr(d, "origin", None), _UsingContext())
+            if isinstance(d, UsingDecl):
+                self._register_using(d, ctx)
+                continue
+            kept.append(d)
+            if prefixes or not ctx.is_empty():
+                self._ctx = ctx
                 self._r_decl(d, prefixes)
+        program.declarations = kept
         return program
 
     # ------------------------------------------------------------------
@@ -68,32 +106,96 @@ class NamespaceResolver:
                  out: List[Tuple[Decl, List[str]]]) -> None:
         if isinstance(d, NamespaceDecl):
             new_chain = chain + d.name.split("::")
+            for i in range(1, len(new_chain) + 1):
+                self._namespaces.add("::".join(new_chain[:i]))
             for member in d.declarations:
+                # Members inherit the namespace block's source file.
+                member.origin = getattr(d, "origin", None)
                 self._flatten(member, new_chain, out)
             return
         if chain:
             d.name = "::".join(chain) + "::" + d.name
             self._declared.add(d.name)
+        elif not isinstance(d, UsingDecl):
+            self._globals.add(d.name)
         prefixes = ["::".join(chain[:i]) for i in range(len(chain), 0, -1)]
         out.append((d, prefixes))
+
+    # ------------------------------------------------------------------
+    # `using` registration
+    # ------------------------------------------------------------------
+
+    def _register_using(self, d: UsingDecl, ctx: _UsingContext) -> None:
+        if d.is_namespace:
+            if d.name not in self._namespaces:
+                raise TypeError(f"unknown namespace '{d.name}'", d.line, d.col)
+            if d.name not in ctx.opened:
+                ctx.opened.append(d.name)
+            return
+
+        if d.name in self._namespaces:
+            raise TypeError(
+                f"'{d.name}' is a namespace; write 'using namespace {d.name};'",
+                d.line, d.col,
+            )
+        if d.name not in self._declared:
+            raise TypeError(
+                f"'{d.name}' is not a namespace member", d.line, d.col
+            )
+        last = d.name.rsplit("::", 1)[1]
+        if last in self._globals:
+            raise TypeError(
+                f"using declaration '{last}' conflicts with a global "
+                f"declaration of the same name",
+                d.line, d.col,
+            )
+        previous = ctx.aliases.get(last)
+        if previous is not None and previous != d.name:
+            raise TypeError(
+                f"using declaration '{last}' conflicts with previous "
+                f"'using {previous};'",
+                d.line, d.col,
+            )
+        ctx.aliases[last] = d.name
 
     # ------------------------------------------------------------------
     # Name resolution
     # ------------------------------------------------------------------
 
-    def _resolve_type_name(self, name: str, prefixes: List[str]) -> str:
+    def _resolve_type_name(self, name: str, prefixes: List[str],
+                           line: int, col: int) -> str:
         if name in self._type_params:
             return name
         for prefix in prefixes:
             candidate = f"{prefix}::{name}"
             if candidate in self._declared:
                 return candidate
+        if name in self._declared or name in self._globals:
+            return name
+        if "::" not in name:
+            alias = self._ctx.aliases.get(name)
+            if alias is not None:
+                return alias
+        matches: List[str] = []
+        for ns in self._ctx.opened:
+            candidate = f"{ns}::{name}"
+            if candidate in self._declared and candidate not in matches:
+                matches.append(candidate)
+        if len(matches) > 1:
+            raise TypeError(
+                f"'{name}' is ambiguous: could be "
+                + " or ".join(f"'{m}'" for m in matches),
+                line, col,
+            )
+        if matches:
+            return matches[0]
         return name
 
-    def _resolve_value_name(self, name: str, prefixes: List[str]) -> str:
+    def _resolve_value_name(self, name: str, prefixes: List[str],
+                            line: int, col: int) -> str:
         if "::" not in name and self._is_local(name):
             return name
-        return self._resolve_type_name(name, prefixes)
+        return self._resolve_type_name(name, prefixes, line, col)
 
     def _is_local(self, name: str) -> bool:
         return any(name in scope for scope in self._scopes)
@@ -114,8 +216,13 @@ class NamespaceResolver:
         elif isinstance(d, ClassDecl):
             self._type_params = set(d.type_params)
             if d.superclass is not None:
-                d.superclass = self._resolve_type_name(d.superclass, p)
-            d.interfaces = [self._resolve_type_name(i, p) for i in d.interfaces]
+                d.superclass = self._resolve_type_name(
+                    d.superclass, p, d.line, d.col
+                )
+            d.interfaces = [
+                self._resolve_type_name(i, p, d.line, d.col)
+                for i in d.interfaces
+            ]
             for fd in d.fields:
                 self._r_type(fd.type, p)
             for sfd in d.static_fields:
@@ -162,7 +269,7 @@ class NamespaceResolver:
 
     def _r_type(self, t: TypeNode, p: List[str]) -> None:
         if isinstance(t, NamedType):
-            t.name = self._resolve_type_name(t.name, p)
+            t.name = self._resolve_type_name(t.name, p, t.line, t.col)
         elif isinstance(t, (PointerType, ArrayType)):
             self._r_type(t.base, p)
         elif isinstance(t, FunctionPointerType):
@@ -170,7 +277,7 @@ class NamespaceResolver:
                 self._r_type(pt, p)
             self._r_type(t.return_type, p)
         elif isinstance(t, GenericType):
-            t.name = self._resolve_type_name(t.name, p)
+            t.name = self._resolve_type_name(t.name, p, t.line, t.col)
             for a in t.type_args:
                 self._r_type(a, p)
 
@@ -231,7 +338,7 @@ class NamespaceResolver:
 
     def _r_expr(self, e, p: List[str]) -> None:
         if isinstance(e, IdentifierExpr):
-            e.name = self._resolve_value_name(e.name, p)
+            e.name = self._resolve_value_name(e.name, p, e.line, e.col)
         elif isinstance(e, BinaryExpr):
             self._r_expr(e.left, p)
             self._r_expr(e.right, p)
@@ -241,7 +348,7 @@ class NamespaceResolver:
             self._r_type(e.target_type, p)
             self._r_expr(e.expr, p)
         elif isinstance(e, CallExpr):
-            e.name = self._resolve_value_name(e.name, p)
+            e.name = self._resolve_value_name(e.name, p, e.line, e.col)
             for a in e.type_args:
                 self._r_type(a, p)
             for a in e.args:
@@ -261,7 +368,9 @@ class NamespaceResolver:
             for a in e.args:
                 self._r_expr(a, p)
         elif isinstance(e, NewExpr):
-            e.class_name = self._resolve_type_name(e.class_name, p)
+            e.class_name = self._resolve_type_name(
+                e.class_name, p, e.line, e.col
+            )
             for a in e.type_args:
                 self._r_type(a, p)
             for a in e.args:

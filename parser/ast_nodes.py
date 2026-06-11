@@ -366,6 +366,30 @@ class InterfaceDecl(Decl):
 
 
 @dataclass
+class UsingDecl(Decl):
+    """A `using` declaration importing namespace members into the current
+    file's unqualified scope.
+
+    Two forms:
+      using namespace math;   →  UsingDecl("math", is_namespace=True)
+      using math::abs;        →  UsingDecl("math::abs", is_namespace=False)
+
+    The directive form makes every member of the namespace referable without
+    the prefix; the declaration form imports a single member under its last
+    segment. Both are file-scoped: they apply from their position to the end
+    of the file they appear in and never leak into importing files. The
+    NamespaceResolver consumes them — none survive into Pass1.
+
+    The parenthesised form `using (expr) { ... }` is reserved for a future
+    resource/GC feature and is rejected by the parser with a dedicated error.
+    """
+    name: str
+    is_namespace: bool
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class NamespaceDecl(Decl):
     """A namespace block grouping top-level declarations under a qualified
     prefix.

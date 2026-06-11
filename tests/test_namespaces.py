@@ -352,6 +352,214 @@ class TestNamespacedTypes:
 # Interaction with existing syntax
 # ---------------------------------------------------------------------------
 
+class TestUsing:
+    def test_using_namespace_directive(self):
+        assert run("""
+            namespace math {
+                int abs(int x) { if (x < 0) { return -x; } return x; }
+                int sign(int x) { if (x < 0) { return -1; } return 1; }
+            }
+            using namespace math;
+            int main() { return abs(-3) + sign(9); }
+        """) == 4
+
+    def test_using_single_member(self):
+        assert run("""
+            namespace math { int abs(int x) { if (x < 0) { return -x; } return x; } }
+            using math::abs;
+            int main() { return abs(-5); }
+        """) == 5
+
+    def test_single_member_does_not_open_namespace(self):
+        err("""
+            namespace math {
+                int abs(int x) { return x; }
+                int sign(int x) { return 1; }
+            }
+            using math::abs;
+            int main() { return sign(1); }
+        """, "sign")
+
+    def test_unknown_namespace_rejected(self):
+        err("""
+            namespace math { int abs(int x) { return x; } }
+            using namespace maths;
+            int main() { return 0; }
+        """, "unknown namespace 'maths'")
+
+    def test_unknown_member_rejected(self):
+        err("""
+            namespace math { int abs(int x) { return x; } }
+            using math::sing;
+            int main() { return 0; }
+        """, "'math::sing' is not a namespace member")
+
+    def test_namespace_in_member_form_rejected(self):
+        err("""
+            namespace a { namespace b { int f() { return 1; } } }
+            using a::b;
+            int main() { return 0; }
+        """, "using namespace a::b")
+
+    def test_unqualified_using_is_parse_error(self):
+        with pytest.raises(ParseError):
+            parse("using math; int main() { return 0; }")
+
+    def test_using_inside_namespace_rejected(self):
+        with pytest.raises(ParseError):
+            parse("namespace a { using namespace b; }")
+
+    def test_using_paren_form_reserved(self):
+        with pytest.raises(ParseError) as exc:
+            parse("int main() { return 0; } using (x) { }")
+        assert "reserved" in str(exc.value)
+
+    def test_ambiguous_member_rejected(self):
+        err("""
+            namespace a { int f() { return 1; } }
+            namespace b { int f() { return 2; } }
+            using namespace a;
+            using namespace b;
+            int main() { return f(); }
+        """, "ambiguous")
+
+    def test_global_wins_over_opened_namespace(self):
+        assert run("""
+            int f() { return 10; }
+            namespace a { int f() { return 1; } }
+            using namespace a;
+            int main() { return f(); }
+        """) == 10
+
+    def test_member_using_conflicts_with_global(self):
+        err("""
+            int abs(int x) { return x; }
+            namespace math { int abs(int x) { return -x; } }
+            using math::abs;
+            int main() { return 0; }
+        """, "conflicts with a global declaration")
+
+    def test_conflicting_member_usings_rejected(self):
+        err("""
+            namespace a { int f() { return 1; } }
+            namespace b { int f() { return 2; } }
+            using a::f;
+            using b::f;
+            int main() { return 0; }
+        """, "conflicts with previous")
+
+    def test_using_applies_to_types_and_enums(self):
+        assert run("""
+            namespace geo {
+                class Point { int x; Point(int x) { this.x = x; } }
+                enum Axis { X, Y = 7 }
+            }
+            using namespace geo;
+            int main() {
+                Point p = Point(3);
+                Point* q = new Point(4);
+                int total = p.x + q->x + (int)(Axis.Y);
+                delete q;
+                return total;
+            }
+        """) == 14
+
+    def test_using_with_generic_class(self):
+        assert run("""
+            namespace col {
+                class Pair<T> {
+                    T a;
+                    T b;
+                    Pair(T a, T b) { this.a = a; this.b = b; }
+                }
+            }
+            using namespace col;
+            int main() {
+                Pair<int> p = Pair<int>(3, 4);
+                return p.a + p.b;
+            }
+        """) == 7
+
+    def test_using_is_positional(self):
+        # A declaration before the `using` must still qualify.
+        err("""
+            namespace math { int abs(int x) { return x; } }
+            int early() { return abs(1); }
+            using namespace math;
+            int main() { return early(); }
+        """, "abs")
+
+    def test_local_still_shadows_opened_member(self):
+        assert run("""
+            namespace math { int abs(int x) { return 100; } }
+            using namespace math;
+            int main() {
+                int abs = 6;
+                return abs;
+            }
+        """) == 6
+
+    def test_duplicate_directive_is_harmless(self):
+        assert run("""
+            namespace math { int abs(int x) { if (x < 0) { return -x; } return x; } }
+            using namespace math;
+            using namespace math;
+            int main() { return abs(-2); }
+        """) == 2
+
+
+class TestUsingFileScope:
+    def _write(self, directory, name, text):
+        path = directory / name
+        path.write_text(text)
+        return str(path)
+
+    def test_using_does_not_leak_into_importing_file(self, tmp_path):
+        from glang_loader.loader import Loader
+        self._write(tmp_path, "lib.lang", """
+            namespace util { int seven() { return 7; } }
+            using namespace util;
+            int libCall() { return seven(); }
+        """)
+        root = self._write(tmp_path, "main.lang", """
+            import "lib.lang";
+            int main() { return seven(); }
+        """)
+        prog = Loader().load(root)
+        with pytest.raises(GTE) as exc:
+            Analyser().analyse(prog)
+        assert "seven" in str(exc.value)
+
+    def test_using_in_main_file_sees_imported_namespace(self, tmp_path):
+        from glang_loader.loader import Loader
+        self._write(tmp_path, "lib.lang", """
+            namespace util { int seven() { return 7; } }
+        """)
+        root = self._write(tmp_path, "main.lang", """
+            import "lib.lang";
+            using namespace util;
+            int main() { return seven(); }
+        """)
+        prog = Loader().load(root)
+        env = Analyser().analyse(prog)
+        assert Interpreter(env).run(prog) == 7
+
+    def test_library_using_still_works_inside_library(self, tmp_path):
+        from glang_loader.loader import Loader
+        self._write(tmp_path, "lib.lang", """
+            namespace util { int seven() { return 7; } }
+            using namespace util;
+            int libCall() { return seven(); }
+        """)
+        root = self._write(tmp_path, "main.lang", """
+            import "lib.lang";
+            int main() { return libCall(); }
+        """)
+        prog = Loader().load(root)
+        env = Analyser().analyse(prog)
+        assert Interpreter(env).run(prog) == 7
+
+
 class TestNoRegressions:
     def test_constructor_super_colon_still_works(self):
         # Single ':' must still lex for `Ctor() : super(...)`.

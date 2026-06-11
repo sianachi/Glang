@@ -1,6 +1,6 @@
 // Demonstrates getArgCount() and getArg(i): command-line arguments passed
 // after the filename are available inside the Glang program. The echo helper
-// lives in a `cli` namespace.
+// lives in a `cli` namespace and is imported with a single-member `using`.
 //
 // Run with no args:   python3 main.py run examples/args_demo.lang
 // Run with args:      python3 main.py run examples/args_demo.lang foo bar baz
@@ -16,6 +16,8 @@ void echoArgs(int n) {
 
 }
 
+using cli::echoArgs;
+
 int main() {
     int n = getArgCount();
     print("arg count: " + toString(n));
@@ -25,7 +27,7 @@ int main() {
         return 0;
     }
 
-    cli::echoArgs(n);
+    echoArgs(n);
 
     return 0;
 }

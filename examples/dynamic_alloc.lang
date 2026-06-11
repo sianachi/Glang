@@ -1,6 +1,7 @@
 // Demonstrates the low-level memory primitives that back the containers:
 // alloc(T, n) for a contiguous block and p[i] indexing through a pointer.
-// The block helpers live in a `blocks` namespace.
+// The block helpers live in a `blocks` namespace, opened with
+// `using namespace blocks;`.
 // Run: python3 main.py run examples/dynamic_alloc.lang
 
 namespace blocks {
@@ -31,14 +32,16 @@ void reverse(int* p, int n) {
 
 }
 
+using namespace blocks;
+
 int main() {
     int n = 8;
-    int* fib = blocks::fibonacci(n);
+    int* fib = fibonacci(n);
     for (int i = 0; i < n; ++i) {
         print(fib[i]);   // 0 1 1 2 3 5 8 13
     }
 
-    blocks::reverse(fib, n);
+    reverse(fib, n);
     print(fib[0]);       // 13
     free(fib);
     return 0;

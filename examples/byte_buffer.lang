@@ -1,6 +1,6 @@
 // Demonstrates the byte primitive: 8-bit wrapping arithmetic, bitwise ops,
 // byte blocks via alloc, and string <-> byte interop. The arithmetic helpers
-// live in a `bytemath` namespace.
+// live in a `bytemath` namespace, opened with `using namespace bytemath;`.
 // Run: python3 main.py run examples/byte_buffer.lang
 
 namespace bytemath {
@@ -12,16 +12,18 @@ byte invert(byte b)          { return ~b; }
 
 }
 
+using namespace bytemath;
+
 int main() {
     // Arithmetic wraps modulo 256.
     byte a = 200;
     byte b = 100;
-    print(bytemath::wrapAdd(a, b));    // 44   (300 mod 256)
+    print(wrapAdd(a, b));    // 44   (300 mod 256)
 
     // Bitwise ops; int literals in 0..255 are accepted directly.
-    print(bytemath::lowNibble(a));     // 8
-    print(bytemath::shiftLeft(b));     // 200
-    print(bytemath::invert(a));        // 55
+    print(lowNibble(a));     // 8
+    print(shiftLeft(b));     // 200
+    print(invert(a));        // 55
 
     // A heap byte block, zero-initialised, indexed through the pointer.
     byte* buf = alloc(byte, 4);

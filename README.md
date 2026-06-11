@@ -63,7 +63,8 @@ const     continue  delete    else      enum      extends
 false     float     fn        for       free      if
 implements  import  int       interface namespace new
 null      private   protected public    return    static
-string    super     this      true      void      while
+string    super     this      true      using     void
+while
 ```
 
 ### 2.4 Literals
@@ -776,8 +777,8 @@ Resolution rules:
 - Inside a namespace, an unqualified name is looked up in the enclosing
   namespaces innermost-first, then falls back to the global scope and the
   builtins. Local variables and parameters always shadow namespace members.
-- Outside a namespace, members must be fully qualified (`math::abs(x)`).
-  There is no `using` import (yet).
+- Outside a namespace, members are reached with their qualified name
+  (`math::abs(x)`), or unqualified under a `using` declaration (below).
 - Qualified names work everywhere a name does: types (`geo::Point* p`),
   construction (`new geo::Point(7)`), casts (`(traffic::Light)1`), enum
   variants (`traffic::Light.GREEN`), static members (`cfg::Defaults.get()`),
@@ -791,6 +792,47 @@ Resolution rules:
 Namespaces compile away before type checking: every member becomes an
 ordinary top-level declaration whose name carries the prefix, so the rest of
 the pipeline (and error messages) see plain qualified names like `math::abs`.
+
+### 13.3 `using` declarations
+
+A `using` declaration removes the need to qualify every reference. It has two
+forms:
+
+```c
+import "std/math.lang";
+import "std/io.lang";
+
+using namespace math;       // directive: opens every member of math
+using io::appendFile;       // declaration: imports the single member appendFile
+
+int main() {
+    print(abs(-7));         // math::abs
+    appendFile("log.txt", "hi\n");
+    return 0;
+}
+```
+
+Rules:
+
+- `using` appears only at the top level of a file (not inside a namespace
+  block) and applies from its position to the end of **that file**. It never
+  leaks into files that import it, so a library's `using` choices stay
+  private to the library.
+- An unqualified name resolves in this order: local variables, enclosing
+  namespaces (innermost first), explicitly declared top-level names,
+  single-member `using` imports, then namespaces opened with
+  `using namespace`. A name found in two opened namespaces is a compile-time
+  ambiguity error; qualify to disambiguate.
+- A global declaration always wins over an opened namespace, and a
+  single-member `using` that collides with a global of the same name is a
+  compile error.
+- Both forms work for functions, classes, enums, and interfaces alike —
+  `using namespace geo;` makes `Point p = Point(3);` and `new Point(4)`
+  valid without the `geo::` prefix.
+
+The parenthesised form `using (expr) { ... }` is **reserved** for a planned
+resource-management/GC feature and is rejected with a dedicated parse error
+today.
 
 ---
 
@@ -846,17 +888,17 @@ operations, the import system (with a `std/` prefix), function pointers,
 closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
 file-I/O built-ins, **generics** (monomorphized) with a generic standard
 library, the `byte` primitive with `byte[]` blocks and `string`/`byte` interop,
-the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views, and
-**namespaces** (section 13.2) with a namespaced standard library. The
-remaining items reserved for later versions:
+the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views,
+**namespaces** (section 13.2) with a namespaced standard library, and
+**`using` declarations** (section 13.3). The remaining items reserved for
+later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
 | Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
 | Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
-| `using` declarations | Namespace members must be fully qualified outside their namespace |
 | Exceptions           | Error handling via return values for now           |
-| Garbage collection   | Planned as a pure-Glang standard-library module    |
+| Garbage collection   | Planned as a pure-Glang standard-library module; the `using (expr) { ... }` resource-block syntax is reserved for it |
 | Command-line args    | `main(int argc, string[] argv)` — the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
 

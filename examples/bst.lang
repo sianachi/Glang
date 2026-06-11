@@ -7,7 +7,8 @@
 //   - building and searching a tree
 //   - recursive cleanup through a destructor
 //   - namespaced classes: inside `collections` the tree refers to `Node`
-//     unqualified; main names the tree as `collections::BinarySearchTree`
+//     unqualified; main imports only the public type with
+//     `using collections::BinarySearchTree;` — `Node` stays internal
 //
 // Run with:
 //     python3 main.py run examples/bst.lang
@@ -154,8 +155,10 @@ public class BinarySearchTree {
 
 }
 
+using collections::BinarySearchTree;
+
 int main() {
-    collections::BinarySearchTree* tree = new collections::BinarySearchTree();
+    BinarySearchTree* tree = new BinarySearchTree();
 
     tree->insert(8);
     tree->insert(3);

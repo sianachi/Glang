@@ -6,10 +6,10 @@
 //   - enums as function parameters and return types
 //   - comparing enum values with ==
 //   - casting enum <-> int with an explicit cast
-//   - enums and their helper functions living together in a namespace;
-//     inside the namespace they are used unqualified, outside it the
-//     qualified forms `compass::Direction.NORTH` / `(http::HttpStatus) 500`
-//     are required
+//   - enums and their helper functions living together in a namespace,
+//     consumed in both styles: `compass` is opened with `using namespace`,
+//     while `http` is kept fully qualified (`http::HttpStatus.OK`,
+//     `(http::HttpStatus) 500`) for contrast
 //
 // Run with:
 //     python main.py run examples/enums.lang
@@ -48,23 +48,25 @@ bool is_success(HttpStatus s) {
 
 }
 
+using namespace compass;
+
 int main() {
     // --- Directions -------------------------------------------------
-    compass::Direction heading = compass::Direction.NORTH;
+    Direction heading = Direction.NORTH;
     print("NORTH ordinal:");
     print((int) heading);              // 0
 
-    compass::Direction back = compass::opposite(heading);
+    Direction back = opposite(heading);
     print("opposite of NORTH:");
     print((int) back);                 // 2  (SOUTH)
 
-    compass::Direction right = compass::turn_right(heading);
+    Direction right = turn_right(heading);
     print("one right-turn from NORTH:");
     print((int) right);                // 1  (EAST)
 
     // Compare enum values with ==
     print("back == SOUTH:");
-    print(back == compass::Direction.SOUTH);    // true
+    print(back == Direction.SOUTH);    // true
 
     // --- HTTP status codes ------------------------------------------
     http::HttpStatus good = http::HttpStatus.OK;

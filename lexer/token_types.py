@@ -54,6 +54,7 @@ class TokenType(Enum):
     KW_ENUM      = auto()  # enum
 
     KW_NAMESPACE = auto()  # namespace
+    KW_USING     = auto()  # using
     # Qualifiers / visibility
     KW_CONST     = auto()  # const
     KW_PRIVATE   = auto()  # private
@@ -156,6 +157,7 @@ KEYWORDS: dict[str, TokenType] = {
     "fn":         TokenType.KW_FN,
     "enum":       TokenType.KW_ENUM,
     "namespace":  TokenType.KW_NAMESPACE,
+    "using":      TokenType.KW_USING,
     "const":      TokenType.KW_CONST,
     "private":    TokenType.KW_PRIVATE,
     "protected":  TokenType.KW_PROTECTED,

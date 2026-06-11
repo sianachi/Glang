@@ -86,6 +86,10 @@ class Loader:
                 self._load_file(target, via=imp)
 
             # Post-order: a file's imports are merged before the file itself.
+            # Each declaration remembers its source file so file-scoped
+            # constructs (`using`) cannot leak across the merge.
+            for decl in program.declarations:
+                decl.origin = abspath
             self._declarations.extend(program.declarations)
         finally:
             self._visiting.pop()

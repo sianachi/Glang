@@ -1,6 +1,6 @@
 // Demonstrates exit(): terminates immediately from anywhere in the call stack,
 // skipping all remaining code in every active frame. The bounds check lives
-// in a `validate` namespace.
+// in a `validate` namespace and is imported with a single-member `using`.
 // Run: python3 main.py run examples/exit_early.lang
 
 namespace validate {
@@ -15,6 +15,8 @@ void checkBounds(int val, int lo, int hi) {
 
 }
 
+using validate::checkBounds;
+
 int main() {
     // Process a series of values; exit() fires when a bad value is found,
     // so "done" is never reached and later iterations never run.
@@ -26,7 +28,7 @@ int main() {
     data[4] = 50;
 
     for (int i = 0; i < 5; ++i) {
-        validate::checkBounds(data[i], 0, 50);
+        checkBounds(data[i], 0, 50);
         print(data[i]);   // printed only for values that pass
     }
     print("done");        // never reached

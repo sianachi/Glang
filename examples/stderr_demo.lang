@@ -1,7 +1,8 @@
 // Demonstrates printErr(): writes to stderr while print() writes to stdout.
 // The two streams are independent — printErr lines don't appear in stdout
 // and won't interfere with structured output a compiler sends to a file.
-// The diagnostic helpers live in a `diag` namespace.
+// The diagnostic helpers live in a `diag` namespace, opened with
+// `using namespace diag;`.
 // Run: python3 main.py run examples/stderr_demo.lang
 
 namespace diag {
@@ -17,14 +18,16 @@ void noteUnusedVariable(int lineNum) {
 
 }
 
+using namespace diag;
+
 int main() {
     print("stdout: starting");
 
-    diag::warn("warning — low memory");
+    warn("warning — low memory");
 
     print("stdout: processing");
 
-    diag::noteUnusedVariable(42);
+    noteUnusedVariable(42);
 
     print("stdout: done");
     return 0;

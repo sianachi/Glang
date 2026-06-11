@@ -11,7 +11,7 @@ try:
     from .ast_nodes import (
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl,
+        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -23,7 +23,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl,
+        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl,
     )
 
 
@@ -68,6 +68,8 @@ class DeclParser:
     def parse_top_level_decl(self) -> Decl:
         if self._s.check(TokenType.KW_NAMESPACE):
             return self._parse_namespace()
+        if self._s.check(TokenType.KW_USING):
+            return self._parse_using()
         access = "public"
         if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
             access = self._s.advance().value
@@ -91,10 +93,36 @@ class DeclParser:
         while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
             if self._s.check(TokenType.KW_IMPORT):
                 raise self._s.error("imports are not allowed inside a namespace")
+            if self._s.check(TokenType.KW_USING):
+                raise self._s.error(
+                    "using declarations are not allowed inside a namespace"
+                )
             declarations.append(self.parse_top_level_decl())
         self._s.expect(TokenType.RBRACE)
         return NamespaceDecl(name=name, declarations=declarations,
                              line=tok.line, col=tok.col)
+
+    def _parse_using(self) -> UsingDecl:
+        tok = self._s.advance()  # consume 'using'
+        if self._s.check(TokenType.LPAREN):
+            raise self._s.error(
+                "'using (...)' resource blocks are reserved for a future release"
+            )
+        if self._s.match(TokenType.KW_NAMESPACE):
+            name = self._parse_qualified_name()
+            self._s.expect(TokenType.SEMICOLON)
+            return UsingDecl(name=name, is_namespace=True,
+                             line=tok.line, col=tok.col)
+        name = self._parse_qualified_name()
+        if "::" not in name:
+            raise ParseError(
+                f"using declaration needs a qualified name like 'ns::{name}' "
+                f"(or 'using namespace {name};')",
+                tok.line, tok.col,
+            )
+        self._s.expect(TokenType.SEMICOLON)
+        return UsingDecl(name=name, is_namespace=False,
+                         line=tok.line, col=tok.col)
 
     def _parse_qualified_name(self) -> str:
         name = self._s.expect(TokenType.IDENT).value
