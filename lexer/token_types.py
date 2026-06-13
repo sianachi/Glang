@@ -64,6 +64,7 @@ class TokenType(Enum):
     KW_PRIVATE   = auto()  # private
     KW_PROTECTED = auto()  # protected
     KW_PUBLIC    = auto()  # public
+    KW_MODIFIER  = auto()  # modifier
 
     # --- Arithmetic operators ---
     PLUS    = auto()  # +
@@ -170,4 +171,5 @@ KEYWORDS: dict[str, TokenType] = {
     "private":    TokenType.KW_PRIVATE,
     "protected":  TokenType.KW_PROTECTED,
     "public":     TokenType.KW_PUBLIC,
+    "modifier":   TokenType.KW_MODIFIER,
 }

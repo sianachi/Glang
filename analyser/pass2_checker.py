@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 
 from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
-    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
+    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
@@ -43,6 +43,7 @@ class Pass2Checker:
         self._scope: SymbolTable = SymbolTable()
         self._return_type: Optional[TypeNode] = None
         self._current_class: Optional[ClassInfo] = None
+        self._modifier_target_type: Optional[TypeNode] = None
         self._in_loop: bool = False
         self._in_static_method: bool = False
         self._in_constructor: bool = False
@@ -59,6 +60,8 @@ class Pass2Checker:
                 self._check_interface(decl)
             elif isinstance(decl, EnumDecl):
                 pass  # validated in pass1
+            elif isinstance(decl, ModifierDecl):
+                self._check_modifier(decl)
 
     # ------------------------------------------------------------------
     # Declarations
@@ -192,6 +195,44 @@ class Pass2Checker:
 
     def _check_interface(self, iface: InterfaceDecl) -> None:
         pass  # signatures already validated in pass1
+
+    def _check_modifier(self, decl: ModifierDecl) -> None:
+        from analyser.type_utils import type_str as _type_str
+        target_name = _type_str(decl.target)
+        saved_class = self._current_class
+        saved_modifier_target = self._modifier_target_type
+        saved_static = self._in_static_method
+        self._in_static_method = False
+
+        class_info = self._env.classes.get(target_name)
+        if class_info is not None:
+            self._current_class = class_info
+            self._modifier_target_type = None
+        else:
+            self._current_class = None
+            self._modifier_target_type = decl.target
+
+        for md in decl.methods:
+            saved_scope = self._scope
+            saved_return = self._return_type
+            self._scope = self._scope.child()
+            for p in md.params:
+                self._scope.define(p.name, p.type, p.line, p.col, p.is_const)
+            self._return_type = md.return_type
+            self._check_block(md.body)
+            rt_name = md.return_type.name if isinstance(md.return_type, NamedType) else None
+            if rt_name != "void":
+                from analyser.return_checker import always_returns
+                if not always_returns(md.body.stmts):
+                    raise TypeError(
+                        "not all code paths return a value", md.line, md.col
+                    )
+            self._scope = saved_scope
+            self._return_type = saved_return
+
+        self._current_class = saved_class
+        self._modifier_target_type = saved_modifier_target
+        self._in_static_method = saved_static
 
     # ------------------------------------------------------------------
     # Statements
@@ -468,9 +509,17 @@ class Pass2Checker:
             )
 
         if isinstance(expr, ThisExpr):
-            if self._in_static_method or self._current_class is None:
+            if self._in_static_method:
                 raise TypeError(
                     "'this' is not available in a static method",
+                    expr.line, expr.col,
+                )
+            if self._modifier_target_type is not None:
+                # Primitive modifier: 'this' is the target value itself.
+                return self._modifier_target_type
+            if self._current_class is None:
+                raise TypeError(
+                    "'this' used outside of a class or modifier",
                     expr.line, expr.col,
                 )
             return PointerType(NamedType(self._current_class.name))
@@ -646,18 +695,25 @@ class Pass2Checker:
                 )
             class_info = self._env.classes.get(class_t.name)
             if class_info is None:
-                raise TypeError(
-                    f"'{class_t.name}' has no method '{expr.method}'",
-                    expr.line, expr.col,
-                )
-            method = class_info.instance_methods.get(expr.method)
-            if method is None:
-                raise TypeError(
-                    f"'{class_t.name}' has no method '{expr.method}'",
-                    expr.line, expr.col,
-                )
-            self._check_access(class_t.name, method.access, expr.method,
-                               expr.line, expr.col)
+                # Primitive type or unrecognised — check modifier methods.
+                method = self._env.modifier_methods.get(class_t.name, {}).get(expr.method)
+                if method is None:
+                    raise TypeError(
+                        f"'{class_t.name}' has no method '{expr.method}'",
+                        expr.line, expr.col,
+                    )
+            else:
+                method = class_info.instance_methods.get(expr.method)
+                if method is None:
+                    method = self._env.modifier_methods.get(class_t.name, {}).get(expr.method)
+                if method is None:
+                    raise TypeError(
+                        f"'{class_t.name}' has no method '{expr.method}'",
+                        expr.line, expr.col,
+                    )
+                if method in class_info.instance_methods.values():
+                    self._check_access(class_t.name, method.access, expr.method,
+                                       expr.line, expr.col)
             expected = len(method.params)
             got = len(expr.args)
             if expected != got:

@@ -412,6 +412,25 @@ class NamespaceDecl(Decl):
     col: int = 0
 
 
+@dataclass
+class ModifierDecl(Decl):
+    """A modifier block that adds methods to an existing type from the outside.
+
+    Generic modifiers use type_params (e.g. ``modifier<T> for List<T> { ... }``).
+    Non-generic modifiers extend a concrete or primitive type
+    (e.g. ``modifier for string { ... }``).
+
+    Modifier declarations are removed by the monomorphizer (generic) or pass
+    through unchanged (non-generic); Pass1 registers their methods into
+    GlobalEnv.modifier_methods keyed by the concrete target type name.
+    """
+    type_params: List[str]
+    target: 'TypeNode'
+    methods: List[MethodDecl]
+    line: int = 0
+    col: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Statements
 # ---------------------------------------------------------------------------

@@ -4,8 +4,9 @@ from typing import Dict, List, Set
 from parser.ast_nodes import (
     Program, FunctionDecl, ClassDecl, InterfaceDecl,
     MethodDecl, FieldDecl, StaticFieldDecl,
-    NamedType, PointerType, ArrayType, EnumDecl,
+    NamedType, PointerType, ArrayType, EnumDecl, ModifierDecl,
 )
+from analyser.type_utils import type_str
 from errors.errors import TypeError
 from analyser.symbol_table import (
     GlobalEnv, FunctionInfo, ClassInfo, InterfaceInfo, EnumInfo,
@@ -43,6 +44,24 @@ class Pass1Collector:
         for decl in program.declarations:
             if isinstance(decl, FunctionDecl):
                 self._register_function(decl)
+        for decl in program.declarations:
+            if isinstance(decl, ModifierDecl):
+                self._register_modifier(decl)
+
+    def _register_modifier(self, decl: ModifierDecl) -> None:
+        target_name = type_str(decl.target)
+        if target_name not in self._env.modifier_methods:
+            self._env.modifier_methods[target_name] = {}
+        for md in decl.methods:
+            if md.name in self._env.modifier_methods[target_name]:
+                raise TypeError(
+                    f"duplicate modifier method '{md.name}' for type '{target_name}'",
+                    md.line, md.col,
+                )
+            self._env.resolve_type(md.return_type)
+            for p in md.params:
+                self._env.resolve_type(p.type)
+            self._env.modifier_methods[target_name][md.name] = md
 
     def _populate_classes(self, program: Program) -> None:
         for decl in program.declarations:

@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from parser.ast_nodes import (
     Program, Decl, Expr, NamespaceDecl, UsingDecl,
-    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl,
+    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
@@ -115,9 +115,10 @@ class NamespaceResolver:
                 self._flatten(member, new_chain, out)
             return
         if chain:
-            d.name = "::".join(chain) + "::" + d.name
-            self._declared.add(d.name)
-        elif not isinstance(d, UsingDecl):
+            if not isinstance(d, ModifierDecl):
+                d.name = "::".join(chain) + "::" + d.name
+            self._declared.add(getattr(d, "name", ""))
+        elif not isinstance(d, (UsingDecl, ModifierDecl)):
             self._globals.add(d.name)
         prefixes = ["::".join(chain[:i]) for i in range(len(chain), 0, -1)]
         out.append((d, prefixes))
@@ -253,6 +254,17 @@ class NamespaceResolver:
             for md in d.methods:
                 self._r_type(md.return_type, p)
                 self._r_params(md.params, p)
+        elif isinstance(d, ModifierDecl):
+            self._type_params = set(d.type_params)
+            self._r_type(d.target, p)
+            for md in d.methods:
+                self._r_type(md.return_type, p)
+                self._r_params(md.params, p)
+                if md.body is not None:
+                    self._scopes = [{prm.name for prm in md.params}]
+                    self._r_block_stmts(md.body, p)
+                    self._scopes = []
+            self._type_params = set()
         # EnumDecl carries only integer variants — nothing to rewrite.
 
     def _r_ctor(self, ctor: ConstructorDecl, p: List[str]) -> None:

@@ -1,0 +1,62 @@
+import "std/linq.lang";
+
+// Demonstrates LINQ-style collection operations on List<T>.
+
+int main() {
+    List<int> scores = List<int>();
+    scores.add(45);
+    scores.add(82);
+    scores.add(60);
+    scores.add(91);
+    scores.add(38);
+    scores.add(75);
+    scores.add(55);
+
+    // where — filter to passing scores (>= 60)
+    List<int> passing = scores.where((int s) -> bool { return s >= 60; });
+    print("Passing scores:");
+    passing.forEach((int s) -> void { print(s); });
+
+    // countWhere — how many failed?
+    int failures = scores.countWhere((int s) -> bool { return s < 60; });
+    print("Number of failures:");
+    print(failures);
+
+    // any / all
+    bool anyExcellent = scores.any((int s) -> bool { return s >= 90; });
+    bool allPass      = scores.all((int s) -> bool { return s >= 60; });
+    print("Any score >= 90?");
+    print(anyExcellent);
+    print("All scores >= 60?");
+    print(allPass);
+
+    // first — highest-priority element matching a condition
+    int topPassing = passing.first((int s) -> bool { return s >= 80; });
+    print("First score >= 80 in passing list:");
+    print(topPassing);
+
+    // reduce — sum of passing scores
+    int total = passing.reduce((int acc, int s) -> int { return acc + s; }, 0);
+    print("Sum of passing scores:");
+    print(total);
+
+    // select<T,U> — map scores to letter grades
+    // (simplified: A >= 90, B >= 75, C >= 60)
+    List<int> gradeNums = select<int, int>(scores, (int s) -> int {
+        if (s >= 90) { return 65; }   // 'A'
+        if (s >= 75) { return 66; }   // 'B'
+        if (s >= 60) { return 67; }   // 'C'
+        return 70;                     // 'F' (placeholder)
+    });
+    print("Grade codes (A=65, B=66, C=67, F=70):");
+    gradeNums.forEach((int g) -> void { print(g); });
+
+    // method chaining — sum of scores above average (approx.)
+    int chainedSum = scores
+        .where((int s) -> bool { return s > 60; })
+        .reduce((int acc, int s) -> int { return acc + s; }, 0);
+    print("Sum of scores above 60:");
+    print(chainedSum);
+
+    return 0;
+}

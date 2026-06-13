@@ -1,0 +1,25 @@
+Passing scores:
+82
+60
+91
+75
+Number of failures:
+3
+Any score >= 90?
+true
+All scores >= 60?
+false
+First score >= 80 in passing list:
+82
+Sum of passing scores:
+308
+Grade codes (A=65, B=66, C=67, F=70):
+70
+66
+67
+65
+70
+66
+70
+Sum of scores above 60:
+248

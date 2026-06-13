@@ -1,0 +1,240 @@
+// std/linq.lang — LINQ-style operations via object modifiers.
+//
+// Importing this file extends List<T>, Span<T>, and string with query and
+// iteration methods. Methods are added via the modifier system and are
+// opt-in: importing std/list.lang alone does NOT provide them.
+//
+// Cross-type operations (select, spanSelect, strReduce) require a second
+// type parameter and cannot be modifier methods; they remain free functions.
+
+import "std/list.lang";
+
+// ---------------------------------------------------------------------------
+// List<T> modifier
+// ---------------------------------------------------------------------------
+
+modifier<T> for List<T> {
+    List<T> where(fn(T) -> bool predicate) {
+        List<T> result = List<T>();
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                result.add(this.get(i));
+            }
+        }
+        return result;
+    }
+
+    bool any(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool all(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (!(predicate(this.get(i)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    int countWhere(fn(T) -> bool predicate) {
+        int n = 0;
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                n = n + 1;
+            }
+        }
+        return n;
+    }
+
+    T first(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                return this.get(i);
+            }
+        }
+        printErr("List.first: no element satisfies predicate");
+        exit(1);
+        return this.get(0);
+    }
+
+    void forEach(fn(T) -> void action) {
+        for (int i = 0; i < this.length(); ++i) {
+            action(this.get(i));
+        }
+    }
+
+    T reduce(fn(T, T) -> T reducer, T initial) {
+        T acc = initial;
+        for (int i = 0; i < this.length(); ++i) {
+            acc = reducer(acc, this.get(i));
+        }
+        return acc;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Span<T> modifier
+// ---------------------------------------------------------------------------
+
+modifier<T> for Span<T> {
+    List<T> where(fn(T) -> bool predicate) {
+        List<T> result = List<T>();
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                result.add(this.get(i));
+            }
+        }
+        return result;
+    }
+
+    bool any(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool all(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (!(predicate(this.get(i)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    int countWhere(fn(T) -> bool predicate) {
+        int n = 0;
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                n = n + 1;
+            }
+        }
+        return n;
+    }
+
+    T first(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) {
+                return this.get(i);
+            }
+        }
+        printErr("Span.first: no element satisfies predicate");
+        exit(1);
+        return this.get(0);
+    }
+
+    void forEach(fn(T) -> void action) {
+        for (int i = 0; i < this.length(); ++i) {
+            action(this.get(i));
+        }
+    }
+
+    T reduce(fn(T, T) -> T reducer, T initial) {
+        T acc = initial;
+        for (int i = 0; i < this.length(); ++i) {
+            acc = reducer(acc, this.get(i));
+        }
+        return acc;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// string modifier — treats string as a sequence of char
+// ---------------------------------------------------------------------------
+
+modifier for string {
+    bool any(fn(char) -> bool predicate) {
+        for (int i = 0; i < len(this); ++i) {
+            if (predicate(this[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool all(fn(char) -> bool predicate) {
+        for (int i = 0; i < len(this); ++i) {
+            if (!(predicate(this[i]))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    int countWhere(fn(char) -> bool predicate) {
+        int n = 0;
+        for (int i = 0; i < len(this); ++i) {
+            if (predicate(this[i])) {
+                n = n + 1;
+            }
+        }
+        return n;
+    }
+
+    char first(fn(char) -> bool predicate) {
+        for (int i = 0; i < len(this); ++i) {
+            if (predicate(this[i])) {
+                return this[i];
+            }
+        }
+        printErr("string.first: no character satisfies predicate");
+        exit(1);
+        return this[0];
+    }
+
+    void forEach(fn(char) -> void action) {
+        for (int i = 0; i < len(this); ++i) {
+            action(this[i]);
+        }
+    }
+
+    // Returns matching characters as a List<char>. String concatenation with
+    // a single char is not supported, so a filtered string cannot be built
+    // directly; callers may join the result via stringFromBytes if needed.
+    List<char> where(fn(char) -> bool predicate) {
+        List<char> result = List<char>();
+        for (int i = 0; i < len(this); ++i) {
+            if (predicate(this[i])) {
+                result.add(this[i]);
+            }
+        }
+        return result;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-type free functions (require a second type parameter)
+// ---------------------------------------------------------------------------
+
+List<U> select<T, U>(List<T> source, fn(T) -> U mapper) {
+    List<U> result = List<U>();
+    for (int i = 0; i < source.length(); ++i) {
+        result.add(mapper(source.get(i)));
+    }
+    return result;
+}
+
+List<U> spanSelect<T, U>(Span<T> sp, fn(T) -> U mapper) {
+    List<U> result = List<U>();
+    for (int i = 0; i < sp.length(); ++i) {
+        result.add(mapper(sp.get(i)));
+    }
+    return result;
+}
+
+T strReduce<T>(string s, fn(T, char) -> T reducer, T initial) {
+    T acc = initial;
+    for (int i = 0; i < len(s); ++i) {
+        acc = reducer(acc, s[i]);
+    }
+    return acc;
+}

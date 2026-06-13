@@ -11,7 +11,7 @@ try:
     from .ast_nodes import (
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl,
+        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -23,7 +23,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl,
+        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
     )
 
 
@@ -70,6 +70,8 @@ class DeclParser:
             return self._parse_namespace()
         if self._s.check(TokenType.KW_USING):
             return self._parse_using()
+        if self._s.check(TokenType.KW_MODIFIER):
+            return self._parse_modifier()
         access = "public"
         if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
             access = self._s.advance().value
@@ -386,6 +388,43 @@ class DeclParser:
         self._s.expect(TokenType.RBRACE)
         return InterfaceDecl(name=name_tok.value, methods=methods,
                              line=tok.line, col=tok.col)
+
+    # ------------------------------------------------------------------
+    # Modifiers
+    # ------------------------------------------------------------------
+
+    def _parse_modifier(self) -> ModifierDecl:
+        tok = self._s.advance()  # consume 'modifier'
+        type_params: List[str] = []
+        if self._s.match(TokenType.LT):
+            while True:
+                tp_tok = self._s.expect(TokenType.IDENT)
+                type_params.append(tp_tok.value)
+                if not self._s.match(TokenType.COMMA):
+                    break
+            self._s.expect(TokenType.GT)
+        self._s.expect(TokenType.KW_FOR)
+        target = self._tp.parse_type()
+        self._s.expect(TokenType.LBRACE)
+        methods: List[MethodDecl] = []
+        while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            access = "public"
+            if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
+                access = self._s.advance().value
+            ret_type = self._tp.parse_type()
+            name, m_line, m_col = self._parse_member_name()
+            params = self._parse_param_list()
+            body = self._sp.parse_block()
+            methods.append(MethodDecl(
+                name=name, params=params, return_type=ret_type,
+                body=body, is_static=False, access=access,
+                line=m_line, col=m_col,
+            ))
+        self._s.expect(TokenType.RBRACE)
+        return ModifierDecl(
+            type_params=type_params, target=target, methods=methods,
+            line=tok.line, col=tok.col,
+        )
 
     # ------------------------------------------------------------------
     # Helpers

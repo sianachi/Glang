@@ -902,6 +902,13 @@ class Interpreter:
             return self._call_method(method, defining, self._frame.this_val, args)
 
         receiver = self._eval(expr.object)
+        # Primitive modifier path (e.g. "hello".any(...), where string is not
+        # an ObjectInstance and cannot go through _receiver).
+        if not isinstance(receiver.raw, (Pointer, ObjectInstance)):
+            if isinstance(receiver.type, NamedType):
+                mod = self._env.modifier_methods.get(receiver.type.name, {})
+                if expr.method in mod:
+                    return self._call_method(mod[expr.method], receiver.type.name, receiver, args)
         instance, this_val = self._receiver(receiver, expr.line, expr.col)
         method, defining = self._resolve_virtual(instance.class_name, expr.method)
         return self._call_method(method, defining, this_val, args)
@@ -1021,6 +1028,9 @@ class Interpreter:
             info = self._env.classes.get(cls)
             if info is not None and method in info.instance_methods:
                 return info.instance_methods[method], cls
+        mod = self._env.modifier_methods.get(class_name, {})
+        if method in mod:
+            return mod[method], class_name
         raise GlangRuntimeError(
             f"'{class_name}' has no method '{method}'", 0, 0
         )

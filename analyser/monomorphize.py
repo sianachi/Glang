@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 from parser.ast_nodes import (
     Program, Decl, Expr, FunctionDecl, ClassDecl, FieldDecl, StaticFieldDecl,
-    ConstructorDecl, DestructorDecl, MethodDecl,
+    ConstructorDecl, DestructorDecl, MethodDecl, ModifierDecl,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, UsingStmt,
@@ -66,6 +66,8 @@ class Monomorphizer:
         # Pending instantiations: (kind, base_name, concrete_args, mangled_name).
         self._worklist: List[Tuple[str, str, List[TypeNode], str]] = []
         self._new_decls: List[Decl] = []
+        # Generic modifier templates: base class name → list of ModifierDecl templates.
+        self._modifier_templates: Dict[str, List[ModifierDecl]] = {}
 
     def run(self, program: Program) -> Program:
         self._collect_known_decls(program.declarations)
@@ -75,6 +77,14 @@ class Monomorphizer:
                 self._class_templates[d.name] = d
             elif isinstance(d, FunctionDecl) and d.type_params:
                 self._func_templates[d.name] = d
+            elif isinstance(d, ModifierDecl) and d.type_params:
+                # Generic modifier — collect by the base name of its target.
+                # target is always a GenericType like List<T> for generic modifiers.
+                if isinstance(d.target, GenericType):
+                    base = d.target.name
+                else:
+                    base = type_str(d.target)
+                self._modifier_templates.setdefault(base, []).append(d)
             else:
                 kept.append(d)
 
@@ -167,6 +177,20 @@ class Monomorphizer:
             else:
                 interfaces.append(iface)
         self._class_interfaces[mangled] = interfaces
+        # Instantiate any modifier templates that target this base class.
+        for tmpl in self._modifier_templates.get(base, []):
+            if len(tmpl.type_params) == len(args):
+                self._build_modifier_instance(tmpl, args, mangled)
+
+    def _build_modifier_instance(
+        self, tmpl: ModifierDecl, args: List[TypeNode], target_mangled: str
+    ) -> None:
+        mapping = dict(zip(tmpl.type_params, args))
+        clone = copy.deepcopy(tmpl)
+        clone.type_params = []
+        clone.target = NamedType(target_mangled)
+        self._t_decl(clone, mapping)
+        self._new_decls.append(clone)
 
     def _register_function_instance_metadata(
         self, base: str, args: List[TypeNode], mangled: str
@@ -247,6 +271,10 @@ class Monomorphizer:
                 self._t_block(d.body, m)
         elif isinstance(d, DestructorDecl):
             self._t_block(d.body, m)
+        elif isinstance(d, ModifierDecl):
+            d.target = self._t_type(d.target, m)
+            for md in d.methods:
+                self._t_decl(md, m)
 
     def _t_params(self, params, m: Dict[str, TypeNode]) -> None:
         for p in params:

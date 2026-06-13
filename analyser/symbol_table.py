@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 
 from parser.ast_nodes import (
     TypeNode, Param, FunctionDecl, ClassDecl, InterfaceDecl,
@@ -126,6 +126,8 @@ class GlobalEnv:
     classes: Dict[str, ClassInfo] = field(default_factory=dict)
     interfaces: Dict[str, InterfaceInfo] = field(default_factory=dict)
     enums: Dict[str, EnumInfo] = field(default_factory=dict)
+    modifier_methods: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # target type name → {method name → MethodDecl}
 
     def resolve_type(self, node: TypeNode) -> None:
         from parser.ast_nodes import (
