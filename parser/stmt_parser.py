@@ -9,7 +9,7 @@ try:
     from .ast_nodes import (
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
-        ReturnStmt, NamedType, UsingStmt,
+        ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -20,7 +20,7 @@ except ImportError:
     from parser.ast_nodes import (  # type: ignore
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
-        ReturnStmt, NamedType, UsingStmt,
+        ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     )
 
 _TYPE_KWS = {
@@ -70,6 +70,10 @@ class StmtParser:
             return self._parse_foreach()
         if tok.type == TokenType.KW_RETURN:
             return self._parse_return()
+        if tok.type == TokenType.KW_THROW:
+            return self._parse_throw()
+        if tok.type == TokenType.KW_TRY:
+            return self._parse_try_catch()
         if tok.type == TokenType.KW_USING:
             return self._parse_using()
         if tok.type == TokenType.KW_BREAK:
@@ -294,6 +298,37 @@ class StmtParser:
             is_const=True, line=name_tok.line, col=name_tok.col,
         )
         return UsingStmt(decl=decl, body=body, line=tok.line, col=tok.col)
+
+    def _parse_throw(self) -> ThrowStmt:
+        tok = self._s.advance()  # consume 'throw'
+        value = self._ep.parse_expr()
+        self._s.expect(TokenType.SEMICOLON)
+        return ThrowStmt(value=value, line=tok.line, col=tok.col)
+
+    def _parse_try_catch(self) -> TryCatchStmt:
+        tok = self._s.advance()  # consume 'try'
+        body = self.parse_block()
+        catches = []
+        while self._s.check(TokenType.KW_CATCH):
+            self._s.advance()  # consume 'catch'
+            self._s.expect(TokenType.LPAREN)
+            catch_type = self._tp.parse_type()
+            var_tok = self._s.expect(TokenType.IDENT)
+            self._s.expect(TokenType.RPAREN)
+            handler = self.parse_block()
+            catches.append(CatchClause(
+                catch_type=catch_type,
+                var_name=var_tok.value,
+                body=handler,
+                line=var_tok.line,
+                col=var_tok.col,
+            ))
+        if not catches:
+            raise ParseError(
+                "try block requires at least one catch clause",
+                tok.line, tok.col,
+            )
+        return TryCatchStmt(body=body, catches=catches, line=tok.line, col=tok.col)
 
     def _parse_return(self) -> ReturnStmt:
         tok = self._s.advance()  # consume 'return'

@@ -5,26 +5,29 @@
 
 1. [Overview](#1-overview)
 2. [Lexical Structure](#2-lexical-structure)
-3. [Types](#3-types)
+3. [Types](#3-types) — including [Nullable types (§3.5)](#35-nullable-types-t)
 4. [Variables & Declarations](#4-variables--declarations)
 5. [Operators](#5-operators)
-6. [Control Flow](#6-control-flow)
+6. [Control Flow](#6-control-flow) — including [Exceptions (§6.6)](#66-throw--try--catch)
 7. [Functions](#7-functions)
 8. [Memory Model](#8-memory-model)
 9. [Classes](#9-classes)
 10. [Interfaces](#10-interfaces)
 11. [Enums](#11-enums)
-12. [Scope & Lifetime](#12-scope--lifetime)
-13. [Modules](#13-modules)
-14. [Entry Point](#14-entry-point)
-15. [Memory-safety violations](#15-memory-safety-violations)
-16. [Future Work](#16-future-work)
+12. [Object Modifiers](#12-object-modifiers)
+13. [Scope & Lifetime](#13-scope--lifetime)
+14. [Modules](#14-modules)
+15. [Entry Point](#15-entry-point)
+16. [Memory-safety violations](#16-memory-safety-violations)
+17. [Future Work](#17-future-work)
+18. [Standard Library](#18-standard-library)
+19. [Running Programs and Examples](#19-running-programs-and-examples)
 
 ---
 
 ## 1. Overview
 
-A statically-typed, manually-managed, C-style language with single inheritance and interface-based polymorphism. The runtime is intentionally minimal — no garbage collector, no exceptions, no implicit allocations. The only built-in I/O is `print` for diagnostics (§7.5); richer I/O and higher-level facilities (dynamic arrays, GC allocators, string builders, etc.) are provided by a standard library written in the language itself.
+A statically-typed, manually-managed, C-style language with single inheritance and interface-based polymorphism. The runtime is intentionally minimal — no garbage collector, no implicit allocations. The only built-in I/O is `print` for diagnostics (§7.5); richer I/O and higher-level facilities (dynamic arrays, GC allocators, string builders, etc.) are provided by a standard library written in the language itself.
 
 **Design goals:**
 - Simple, unambiguous syntax close to C/Java
@@ -58,13 +61,13 @@ Identifiers start with a letter or underscore, followed by any number of letters
 ### 2.3 Keywords
 
 ```
-alloc     bool      break     byte      char      class
-const     continue  delete    else      enum      extends
-false     float     fn        for       free      if
-implements  import  int       interface namespace new
-null      private   protected public    return    static
-string    super     this      true      using     void
-while
+alloc     bool      break     byte      catch     char
+class     const     continue  delete    else      enum
+extends   false     float     fn        for       free
+if        implements  import  int       interface modifier
+namespace new       null      private   protected public
+return    static    string    super     this      throw
+true      try       using     void      while
 ```
 
 ### 2.4 Literals
@@ -169,7 +172,34 @@ allowed primitive casts are `int <-> float`, `int <-> char`, `int <-> byte`, and
 convenience, an integer *literal* in range coerces to `byte` without a cast
 (see §3.1).
 
-### 3.5 Enum types
+### 3.5 Nullable types (`T?`)
+
+Any non-pointer type can be made nullable with `?`:
+
+```
+int?    // int or null
+string? // string or null
+bool?   // bool or null
+```
+
+Pointer types (`T*`) are already nullable and do not accept `?`.
+
+A nullable variable may be assigned `null` or a value of the base type:
+
+```c
+int? count = null;    // explicitly absent
+int? count2 = 42;     // auto-promotes int → int?
+```
+
+Assigning `T?` to a plain `T` is a compile-time error; use the **null-coalescing** operator `??` to unwrap:
+
+```c
+int x = count ?? 0;   // x = 0 if count is null, else count's value
+```
+
+The `??` operator short-circuits: the right operand is not evaluated when the left is non-null. The zero value of a nullable field is `null`.
+
+### 3.6 Enum types
 
 An enum is a named set of integer constants. Each variant carries a distinct `int` value.
 
@@ -367,6 +397,54 @@ return value;    // typed function
 ```
 
 All non-void code paths must return a value — enforced at compile time.
+
+### 6.6 Throw / Try / Catch
+
+Glang has object-based exception handling. The built-in `Exception` class is always available — no import needed:
+
+```c
+class Exception {
+    string message;
+    Exception(string msg) { ... }   // built-in, do not redeclare
+}
+```
+
+**Subclassing** — define specific exception types by extending `Exception`:
+
+```c
+class IOException extends Exception {
+    IOException(string msg) : super(msg) { }
+}
+
+class NetworkException extends IOException {
+    NetworkException(string msg) : super(msg) { }
+}
+```
+
+**Throwing** — `throw` accepts a pointer to any `Exception` subclass and is a diverging statement:
+
+```c
+throw new IOException("file not found");
+```
+
+**Catching** — one or more typed `catch` clauses, matched top-to-bottom by class hierarchy (first match wins):
+
+```c
+try {
+    openFile(path);
+} catch (IOException* e) {
+    printErr(e->message);   // specific handler
+} catch (Exception* e) {
+    printErr(e->message);   // fallback
+}
+```
+
+- `catch (IOException* e)` catches `IOException` and any subclass (e.g. `NetworkException`).
+- `catch (Exception* e)` is the catch-all.
+- Exceptions propagate through function calls and loops; only `try`/`catch` intercepts them.
+- An unhandled exception prints `Unhandled ClassName: message` to stderr and exits with code 1.
+- `throw` inside a `catch` re-throws or throws a new exception.
+- A `try`/`catch` satisfies the always-returns requirement only when both the try body and every catch handler always return.
 
 ---
 
@@ -748,9 +826,108 @@ HttpStatus s = (HttpStatus) 500;         // SERVER_ERROR
 
 ---
 
-## 12. Scope & Lifetime
+## 12. Object Modifiers
 
-### 12.1 Block scoping
+An **object modifier** adds methods to an existing type from outside its definition — similar to extension methods in C# or extensions in Swift. The type being extended does not need to be modified.
+
+### 12.1 Declaration
+
+```c
+modifier for TypeName {
+    ReturnType methodName(Params) {
+        // body — `this` refers to the receiver
+    }
+}
+```
+
+A modifier block contains only method declarations (no fields, no constructor, no static members). Methods have full access to the receiver via `this`.
+
+For generic types, the modifier is parameterised with the same type variables:
+
+```c
+modifier<T> for List<T> {
+    bool any(fn(T) -> bool predicate) {
+        for (int i = 0; i < this.length(); ++i) {
+            if (predicate(this.get(i))) { return true; }
+        }
+        return false;
+    }
+}
+```
+
+The type variables in `<T>` are bound at instantiation time: `modifier<T> for List<T>` generates a concrete `any` for every distinct `List<X>` used in the program, following the same monomorphization rules as generic classes and functions.
+
+### 12.2 Primitive targets
+
+Modifiers may target primitive types such as `string`. Inside the method body `this` has the primitive type directly (not a pointer):
+
+```c
+modifier for string {
+    int size() { return len(this); }
+    bool startsWith(char c) { return len(this) > 0 && this[0] == c; }
+}
+
+print("hello".size());               // 5
+bool ok = "glang".startsWith('g');   // true
+```
+
+### 12.3 Scope and visibility
+
+- A modifier declared in a file is visible from its declaration to the end of that file, and to any file that imports it.
+- Modifier methods are looked up after the class's own instance methods, so the class always takes precedence. A modifier cannot shadow a method the class already defines.
+- Two modifiers registering the same method name for the same type in the same visible scope are a compile error.
+
+### 12.4 `std/linq.lang`
+
+The standard library uses modifiers to provide LINQ-style collection operations without touching the core class definitions. Importing `std/linq.lang` adds the following methods to `List<T>`, `Span<T>`, and `string`:
+
+| Method | Signature on `List<T>` | Description |
+|---|---|---|
+| `where` | `List<T> where(fn(T) -> bool)` | Filter — new list of matching elements |
+| `any` | `bool any(fn(T) -> bool)` | True if any element matches |
+| `all` | `bool all(fn(T) -> bool)` | True if every element matches |
+| `countWhere` | `int countWhere(fn(T) -> bool)` | Count of matching elements |
+| `first` | `T first(fn(T) -> bool)` | First matching element (exits if none) |
+| `forEach` | `void forEach(fn(T) -> void)` | Apply action to every element |
+| `reduce` | `T reduce(fn(T,T) -> T, T)` | Fold left with an initial value |
+
+`Span<T>` gets the same seven methods (where `where` returns `List<T>`). On `string` the element type is `char` and `where` returns `List<char>`.
+
+Cross-type operations that require a second type parameter remain free functions:
+
+```c
+List<U> select<T, U>(List<T> source, fn(T) -> U mapper)
+List<U> spanSelect<T, U>(Span<T> sp, fn(T) -> U mapper)
+T strReduce<T>(string s, fn(T, char) -> T reducer, T initial)
+```
+
+Example:
+
+```c
+import "std/linq.lang";
+
+int main() {
+    List<int> nums = List<int>();
+    for (int i = 1; i <= 10; ++i) { nums.add(i); }
+
+    // method chaining works because where() returns a List<int>
+    int sumOfEvens = nums
+        .where((int x) -> bool { return x % 2 == 0; })
+        .reduce((int acc, int x) -> int { return acc + x; }, 0);
+    print(sumOfEvens);   // 30
+
+    bool hasW = "hello world".any((char c) -> bool { return c == 'w'; });
+    print(hasW);         // true
+
+    return 0;
+}
+```
+
+---
+
+## 13. Scope & Lifetime
+
+### 13.1 Block scoping
 
 Variables are visible from their declaration to the end of the enclosing `{}` block. There is no hoisting.
 
@@ -765,19 +942,19 @@ int x = 1;
 
 Shadowing is allowed but generates a compiler warning.
 
-### 12.2 Stack lifetime
+### 13.2 Stack lifetime
 
 Stack variables are destroyed in reverse declaration order when their scope exits. If a class has a destructor, it is called.
 
-### 12.3 Heap lifetime
+### 13.3 Heap lifetime
 
 Heap objects live until explicitly freed with `delete` or `free`. The compiler does not track heap lifetimes.
 
 ---
 
-## 13. Modules
+## 14. Modules
 
-### 13.1 Import
+### 14.1 Import
 
 ```c
 import "path/to/file.lang";
@@ -792,7 +969,7 @@ import "std/list.lang";   // resolves to <project>/stdlib/list.lang
 import "std/math.lang";
 ```
 
-### 13.2 Namespaces
+### 14.2 Namespaces
 
 Top-level declarations — functions, classes, interfaces, enums, and nested
 namespaces — may be grouped in a `namespace` block. Members are referenced
@@ -834,7 +1011,7 @@ Namespaces compile away before type checking: every member becomes an
 ordinary top-level declaration whose name carries the prefix, so the rest of
 the pipeline (and error messages) see plain qualified names like `math::abs`.
 
-### 13.3 `using` declarations
+### 14.3 `using` declarations
 
 A `using` declaration removes the need to qualify every reference. It has two
 forms:
@@ -878,7 +1055,7 @@ top level of a file.
 
 ---
 
-## 14. Entry Point
+## 15. Entry Point
 
 Every program must define exactly one `main` function:
 
@@ -893,7 +1070,7 @@ The return value is the process exit code. `0` means success. No command-line ar
 
 ---
 
-## 15. Memory-safety violations
+## 16. Memory-safety violations
 
 These operations are programming errors. The language does not define a way to
 recover from them.
@@ -923,7 +1100,7 @@ runtime error (a `RuntimeError` diagnostic) rather than continuing:
 
 ---
 
-## 16. Future Work
+## 17. Future Work
 
 Since v1, the following have shipped: `const`, access modifiers, string
 operations, the import system (with a `std/` prefix), function pointers,
@@ -931,22 +1108,25 @@ closures, operator overloading, sized `alloc(T, n)` with pointer indexing,
 file-I/O built-ins, **generics** (monomorphized) with a generic standard
 library, the `byte` primitive with `byte[]` blocks and `string`/`byte` interop,
 the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views,
-**namespaces** (section 13.2) with a namespaced standard library, **`using`
-declarations** (section 13.3), and **`using` resource blocks** (section 8.6).
+**namespaces** (section 14.2) with a namespaced standard library, **`using`
+declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
+**object modifiers** (section 12) with LINQ-style collection operations via
+`std/linq.lang`, **nullable types** (`T?` with `??` null-coalescing, section 3.5),
+and **exception handling** (`throw`/`try`/`catch`, section 6.6).
 The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
 | Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
 | Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
-| Exceptions           | Error handling via return values for now           |
+| Exceptions           | Object-based `throw`/`try`/`catch` shipped (§6.6); no `finally` in v1 |
 | Garbage collection   | Planned as a pure-Glang standard-library module; `using` blocks (section 8.6) already provide deterministic scope-exit disposal |
 | Command-line args    | `main(int argc, string[] argv)` — the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
 
 ---
 
-## 17. Standard Library
+## 18. Standard Library
 
 The bundled standard library lives in `stdlib/` and is imported with the `std/`
 prefix (e.g. `import "std/list.lang";`). The file-I/O built-ins (`readFile`,
@@ -963,7 +1143,8 @@ type keywords) — so their members are called as `math::abs(x)`,
 | `std/char.lang`   | `chars::` — `isDigit`/`isAlpha`/`isAlnum`/`isSpace`/`isUpper`/`isLower`, `toUpper`/`toLower`, `digitToInt` |
 | `std/string.lang` | `strings::` — `toUpperStr`/`toLowerStr`, `reverse`, `repeat`, `trim`, `padLeft`, `count`, `replaceChar`, `equalsIgnoreCase` |
 | `std/io.lang`     | `io::` — `appendFile`, `readLineCount`, `dieWith` (built on the I/O built-ins) |
-| `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `isEmpty`, `clear` |
+| `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `isEmpty`, `clear`, `span` |
+| `std/linq.lang`   | Modifier methods on `List<T>`, `Span<T>`, and `string`: `where`, `any`, `all`, `countWhere`, `first`, `forEach`, `reduce`; free functions `select<T,U>`, `spanSelect<T,U>`, `strReduce<T>` (see §12.4) |
 | `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek`, `length`, `isEmpty`                   |
 | `std/queue.lang`  | `Queue<T>` — ring buffer: `enqueue`, `dequeue`, `peek`, `length`, `isEmpty` |
 | `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length`  |
@@ -1016,7 +1197,7 @@ int main() {
 
 ---
 
-## 18. Running Programs and Examples
+## 19. Running Programs and Examples
 
 ```bash
 # Run a program

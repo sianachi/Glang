@@ -93,6 +93,22 @@ class GenericType(TypeNode):
 
 
 @dataclass
+class NullableType(TypeNode):
+    """A nullable wrapping of any non-pointer type: T?.
+
+    Makes null a legal value for value types (int, string, class values, etc.).
+    Pointers are already implicitly nullable so ``T*?`` is rejected by the parser.
+
+    Examples:
+      int?     → NullableType(NamedType("int"))
+      string?  → NullableType(NamedType("string"))
+    """
+    base: TypeNode
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class FunctionPointerType(TypeNode):
     """A function pointer type: fn(T1, T2, ...) -> R.
 
@@ -939,5 +955,50 @@ class SuperExpr(Expr):
     Example:
       super.speak()  →  MethodCallExpr(SuperExpr(), "speak", [], False)
     """
+    line: int = 0
+    col: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Exception-handling statements
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ThrowStmt(Stmt):
+    """Raise an exception: throw new IOException("msg");
+
+    The value must be a pointer to an Exception subclass.
+    """
+    value: Expr
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class CatchClause:
+    """One catch clause in a try/catch statement.
+
+    catch_type must be a pointer to Exception or a subclass.
+    Example:
+      catch (IOException* e) { ... }
+    """
+    catch_type: TypeNode
+    var_name: str
+    body: 'Block'
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class TryCatchStmt(Stmt):
+    """A try block with one or more typed catch clauses.
+
+    Example:
+      try { risky(); }
+      catch (IOException* e) { ... }
+      catch (Exception* e) { ... }
+    """
+    body: 'Block'
+    catches: 'List[CatchClause]'
     line: int = 0
     col: int = 0

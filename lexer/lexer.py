@@ -427,6 +427,9 @@ class Lexer:
         if ch == ":":
             if self._match(":"): return Token(TokenType.COLONCOLON, "::", line, col)
             return Token(TokenType.COLON, ":", line, col)
+        if ch == "?":
+            if self._match("?"): return Token(TokenType.QUESTION_QUESTION, "??", line, col)
+            return Token(TokenType.QUESTION, "?", line, col)
 
         raise LexError(f"unexpected character {ch!r}", line, col)
 

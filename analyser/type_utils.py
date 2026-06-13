@@ -4,7 +4,7 @@ from typing import List, TYPE_CHECKING
 from parser.ast_nodes import (
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, Expr,
     IdentifierExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
-    GenericType,
+    GenericType, NullableType,
 )
 from errors.errors import TypeError
 
@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 
 PRIMITIVES = {"int", "float", "bool", "char", "byte", "string", "void"}
 NULL_TYPE = NamedType("null")
+
+
+def is_nullable(t: TypeNode) -> bool:
+    return isinstance(t, NullableType)
 
 
 def types_equal(a: TypeNode, b: TypeNode) -> bool:
@@ -32,6 +36,8 @@ def types_equal(a: TypeNode, b: TypeNode) -> bool:
             return False
         return all(types_equal(pa, pb)
                    for pa, pb in zip(a.param_types, b.param_types))
+    if isinstance(a, NullableType):
+        return types_equal(a.base, b.base)
     return False
 
 
@@ -39,11 +45,18 @@ def is_assignable(from_type: TypeNode, to_type: TypeNode, env: GlobalEnv) -> boo
     if types_equal(from_type, to_type):
         return True
 
-    # null → any pointer
+    # null → any pointer or nullable
     if isinstance(from_type, NamedType) and from_type.name == "null":
         if isinstance(to_type, PointerType):
             return True
         if isinstance(to_type, FunctionPointerType):
+            return True
+        if isinstance(to_type, NullableType):
+            return True
+
+    # T → T?  (implicit promotion to nullable)
+    if isinstance(to_type, NullableType):
+        if types_equal(from_type, to_type.base):
             return True
 
     # Subclass pointer covariance
@@ -111,6 +124,8 @@ def type_str(t: TypeNode) -> str:
     if isinstance(t, GenericType):
         args = ", ".join(type_str(a) for a in t.type_args)
         return f"{t.name}<{args}>"
+    if isinstance(t, NullableType):
+        return type_str(t.base) + "?"
     return "?"
 
 
@@ -199,6 +214,17 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
         if l_byte and r_byte:
             return NamedType("byte")
         raise TypeError(f"operator '{op}' requires int operands", 0, 0)
+
+    if op == "??":
+        if not isinstance(left, NullableType):
+            raise TypeError(
+                f"operator '??': left operand must be a nullable type, got '{type_str(left)}'", 0, 0
+            )
+        if not types_equal(left.base, right):
+            raise TypeError(
+                f"operator '??': right operand must be '{type_str(left.base)}', got '{type_str(right)}'", 0, 0
+            )
+        return left.base
 
     raise TypeError(f"unknown operator '{op}'", 0, 0)
 

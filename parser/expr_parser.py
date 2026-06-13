@@ -45,6 +45,7 @@ _ASSIGN_OPS = {
 }
 
 _INFIX_BP: dict[TokenType, Tuple[int, int]] = {
+    TokenType.QUESTION_QUESTION: (9, 10),  # ?? — lower than || so it binds loosely
     TokenType.OR:      (11, 12),
     TokenType.AND:     (21, 22),
     TokenType.PIPE:    (31, 32),

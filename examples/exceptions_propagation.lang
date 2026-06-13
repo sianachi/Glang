@@ -1,0 +1,105 @@
+// exceptions_propagation.lang — demonstrates exceptions propagating through
+// multiple call-stack frames, re-throwing, and the unhandled-exception path.
+//
+// Run with:
+//     python3 main.py run examples/exceptions_propagation.lang
+
+// ------------------------------------------------------------------
+// Exception types
+// ------------------------------------------------------------------
+
+class ParseException extends Exception {
+    int lineNum;
+    ParseException(string msg, int line) : super(msg) {
+        this.lineNum = line;
+    }
+}
+
+class ValidationException extends Exception {
+    ValidationException(string msg) : super(msg) { }
+}
+
+// ------------------------------------------------------------------
+// Simulated "config parsing" stack: parse -> validate -> process
+// ------------------------------------------------------------------
+
+// Innermost: validates a single value
+void validateAge(int age) {
+    if (age < 0) {
+        throw new ValidationException("age cannot be negative");
+    }
+    if (age > 150) {
+        throw new ValidationException("age is unreasonably large");
+    }
+}
+
+// Middle: parses a field (may throw ParseException or re-throw ValidationException)
+int parseAgeField(int raw, int lineNum) {
+    if (raw == -999) {
+        throw new ParseException("missing required field: age", lineNum);
+    }
+    try {
+        validateAge(raw);
+    } catch (ValidationException* e) {
+        // wrap in a ParseException so the caller sees one error type
+        throw new ParseException(e->message, lineNum);
+    }
+    return raw;
+}
+
+// Outer: processes a record; returns false on error
+bool processRecord(int rawAge, int lineNum) {
+    try {
+        int age = parseAgeField(rawAge, lineNum);
+        print("parsed age:");
+        print(age);
+        return true;
+    } catch (ParseException* e) {
+        print("parse error on line:");
+        print(e->lineNum);
+        print(e->message);
+        return false;
+    }
+}
+
+// ------------------------------------------------------------------
+// main
+// ------------------------------------------------------------------
+
+int main() {
+    print("=== valid record ===");
+    processRecord(25, 1);
+
+    print("=== negative age ===");
+    processRecord(-5, 2);
+
+    print("=== missing field ===");
+    processRecord(-999, 3);
+
+    print("=== age too large ===");
+    processRecord(200, 4);
+
+    // Demonstrate propagation past a loop
+    print("=== loop with early exit via exception ===");
+    int i = 0;
+    try {
+        while (i < 5) {
+            i = i + 1;
+            if (i == 3) {
+                throw new ValidationException("stopping at 3");
+            }
+            print("i =");
+            print(i);
+        }
+    } catch (ValidationException* e) {
+        print("caught after loop:");
+        print(e->message);
+        print("i was:");
+        print(i);
+    }
+
+    // Demonstrate unhandled exception (comment out to keep exit 0)
+    // throw new Exception("this would exit with code 1");
+
+    return 0;
+}

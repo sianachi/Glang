@@ -3,7 +3,7 @@ from typing import List
 
 from parser.ast_nodes import (
     Stmt, ReturnStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt, ForeachStmt,
-    Block, UsingStmt,
+    Block, UsingStmt, ThrowStmt, TryCatchStmt,
 )
 
 
@@ -17,6 +17,14 @@ def always_returns(stmts: List[Stmt]) -> bool:
 def _stmt_always_returns(stmt: Stmt) -> bool:
     if isinstance(stmt, ReturnStmt):
         return True
+
+    if isinstance(stmt, ThrowStmt):
+        return True
+
+    if isinstance(stmt, TryCatchStmt):
+        body_returns = always_returns(stmt.body.stmts)
+        handlers_return = all(always_returns(c.body.stmts) for c in stmt.catches)
+        return body_returns and handlers_return
 
     if isinstance(stmt, IfStmt):
         if stmt.else_branch is None:

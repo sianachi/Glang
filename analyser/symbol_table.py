@@ -131,7 +131,7 @@ class GlobalEnv:
 
     def resolve_type(self, node: TypeNode) -> None:
         from parser.ast_nodes import (
-            PointerType, ArrayType, FunctionPointerType, GenericType,
+            PointerType, ArrayType, FunctionPointerType, GenericType, NullableType,
         )
         if isinstance(node, GenericType):
             # Monomorphization should have rewritten every GenericType already;
@@ -158,6 +158,8 @@ class GlobalEnv:
             for p in node.param_types:
                 self.resolve_type(p)
             self.resolve_type(node.return_type)
+        elif isinstance(node, NullableType):
+            self.resolve_type(node.base)
 
     def is_class(self, name: str) -> bool:
         return name in self.classes

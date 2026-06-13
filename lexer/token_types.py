@@ -65,6 +65,10 @@ class TokenType(Enum):
     KW_PROTECTED = auto()  # protected
     KW_PUBLIC    = auto()  # public
     KW_MODIFIER  = auto()  # modifier
+    # Exceptions
+    KW_TRY       = auto()  # try
+    KW_CATCH     = auto()  # catch
+    KW_THROW     = auto()  # throw
 
     # --- Arithmetic operators ---
     PLUS    = auto()  # +
@@ -110,6 +114,10 @@ class TokenType(Enum):
     # --- Increment / Decrement ---
     PLUS_PLUS   = auto()  # ++
     MINUS_MINUS = auto()  # --
+
+    # --- Nullable / null-coalescing ---
+    QUESTION          = auto()  # ?
+    QUESTION_QUESTION = auto()  # ??
 
     # --- Punctuation ---
     LBRACE    = auto()  # {
@@ -172,4 +180,7 @@ KEYWORDS: dict[str, TokenType] = {
     "protected":  TokenType.KW_PROTECTED,
     "public":     TokenType.KW_PUBLIC,
     "modifier":   TokenType.KW_MODIFIER,
+    "try":        TokenType.KW_TRY,
+    "catch":      TokenType.KW_CATCH,
+    "throw":      TokenType.KW_THROW,
 }

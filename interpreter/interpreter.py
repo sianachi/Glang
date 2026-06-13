@@ -26,14 +26,14 @@ from parser.ast_nodes import (
     FunctionDecl, ClassDecl, StaticFieldDecl, EnumDecl,
     MethodDecl, ConstructorDecl, DestructorDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
-    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
+    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
+    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, NullableType,
 )
 from errors.errors import RuntimeError as GlangRuntimeError
 from analyser.symbol_table import GlobalEnv
@@ -162,6 +162,14 @@ class GlangExitException(Exception):
         self.code = code
 
 
+class GlangThrowException(Exception):
+    """Raised by `throw` statements; caught by `try`/`catch` or the top-level runner."""
+    def __init__(self, value: 'Value', line: int, col: int) -> None:
+        self.value = value   # Value wrapping an ObjectInstance (Exception subclass)
+        self.line = line
+        self.col = col
+
+
 # ---------------------------------------------------------------------------
 # Interpreter
 # ---------------------------------------------------------------------------
@@ -204,6 +212,17 @@ class Interpreter:
             result = self._call_function(main.decl, [])
         except GlangExitException as e:
             return e.code
+        except GlangThrowException as e:
+            import sys as _sys
+            raw_msg = self._exception_message(e.value)
+            class_name = self._exception_class(e.value)
+            msg = f"Unhandled {class_name}: {raw_msg}"
+            self.err_output.append(msg)
+            if self._err is not None:
+                self._err.write(msg + "\n")
+            else:
+                _sys.stderr.write(msg + "\n")
+            return 1
         if isinstance(result.raw, int) and not isinstance(result.raw, bool):
             return result.raw
         return 0
@@ -373,6 +392,32 @@ class Interpreter:
         elif isinstance(stmt, ContinueStmt):
             raise ContinueSignal()
 
+        elif isinstance(stmt, ThrowStmt):
+            exc_val = self._eval(stmt.value)
+            raise GlangThrowException(exc_val, stmt.line, stmt.col)
+
+        elif isinstance(stmt, TryCatchStmt):
+            try:
+                self._exec_block(stmt.body)
+            except GlangThrowException as exc:
+                thrown_class = self._exception_class(exc.value)
+                chain = superclass_chain(thrown_class, self._env)
+                handled = False
+                for clause in stmt.catches:
+                    catch_class = clause.catch_type.base.name
+                    if catch_class in chain:
+                        self._frame.push_scope()
+                        try:
+                            box = self._new_box(exc.value)
+                            self._frame.define(clause.var_name, box)
+                            self._exec_block(clause.body)
+                        finally:
+                            self._frame.pop_scope()
+                        handled = True
+                        break
+                if not handled:
+                    raise
+
         else:
             self._eval(stmt)  # bare expression statement
 
@@ -501,6 +546,12 @@ class Interpreter:
             if left.raw:
                 return Value(NamedType("bool"), True)
             return Value(NamedType("bool"), bool(self._eval(expr.right).raw))
+        if expr.op == "??":
+            left = self._eval(expr.left)
+            if left.raw is not None:
+                base_t = left.type.base if isinstance(left.type, NullableType) else left.type
+                return Value(base_t, left.raw)
+            return self._eval(expr.right)
         left = self._eval(expr.left)
         right = self._eval(expr.right)
         return self._apply_binary(expr.op, left, right, expr.line, expr.col)
@@ -1310,6 +1361,10 @@ class Interpreter:
                 return Value(target_type, None)
             if isinstance(target_type, PointerType):
                 return Value(target_type, Pointer(None))
+            if isinstance(target_type, NullableType):
+                return Value(target_type, None)
+        if isinstance(target_type, NullableType):
+            return Value(target_type, value.raw)
         # A byte is always kept in 0..255; this also realises implicit
         # int-literal → byte coercion on every store / param bind / return.
         if isinstance(target_type, NamedType) and target_type.name == "byte":
@@ -1319,7 +1374,30 @@ class Interpreter:
     def _is(self, value: Value, name: str) -> bool:
         return isinstance(value.type, NamedType) and value.type.name == name
 
+    def _exception_instance(self, val: 'Value') -> 'Optional[ObjectInstance]':
+        """Dereference an Exception pointer to get the ObjectInstance."""
+        ptr = val.raw
+        if isinstance(ptr, Pointer) and ptr.target is not None:
+            inner = ptr.target.value.raw
+            if isinstance(inner, ObjectInstance):
+                return inner
+        return None
+
+    def _exception_class(self, val: 'Value') -> str:
+        inst = self._exception_instance(val)
+        return inst.class_name if inst is not None else "Exception"
+
+    def _exception_message(self, val: 'Value') -> str:
+        inst = self._exception_instance(val)
+        if inst is not None:
+            msg_box = inst.fields.get("message")
+            if msg_box is not None:
+                return str(msg_box.value.raw)
+        return "(no message)"
+
     def _zero_value(self, t: TypeNode) -> Value:
+        if isinstance(t, NullableType):
+            return Value(t, None)
         if isinstance(t, FunctionPointerType):
             return Value(t, None)
         if isinstance(t, PointerType):

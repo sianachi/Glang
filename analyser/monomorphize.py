@@ -28,8 +28,9 @@ from parser.ast_nodes import (
     Program, Decl, Expr, FunctionDecl, ClassDecl, FieldDecl, StaticFieldDecl,
     ConstructorDecl, DestructorDecl, MethodDecl, ModifierDecl,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
+    NullableType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
-    ForeachStmt, ReturnStmt, UsingStmt,
+    ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -220,6 +221,9 @@ class Monomorphizer:
             t.param_types = [self._t_type(p, m) for p in t.param_types]
             t.return_type = self._t_type(t.return_type, m)
             return t
+        if isinstance(t, NullableType):
+            t.base = self._t_type(t.base, m)
+            return t
         if isinstance(t, GenericType):
             concrete = [self._t_type(a, m) for a in t.type_args]
             name = self._register("class", t.name, concrete, t.line, t.col)
@@ -343,6 +347,14 @@ class Monomorphizer:
         elif isinstance(s, ReturnStmt):
             if s.value is not None:
                 self._t_expr(s.value, m)
+        elif isinstance(s, ThrowStmt):
+            self._t_expr(s.value, m)
+        elif isinstance(s, TryCatchStmt):
+            self._t_block(s.body, m)
+            for clause in s.catches:
+                clause.catch_type = self._t_type(clause.catch_type, m)
+                with self._scope():
+                    self._t_block(clause.body, m)
         elif isinstance(s, Expr):
             # A bare expression statement (e.g. `foo();`, `x.bar();`).
             self._t_expr(s, m)

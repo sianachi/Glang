@@ -1,0 +1,88 @@
+// exceptions_basic.lang — basic throw / try / catch demo.
+//
+// Run with:
+//     python3 main.py run examples/exceptions_basic.lang
+
+// ------------------------------------------------------------------
+// Exception hierarchy
+// ------------------------------------------------------------------
+
+class MathException extends Exception {
+    MathException(string msg) : super(msg) { }
+}
+
+class DivisionByZeroException extends MathException {
+    DivisionByZeroException() : super("division by zero") { }
+}
+
+// ------------------------------------------------------------------
+// Library functions that throw
+// ------------------------------------------------------------------
+
+int safeDivide(int a, int b) {
+    if (b == 0) {
+        throw new DivisionByZeroException();
+    }
+    return a / b;
+}
+
+int safeSqrt(int n) {
+    if (n < 0) {
+        throw new MathException("cannot take square root of a negative number");
+    }
+    // Integer Newton iteration
+    int x = n;
+    int prev = 0;
+    while (x != prev) {
+        prev = x;
+        x = (x + n / x) / 2;
+    }
+    return x;
+}
+
+// ------------------------------------------------------------------
+// main
+// ------------------------------------------------------------------
+
+int main() {
+    // --- divide by zero ---
+    print("--- division ---");
+    try {
+        int result = safeDivide(10, 2);
+        print("10 / 2 =");
+        print(result);
+
+        int bad = safeDivide(7, 0);   // throws
+        print("should not reach here");
+    } catch (DivisionByZeroException* e) {
+        print("caught DivisionByZeroException:");
+        print(e->message);
+    } catch (MathException* e) {
+        print("caught MathException:");
+        print(e->message);
+    }
+
+    // --- sqrt ---
+    print("--- sqrt ---");
+    try {
+        print("sqrt(144) =");
+        print(safeSqrt(144));
+
+        print("sqrt(-1) — should throw:");
+        safeSqrt(-1);
+    } catch (MathException* e) {
+        print("caught MathException:");
+        print(e->message);
+    }
+
+    // --- unmatched subclass still caught by superclass handler ---
+    print("--- superclass catch-all ---");
+    try {
+        throw new DivisionByZeroException();
+    } catch (MathException* e) {
+        print("caught via MathException handler:");
+        print(e->message);
+    }
+
+    return 0;
+}

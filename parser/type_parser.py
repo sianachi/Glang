@@ -3,16 +3,18 @@ from __future__ import annotations
 try:
     from .token_stream import TokenStream
     from ..lexer.token_types import TokenType
+    from ..errors.errors import ParseError
     from .ast_nodes import (
         TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
-        GenericType,
+        GenericType, NullableType,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
     from lexer.token_types import TokenType  # type: ignore
+    from errors.errors import ParseError  # type: ignore
     from parser.ast_nodes import (  # type: ignore
         TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
-        GenericType,
+        GenericType, NullableType,
     )
 
 _TYPE_KEYWORDS = {
@@ -75,6 +77,15 @@ class TypeParser:
         while self._s.check(TokenType.STAR):
             star = self._s.advance()
             node = PointerType(base=node, line=star.line, col=star.col)
+
+        if self._s.check(TokenType.QUESTION):
+            q = self._s.advance()
+            if isinstance(node, (PointerType, FunctionPointerType)):
+                raise ParseError(
+                    "pointer types are already nullable; use 'T*' without '?'",
+                    q.line, q.col,
+                )
+            node = NullableType(base=node, line=q.line, col=q.col)
 
         if self._s.check(TokenType.LBRACKET):
             lbr = self._s.advance()

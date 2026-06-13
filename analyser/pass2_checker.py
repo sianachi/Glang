@@ -6,20 +6,20 @@ from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
-    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt,
+    ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    NamedType, PointerType, FunctionPointerType,
+    NamedType, PointerType, FunctionPointerType, NullableType,
 )
 from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
 from analyser.type_utils import (
     NULL_TYPE, is_assignable, is_integer, is_byte, is_bool,
-    is_pointer, is_array, is_string, pointer_base, type_str,
+    is_pointer, is_array, is_string, is_nullable, pointer_base, type_str,
     is_lvalue, binary_result_type, unary_result_type,
     superclass_chain, types_equal,
 )
@@ -452,6 +452,53 @@ class Pass2Checker:
         elif isinstance(stmt, ContinueStmt):
             if not self._in_loop:
                 raise TypeError("'continue' outside a loop", stmt.line, stmt.col)
+
+        elif isinstance(stmt, ThrowStmt):
+            val_t = self._check_expr(stmt.value)
+            if not isinstance(val_t, PointerType):
+                raise TypeError(
+                    f"'throw' requires a pointer to an Exception subclass, got '{type_str(val_t)}'",
+                    stmt.line, stmt.col,
+                )
+            base = val_t.base
+            if not (isinstance(base, NamedType) and self._env.is_class(base.name)):
+                raise TypeError(
+                    f"'throw' requires a pointer to a class, got '{type_str(val_t)}'",
+                    stmt.line, stmt.col,
+                )
+            chain = superclass_chain(base.name, self._env)
+            if "Exception" not in chain:
+                raise TypeError(
+                    f"'{base.name}' does not extend Exception",
+                    stmt.line, stmt.col,
+                )
+
+        elif isinstance(stmt, TryCatchStmt):
+            self._check_block(stmt.body)
+            for clause in stmt.catches:
+                ct = clause.catch_type
+                if not isinstance(ct, PointerType):
+                    raise TypeError(
+                        f"catch type must be a pointer to an Exception subclass, got '{type_str(ct)}'",
+                        clause.line, clause.col,
+                    )
+                base = ct.base
+                if not (isinstance(base, NamedType) and self._env.is_class(base.name)):
+                    raise TypeError(
+                        f"catch type must be a pointer to a class, got '{type_str(ct)}'",
+                        clause.line, clause.col,
+                    )
+                chain = superclass_chain(base.name, self._env)
+                if "Exception" not in chain:
+                    raise TypeError(
+                        f"'{base.name}' does not extend Exception",
+                        clause.line, clause.col,
+                    )
+                saved_scope = self._scope
+                self._scope = self._scope.child()
+                self._scope.define(clause.var_name, ct, clause.line, clause.col, False)
+                self._check_block(clause.body)
+                self._scope = saved_scope
 
         else:
             # bare expression statement

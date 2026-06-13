@@ -39,9 +39,9 @@ from parser.ast_nodes import (
     Program, Decl, Expr, NamespaceDecl, UsingDecl,
     FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
-    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
+    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType, NullableType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
-    ForeachStmt, ReturnStmt, UsingStmt,
+    ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -299,6 +299,8 @@ class NamespaceResolver:
             t.name = self._resolve_type_name(t.name, p, t.line, t.col)
             for a in t.type_args:
                 self._r_type(a, p)
+        elif isinstance(t, NullableType):
+            self._r_type(t.base, p)
 
     # ------------------------------------------------------------------
     # Statements
@@ -355,6 +357,13 @@ class NamespaceResolver:
         elif isinstance(s, ReturnStmt):
             if s.value is not None:
                 self._r_expr(s.value, p)
+        elif isinstance(s, ThrowStmt):
+            self._r_expr(s.value, p)
+        elif isinstance(s, TryCatchStmt):
+            self._r_block(s.body, p)
+            for clause in s.catches:
+                clause.catch_type = self._r_type(clause.catch_type, p)
+                self._r_block(clause.body, p)
         elif isinstance(s, Expr):
             self._r_expr(s, p)
         # BreakStmt / ContinueStmt carry nothing.

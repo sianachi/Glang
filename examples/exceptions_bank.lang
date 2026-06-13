@@ -1,0 +1,146 @@
+// exceptions_bank.lang — a small bank account simulation showing how
+// exception hierarchies model domain errors cleanly.
+//
+// Run with:
+//     python3 main.py run examples/exceptions_bank.lang
+
+// ------------------------------------------------------------------
+// Exception hierarchy
+// ------------------------------------------------------------------
+
+class BankException extends Exception {
+    BankException(string msg) : super(msg) { }
+}
+
+class InsufficientFundsException extends BankException {
+    int shortfall;
+    InsufficientFundsException(string msg, int amount) : super(msg) {
+        this.shortfall = amount;
+    }
+}
+
+class AccountFrozenException extends BankException {
+    AccountFrozenException() : super("account is frozen") { }
+}
+
+class InvalidAmountException extends BankException {
+    InvalidAmountException(string msg) : super(msg) { }
+}
+
+// ------------------------------------------------------------------
+// BankAccount class
+// ------------------------------------------------------------------
+
+class BankAccount {
+    int balance;
+    bool frozen;
+
+    BankAccount(int initial) {
+        this.balance = initial;
+        this.frozen = false;
+    }
+
+    void freeze() {
+        this.frozen = true;
+    }
+
+    void deposit(int amount) {
+        if (this.frozen) {
+            throw new AccountFrozenException();
+        }
+        if (amount <= 0) {
+            throw new InvalidAmountException("deposit amount must be positive");
+        }
+        this.balance = this.balance + amount;
+    }
+
+    void withdraw(int amount) {
+        if (this.frozen) {
+            throw new AccountFrozenException();
+        }
+        if (amount <= 0) {
+            throw new InvalidAmountException("withdrawal amount must be positive");
+        }
+        if (amount > this.balance) {
+            throw new InsufficientFundsException(
+                "insufficient funds",
+                amount - this.balance
+            );
+        }
+        this.balance = this.balance - amount;
+    }
+
+    int getBalance() {
+        return this.balance;
+    }
+}
+
+// ------------------------------------------------------------------
+// Helper — attempt a transfer, catching specific errors
+// ------------------------------------------------------------------
+
+void transfer(BankAccount* from, BankAccount* to, int amount) {
+    try {
+        from->withdraw(amount);
+        to->deposit(amount);
+        print("transfer ok, amount:");
+        print(amount);
+    } catch (InsufficientFundsException* e) {
+        print("transfer failed — insufficient funds. shortfall:");
+        print(e->shortfall);
+    } catch (AccountFrozenException* e) {
+        print("transfer failed —");
+        print(e->message);
+    } catch (BankException* e) {
+        print("transfer failed (bank error):");
+        print(e->message);
+    }
+}
+
+// ------------------------------------------------------------------
+// main
+// ------------------------------------------------------------------
+
+int main() {
+    BankAccount* alice = new BankAccount(500);
+    BankAccount* bob   = new BankAccount(100);
+
+    print("=== initial balances ===");
+    print("alice:");
+    print(alice->getBalance());
+    print("bob:");
+    print(bob->getBalance());
+
+    print("=== alice -> bob: 200 ===");
+    transfer(alice, bob, 200);
+    print("alice:");
+    print(alice->getBalance());
+    print("bob:");
+    print(bob->getBalance());
+
+    print("=== alice -> bob: 400 (will fail) ===");
+    transfer(alice, bob, 400);
+    print("alice:");
+    print(alice->getBalance());
+
+    print("=== freeze alice, try deposit ===");
+    alice->freeze();
+    try {
+        alice->deposit(50);
+    } catch (AccountFrozenException* e) {
+        print("caught:");
+        print(e->message);
+    }
+
+    print("=== invalid amount ===");
+    try {
+        bob->deposit(-10);
+    } catch (InvalidAmountException* e) {
+        print("caught:");
+        print(e->message);
+    }
+
+    delete alice;
+    delete bob;
+    return 0;
+}
