@@ -1045,6 +1045,8 @@ class Pass2Checker:
             "getArgCount": ([], NamedType("int")),
             "getArg": ([NamedType("int")], NamedType("string")),
             "exit": ([NamedType("int")], NamedType("void")),
+            "intToStr": ([NamedType("int")], NamedType("string")),
+            "readStdin": ([], NamedType("string")),
         }
         signature = fixed.get(expr.name)
         if signature is None:

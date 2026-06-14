@@ -1,0 +1,99 @@
+// std/set.lang — an unordered collection of distinct values, Set<T>.
+//
+// Backed by a List<T>; membership is checked by linear scan using ==, so any
+// type that supports equality works (int, string, char, ...). Duplicate adds
+// are silently ignored. For small-to-medium sets this is simpler and
+// sufficient; a hashed set would need a per-type hash function the language
+// cannot express generically yet.
+
+import "std/list.lang";
+
+class Set<T> {
+    List<T> items;
+
+    Set() {
+        this.items = List<T>();
+    }
+
+    int size() {
+        return this.items.length();
+    }
+
+    bool isEmpty() {
+        return this.items.isEmpty();
+    }
+
+    bool contains(T item) {
+        return this.items.contains(item);
+    }
+
+    // Add `item` if it is not already in the set.
+    void add(T item) {
+        if (!(this.items.contains(item))) {
+            this.items.add(item);
+        }
+    }
+
+    // Remove `item` if present; does nothing when absent.
+    void remove(T item) {
+        int idx = this.items.indexOf(item);
+        if (idx >= 0) {
+            this.items.removeAt(idx);
+        }
+    }
+
+    void clear() {
+        this.items.clear();
+    }
+
+    // Return all elements as a List (order is insertion order of unique adds).
+    List<T> toList() {
+        List<T> result = List<T>();
+        int n = this.items.length();
+        for (int i = 0; i < n; ++i) {
+            result.add(this.items.get(i));
+        }
+        return result;
+    }
+
+    // Return a new set containing every element present in this set OR `other`.
+    Set<T> union(Set<T> other) {
+        Set<T> result = Set<T>();
+        int n = this.items.length();
+        for (int i = 0; i < n; ++i) {
+            result.add(this.items.get(i));
+        }
+        List<T> ol = other.toList();
+        int m = ol.length();
+        for (int i = 0; i < m; ++i) {
+            result.add(ol.get(i));
+        }
+        return result;
+    }
+
+    // Return a new set containing only elements present in both sets.
+    Set<T> intersection(Set<T> other) {
+        Set<T> result = Set<T>();
+        int n = this.items.length();
+        for (int i = 0; i < n; ++i) {
+            T item = this.items.get(i);
+            if (other.contains(item)) {
+                result.add(item);
+            }
+        }
+        return result;
+    }
+
+    // Return a new set containing elements in this set but not in `other`.
+    Set<T> difference(Set<T> other) {
+        Set<T> result = Set<T>();
+        int n = this.items.length();
+        for (int i = 0; i < n; ++i) {
+            T item = this.items.get(i);
+            if (!(other.contains(item))) {
+                result.add(item);
+            }
+        }
+        return result;
+    }
+}

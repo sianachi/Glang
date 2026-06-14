@@ -3,6 +3,9 @@
 // are always available without importing anything; this module adds
 // conveniences on top of them.
 
+import "std/list.lang";
+import "std/string.lang";
+
 namespace io {
 
 // Append `text` to the file at `path`, creating it if it does not yet exist.
@@ -40,6 +43,28 @@ int readLineCount(string path) {
 void dieWith(string msg, int code) {
     printErr(msg);
     exit(code);
+}
+
+// Read every line from `path` and return them as a list. Lines are split on
+// '\n'; a trailing newline does not produce a final empty element.
+List<string> readLines(string path) {
+    string text = readFile(path);
+    List<string> lines = strings::split(text, '\n');
+    int n = lines.length();
+    if (n > 0 && lines.get(n - 1) == "") {
+        lines.removeAt(n - 1);
+    }
+    return lines;
+}
+
+// Read a single line from `path` by 0-based `lineIndex`. Throws an Exception
+// if `lineIndex` is out of range.
+string readLine(string path, int lineIndex) {
+    List<string> lines = readLines(path);
+    if (lineIndex < 0 || lineIndex >= lines.length()) {
+        throw new Exception("readLine: index out of range");
+    }
+    return lines.get(lineIndex);
 }
 
 }

@@ -5,6 +5,7 @@
 // toString(char).
 
 import "std/char.lang";
+import "std/list.lang";
 
 namespace strings {
 
@@ -95,6 +96,89 @@ string replaceChar(string s, char from, char to) {
 
 bool equalsIgnoreCase(string a, string b) {
     return toLowerStr(a) == toLowerStr(b);
+}
+
+// First index of character `c` in `s`, or -1 if not present.
+int indexOf(string s, char c) {
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        if (s[i] == c) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Substring by start position and character count (rather than end position).
+string substring(string s, int start, int length) {
+    return substr(s, start, start + length);
+}
+
+// Right-pad `s` with `pad` until it is at least `width` characters wide.
+string padRight(string s, int width, char pad) {
+    string out = s;
+    string p = toString(pad);
+    while (len(out) < width) {
+        out = out + p;
+    }
+    return out;
+}
+
+// Convert an integer to its decimal string representation.
+string intToStr(int n) {
+    if (n == 0) {
+        return "0";
+    }
+    bool neg = n < 0;
+    string result = "";
+    int m = n;
+    while (m != 0) {
+        int digit = m % 10;
+        if (digit < 0) { digit = -digit; }
+        char c = (char)(digit + 48);
+        result = toString(c) + result;
+        m = m / 10;
+    }
+    if (neg) {
+        result = "-" + result;
+    }
+    return result;
+}
+
+// Convert a single character to a one-character string.
+string charToStr(char c) {
+    return toString(c);
+}
+
+// Split `s` on every occurrence of `delim`. Adjacent delimiters produce empty
+// segments; the result always contains at least one element.
+List<string> split(string s, char delim) {
+    List<string> result = List<string>();
+    string current = "";
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        if (s[i] == delim) {
+            result.add(current);
+            current = "";
+        } else {
+            current = current + toString(s[i]);
+        }
+    }
+    result.add(current);
+    return result;
+}
+
+// Join a list of strings inserting `sep` between each pair.
+string join(List<string> parts, string sep) {
+    string out = "";
+    int n = parts.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) {
+            out = out + sep;
+        }
+        out = out + parts.get(i);
+    }
+    return out;
 }
 
 }

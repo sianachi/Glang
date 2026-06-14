@@ -1,0 +1,23 @@
+=== initial balances ===
+alice:
+500
+bob:
+100
+=== alice -> bob: 200 ===
+transfer ok, amount:
+200
+alice:
+300
+bob:
+300
+=== alice -> bob: 400 (will fail) ===
+transfer failed — insufficient funds. shortfall:
+100
+alice:
+300
+=== freeze alice, try deposit ===
+caught:
+account is frozen
+=== invalid amount ===
+caught:
+deposit amount must be positive

@@ -1,0 +1,24 @@
+=== valid record ===
+parsed age:
+25
+=== negative age ===
+parse error on line:
+2
+age cannot be negative
+=== missing field ===
+parse error on line:
+3
+missing required field: age
+=== age too large ===
+parse error on line:
+4
+age is unreasonably large
+=== loop with early exit via exception ===
+i =
+1
+i =
+2
+caught after loop:
+stopping at 3
+i was:
+3

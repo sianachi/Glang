@@ -39,4 +39,21 @@ class Option<T> {
         }
         return fallback;
     }
+
+    // Alias for getOr — idiomatic "unwrap or default".
+    T unwrapOr(T fallback) {
+        if (this.present) {
+            return this.value;
+        }
+        return fallback;
+    }
+
+    // Returns an Option containing only values that satisfy `pred`.
+    Option<T> filter(fn(T) -> bool pred) {
+        Option<T> result = Option<T>();
+        if (this.present && pred(this.value)) {
+            result.setSome(this.value);
+        }
+        return result;
+    }
 }

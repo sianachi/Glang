@@ -754,6 +754,8 @@ class Interpreter:
             "getArgCount",
             "getArg",
             "exit",
+            "intToStr",
+            "readStdin",
         }
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
@@ -870,6 +872,14 @@ class Interpreter:
         if expr.name == "fileExists":
             path = self._eval(expr.args[0]).raw
             return Value(NamedType("bool"), os.path.isfile(path))
+
+        if expr.name == "intToStr":
+            n = self._eval(expr.args[0]).raw
+            return Value(NamedType("string"), str(int(n)))
+
+        if expr.name == "readStdin":
+            import sys as _sys
+            return Value(NamedType("string"), _sys.stdin.read())
 
         source = self._eval(expr.args[0]).raw
         needle = self._eval(expr.args[1]).raw

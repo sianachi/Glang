@@ -1,0 +1,261 @@
+// mini_lexer.lang — a lexer for a toy arithmetic expression language,
+// written in Glang using the new stdlib additions: Set, StringBuilder,
+// strings::split/join/indexOf/intToStr, List::indexOf, Map::getOrDefault.
+//
+// The toy language supports:
+//   integers, +, -, *, /, (, ), identifiers, and end-of-file.
+//
+// Run with:
+//     python3 main.py run examples/mini_lexer.lang
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/set.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+// ------------------------------------------------------------------
+// Token kinds
+// ------------------------------------------------------------------
+
+enum TokenKind {
+    TK_INT,
+    TK_PLUS,
+    TK_MINUS,
+    TK_STAR,
+    TK_SLASH,
+    TK_LPAREN,
+    TK_RPAREN,
+    TK_IDENT,
+    TK_EOF,
+    TK_ERROR
+}
+
+// ------------------------------------------------------------------
+// Token  — (kind, text, source position)
+// ------------------------------------------------------------------
+
+class Token {
+    TokenKind kind;
+    string text;
+    int pos;
+
+    Token(TokenKind k, string v, int p) {
+        this.kind = k;
+        this.text = v;
+        this.pos  = p;
+    }
+}
+
+// ------------------------------------------------------------------
+// Lexer
+// ------------------------------------------------------------------
+
+class Lexer {
+    string source;
+    int pos;
+    int srcLen;
+
+    Lexer(string src) {
+        this.source = src;
+        this.pos    = 0;
+        this.srcLen = len(src);
+    }
+
+    bool _atEnd() {
+        return this.pos >= this.srcLen;
+    }
+
+    char _peek() {
+        return this.source[this.pos];
+    }
+
+    char _consume() {
+        char c = this.source[this.pos];
+        this.pos = this.pos + 1;
+        return c;
+    }
+
+    void _skipWs() {
+        while (!(this._atEnd()) && chars::isSpace(this._peek())) {
+            this._consume();
+        }
+    }
+
+    Token* _readInt() {
+        int start = this.pos;
+        while (!(this._atEnd()) && chars::isDigit(this._peek())) {
+            this._consume();
+        }
+        return new Token(TokenKind.TK_INT, substr(this.source, start, this.pos), start);
+    }
+
+    Token* _readIdent() {
+        int start = this.pos;
+        while (!(this._atEnd())) {
+            char c = this._peek();
+            if (!(chars::isAlpha(c) || chars::isDigit(c) || c == '_')) {
+                break;
+            }
+            this._consume();
+        }
+        return new Token(TokenKind.TK_IDENT, substr(this.source, start, this.pos), start);
+    }
+
+    Token* next() {
+        this._skipWs();
+        if (this._atEnd()) {
+            return new Token(TokenKind.TK_EOF, "", this.pos);
+        }
+        int start = this.pos;
+        char c = this._consume();
+
+        if (c == '+') { return new Token(TokenKind.TK_PLUS,   "+", start); }
+        if (c == '-') { return new Token(TokenKind.TK_MINUS,  "-", start); }
+        if (c == '*') { return new Token(TokenKind.TK_STAR,   "*", start); }
+        if (c == '/') { return new Token(TokenKind.TK_SLASH,  "/", start); }
+        if (c == '(') { return new Token(TokenKind.TK_LPAREN, "(", start); }
+        if (c == ')') { return new Token(TokenKind.TK_RPAREN, ")", start); }
+
+        if (chars::isDigit(c)) {
+            this.pos = start;
+            return this._readInt();
+        }
+        if (chars::isAlpha(c) || c == '_') {
+            this.pos = start;
+            return this._readIdent();
+        }
+
+        return new Token(TokenKind.TK_ERROR, toString(c), start);
+    }
+
+    List<Token*> tokenize() {
+        List<Token*> tokens = List<Token*>();
+        bool done = false;
+        while (!done) {
+            Token* t = this.next();
+            tokens.add(t);
+            if (t->kind == TokenKind.TK_EOF || t->kind == TokenKind.TK_ERROR) {
+                done = true;
+            }
+        }
+        return tokens;
+    }
+}
+
+// ------------------------------------------------------------------
+// Human-readable kind name
+// ------------------------------------------------------------------
+
+string kindName(TokenKind k) {
+    if (k == TokenKind.TK_INT)    { return "INT"; }
+    if (k == TokenKind.TK_PLUS)   { return "PLUS"; }
+    if (k == TokenKind.TK_MINUS)  { return "MINUS"; }
+    if (k == TokenKind.TK_STAR)   { return "STAR"; }
+    if (k == TokenKind.TK_SLASH)  { return "SLASH"; }
+    if (k == TokenKind.TK_LPAREN) { return "LPAREN"; }
+    if (k == TokenKind.TK_RPAREN) { return "RPAREN"; }
+    if (k == TokenKind.TK_IDENT)  { return "IDENT"; }
+    if (k == TokenKind.TK_EOF)    { return "EOF"; }
+    return "ERROR";
+}
+
+// ------------------------------------------------------------------
+// Format a token list using StringBuilder
+// ------------------------------------------------------------------
+
+string formatTokens(List<Token*> tokens) {
+    StringBuilder sb = StringBuilder();
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        sb.append("[");
+        sb.append(kindName(t->kind));
+        if (t->text != "") {
+            sb.append(":");
+            sb.append(t->text);
+        }
+        sb.append(" @");
+        sb.appendInt(t->pos);
+        sb.append("]");
+        if (i < n - 1) {
+            sb.append(" ");
+        }
+    }
+    return sb.build();
+}
+
+// ------------------------------------------------------------------
+// Collect unique identifier names via Set
+// ------------------------------------------------------------------
+
+Set<string> collectIdents(List<Token*> tokens) {
+    Set<string> seen = Set<string>();
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        if (t->kind == TokenKind.TK_IDENT) {
+            seen.add(t->text);
+        }
+    }
+    return seen;
+}
+
+// ------------------------------------------------------------------
+// main
+// ------------------------------------------------------------------
+
+int main() {
+    string input = "alpha + 42 * (beta - 7) / gamma";
+
+    print("=== input ===");
+    print(input);
+
+    Lexer* lex = new Lexer(input);
+    List<Token*> tokens = lex->tokenize();
+
+    print("=== token stream ===");
+    print(formatTokens(tokens));
+
+    print("=== unique identifiers (Set) ===");
+    Set<string> idents = collectIdents(tokens);
+    List<string> ident_list = idents.toList();
+    int m = ident_list.length();
+    for (int i = 0; i < m; ++i) {
+        print(ident_list.get(i));
+    }
+
+    print("=== integer literals ===");
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        if (t->kind == TokenKind.TK_INT) {
+            int v = parseInt(t->text);
+            StringBuilder desc = StringBuilder();
+            desc.append(t->text);
+            desc.append(" => doubled: ");
+            desc.append(strings::intToStr(v * 2));
+            print(desc.build());
+        }
+    }
+
+    print("=== strings::indexOf (char search) ===");
+    int plus_pos = strings::indexOf(input, '+');
+    int star_pos = strings::indexOf(input, '*');
+    StringBuilder pos_report = StringBuilder();
+    pos_report.append("'+' at col ");
+    pos_report.appendInt(plus_pos);
+    pos_report.append(", '*' at col ");
+    pos_report.appendInt(star_pos);
+    print(pos_report.build());
+
+    print("=== split / join round-trip ===");
+    List<string> words = strings::split(input, ' ');
+    print("words:");
+    print(words.length());
+    print("rejoined with '|':");
+    print(strings::join(words, "|"));
+
+    delete lex;
+    return 0;
+}

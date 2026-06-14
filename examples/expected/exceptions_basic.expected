@@ -1,0 +1,14 @@
+--- division ---
+10 / 2 =
+5
+caught DivisionByZeroException:
+division by zero
+--- sqrt ---
+sqrt(144) =
+12
+sqrt(-1) — should throw:
+caught MathException:
+cannot take square root of a negative number
+--- superclass catch-all ---
+caught via MathException handler:
+division by zero

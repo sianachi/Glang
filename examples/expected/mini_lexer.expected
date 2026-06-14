@@ -1,0 +1,18 @@
+=== input ===
+alpha + 42 * (beta - 7) / gamma
+=== token stream ===
+[IDENT:alpha @0] [PLUS:+ @6] [INT:42 @8] [STAR:* @11] [LPAREN:( @13] [IDENT:beta @14] [MINUS:- @19] [INT:7 @21] [RPAREN:) @22] [SLASH:/ @24] [IDENT:gamma @26] [EOF @31]
+=== unique identifiers (Set) ===
+alpha
+beta
+gamma
+=== integer literals ===
+42 => doubled: 84
+7 => doubled: 14
+=== strings::indexOf (char search) ===
+'+' at col 6, '*' at col 11
+=== split / join round-trip ===
+words:
+9
+rejoined with '|':
+alpha|+|42|*|(beta|-|7)|/|gamma

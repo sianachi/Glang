@@ -71,6 +71,16 @@ class List<T> {
         this.size = 0;
     }
 
+    // Returns the index of the first occurrence of `item`, or -1 if absent.
+    int indexOf(T item) {
+        for (int i = 0; i < this.size; ++i) {
+            if (this.data[i] == item) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     Span<T> span() {
         return Span<T>(this.data, 0, this.size);
     }

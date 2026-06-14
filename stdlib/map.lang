@@ -80,6 +80,11 @@ class Map<K, V> {
         return fallback;
     }
 
+    // Alias for getOr — returns `defaultValue` when `key` is absent.
+    V getOrDefault(K key, V defaultValue) {
+        return this.getOr(key, defaultValue);
+    }
+
     // Remove `key` if present (swap-with-last; does not preserve order).
     void remove(K key) {
         int idx = this._find(key);
