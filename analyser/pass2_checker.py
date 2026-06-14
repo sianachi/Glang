@@ -4,9 +4,10 @@ from typing import Dict, List, Optional
 
 from parser.ast_nodes import (
     Program, Stmt, Expr, TypeNode,
-    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
+    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl, UnionDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+    MatchStmt, MatchArm, VariantPattern, WildcardPattern,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -59,6 +60,8 @@ class Pass2Checker:
             elif isinstance(decl, InterfaceDecl):
                 self._check_interface(decl)
             elif isinstance(decl, EnumDecl):
+                pass  # validated in pass1
+            elif isinstance(decl, UnionDecl):
                 pass  # validated in pass1
             elif isinstance(decl, ModifierDecl):
                 self._check_modifier(decl)
@@ -500,6 +503,9 @@ class Pass2Checker:
                 self._check_block(clause.body)
                 self._scope = saved_scope
 
+        elif isinstance(stmt, MatchStmt):
+            self._check_match(stmt)
+
         else:
             # bare expression statement
             self._check_expr(stmt)
@@ -524,6 +530,58 @@ class Pass2Checker:
             f"got '{type_str(t)}'",
             line, col,
         )
+
+    def _check_match(self, stmt: MatchStmt) -> None:
+        scrutinee_t = self._check_expr(stmt.scrutinee)
+        # Allow pointer-to-union: auto-unwrap.
+        if isinstance(scrutinee_t, PointerType) and isinstance(scrutinee_t.base, NamedType):
+            scrutinee_t = scrutinee_t.base
+        if not (isinstance(scrutinee_t, NamedType) and self._env.is_union(scrutinee_t.name)):
+            raise TypeError(
+                f"match scrutinee must be a union type, got '{type_str(scrutinee_t)}'",
+                stmt.line, stmt.col,
+            )
+        union_info = self._env.unions[scrutinee_t.name]
+        covered = set()
+        has_wildcard = False
+        for arm in stmt.arms:
+            if isinstance(arm.pattern, WildcardPattern):
+                has_wildcard = True
+                self._check_block(arm.body)
+            else:
+                p = arm.pattern
+                if p.union_name != scrutinee_t.name:
+                    raise TypeError(
+                        f"pattern union '{p.union_name}' does not match "
+                        f"scrutinee type '{scrutinee_t.name}'",
+                        arm.line, arm.col,
+                    )
+                variant = union_info.variants.get(p.variant_name)
+                if variant is None:
+                    raise TypeError(
+                        f"'{scrutinee_t.name}' has no variant '{p.variant_name}'",
+                        arm.line, arm.col,
+                    )
+                if len(p.bindings) != len(variant.fields):
+                    raise TypeError(
+                        f"variant '{p.variant_name}' has {len(variant.fields)} field(s), "
+                        f"but pattern binds {len(p.bindings)}",
+                        arm.line, arm.col,
+                    )
+                covered.add(p.variant_name)
+                saved_scope = self._scope
+                self._scope = self._scope.child()
+                for binding, fd in zip(p.bindings, variant.fields):
+                    self._scope.define(binding, fd.type, arm.line, arm.col, False)
+                self._check_block(arm.body)
+                self._scope = saved_scope
+        if not has_wildcard:
+            missing = set(union_info.variants.keys()) - covered
+            if missing:
+                raise TypeError(
+                    f"non-exhaustive match: missing variants {sorted(missing)}",
+                    stmt.line, stmt.col,
+                )
 
     # ------------------------------------------------------------------
     # Expressions
@@ -691,6 +749,35 @@ class Pass2Checker:
             )
 
         if isinstance(expr, MethodCallExpr):
+            # Union variant constructor: Expr.Number(42)
+            if (
+                not expr.is_arrow
+                and isinstance(expr.object, IdentifierExpr)
+                and self._env.is_union(expr.object.name)
+                and self._scope._find(expr.object.name) is None
+            ):
+                union_info = self._env.unions[expr.object.name]
+                variant = union_info.variants.get(expr.method)
+                if variant is None:
+                    raise TypeError(
+                        f"'{expr.object.name}' has no variant '{expr.method}'",
+                        expr.line, expr.col,
+                    )
+                if len(expr.args) != len(variant.fields):
+                    raise TypeError(
+                        f"variant '{expr.method}' expects {len(variant.fields)} "
+                        f"argument(s), got {len(expr.args)}",
+                        expr.line, expr.col,
+                    )
+                for arg, fd in zip(expr.args, variant.fields):
+                    arg_t = self._check_expr(arg)
+                    if not self._assignable(arg_t, fd.type, arg):
+                        raise TypeError(
+                            f"cannot assign '{type_str(arg_t)}' to '{type_str(fd.type)}'",
+                            expr.line, expr.col,
+                        )
+                return NamedType(expr.object.name)
+
             # Static method call: ClassName.method(args)
             if (
                 not expr.is_arrow
@@ -778,6 +865,27 @@ class Pass2Checker:
             return method.return_type
 
         if isinstance(expr, FieldAccessExpr):
+            # Union no-field variant access: Expr.Nil
+            if (
+                isinstance(expr.object, IdentifierExpr)
+                and self._env.is_union(expr.object.name)
+                and self._scope._find(expr.object.name) is None
+            ):
+                union_info = self._env.unions[expr.object.name]
+                variant = union_info.variants.get(expr.field_name)
+                if variant is None:
+                    raise TypeError(
+                        f"'{expr.object.name}' has no variant '{expr.field_name}'",
+                        expr.line, expr.col,
+                    )
+                if variant.fields:
+                    raise TypeError(
+                        f"variant '{expr.field_name}' has fields; "
+                        f"use '{expr.object.name}.{expr.field_name}(...)' to construct it",
+                        expr.line, expr.col,
+                    )
+                return NamedType(expr.object.name)
+
             # Enum variant access: Color.RED
             if (
                 isinstance(expr.object, IdentifierExpr)
@@ -877,6 +985,35 @@ class Pass2Checker:
             return self._check_index_expr(expr)
 
         if isinstance(expr, NewExpr):
+            # Union variant heap allocation: new Shape.Circle(args) → Shape*
+            if "." in expr.class_name:
+                union_name, variant_name = expr.class_name.split(".", 1)
+                if not self._env.is_union(union_name):
+                    raise TypeError(
+                        f"unknown union '{union_name}'", expr.line, expr.col
+                    )
+                union_info = self._env.unions[union_name]
+                variant = union_info.variants.get(variant_name)
+                if variant is None:
+                    raise TypeError(
+                        f"'{union_name}' has no variant '{variant_name}'",
+                        expr.line, expr.col,
+                    )
+                if len(expr.args) != len(variant.fields):
+                    raise TypeError(
+                        f"variant '{variant_name}' expects {len(variant.fields)} "
+                        f"argument(s), got {len(expr.args)}",
+                        expr.line, expr.col,
+                    )
+                for arg, fd in zip(expr.args, variant.fields):
+                    arg_t = self._check_expr(arg)
+                    if not self._assignable(arg_t, fd.type, arg):
+                        raise TypeError(
+                            f"cannot assign '{type_str(arg_t)}' to '{type_str(fd.type)}'",
+                            expr.line, expr.col,
+                        )
+                return PointerType(NamedType(union_name))
+
             if expr.class_name not in self._env.classes:
                 raise TypeError(
                     f"unknown class '{expr.class_name}'", expr.line, expr.col
@@ -916,9 +1053,13 @@ class Pass2Checker:
                     expr.line, expr.col,
                 )
             base = pointer_base(t)
-            if not (isinstance(base, NamedType) and self._env.is_class(base.name)):
+            is_deletable = (
+                isinstance(base, NamedType)
+                and (self._env.is_class(base.name) or self._env.is_union(base.name))
+            )
+            if not is_deletable:
                 raise TypeError(
-                    "'delete' requires a pointer to a class",
+                    "'delete' requires a pointer to a class or union",
                     expr.line, expr.col,
                 )
             return NamedType("void")

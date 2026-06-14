@@ -10,7 +10,7 @@ from parser.ast_nodes import (
 from errors.errors import TypeError
 
 if TYPE_CHECKING:
-    from parser.ast_nodes import EnumDecl
+    from parser.ast_nodes import EnumDecl, UnionDecl
 
 
 PRIMITIVES = {"int", "float", "bool", "char", "byte", "string", "void"}
@@ -52,6 +52,20 @@ class EnumInfo:
     name: str
     variants: Dict[str, int]
     decl: 'EnumDecl'
+
+
+@dataclass
+class UnionVariantInfo:
+    name: str
+    fields: List[FieldDecl]
+
+
+@dataclass
+class UnionInfo:
+    name: str
+    type_params: List[str]
+    variants: Dict[str, UnionVariantInfo]  # variant_name → info
+    decl: 'UnionDecl'
 
 
 class SymbolTable:
@@ -126,6 +140,7 @@ class GlobalEnv:
     classes: Dict[str, ClassInfo] = field(default_factory=dict)
     interfaces: Dict[str, InterfaceInfo] = field(default_factory=dict)
     enums: Dict[str, EnumInfo] = field(default_factory=dict)
+    unions: Dict[str, UnionInfo] = field(default_factory=dict)
     modifier_methods: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # target type name → {method name → MethodDecl}
 
@@ -145,6 +160,7 @@ class GlobalEnv:
                 and node.name not in self.classes
                 and node.name not in self.interfaces
                 and node.name not in self.enums
+                and node.name not in self.unions
                 and node.name != "null"
             ):
                 raise TypeError(
@@ -169,6 +185,9 @@ class GlobalEnv:
 
     def is_enum(self, name: str) -> bool:
         return name in self.enums
+
+    def is_union(self, name: str) -> bool:
+        return name in self.unions
 
     def is_primitive(self, name: str) -> bool:
         return name in PRIMITIVES

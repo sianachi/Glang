@@ -1,0 +1,31 @@
+union Expr {
+    Num { int value; }
+    Add { Expr* left; Expr* right; }
+    Mul { Expr* left; Expr* right; }
+}
+
+int eval(Expr* e) {
+    match (*e) {
+        Expr.Num(v)    => { return v; }
+        Expr.Add(l, r) => { return eval(l) + eval(r); }
+        Expr.Mul(l, r) => { return eval(l) * eval(r); }
+    }
+}
+
+int main() {
+    // Build: (2 + 3) * 4
+    Expr* two   = new Expr.Num(2);
+    Expr* three = new Expr.Num(3);
+    Expr* four  = new Expr.Num(4);
+    Expr* sum   = new Expr.Add(two, three);
+    Expr* prod  = new Expr.Mul(sum, four);
+
+    print(eval(prod));  // 20
+
+    delete prod;
+    delete sum;
+    delete four;
+    delete three;
+    delete two;
+    return 0;
+}

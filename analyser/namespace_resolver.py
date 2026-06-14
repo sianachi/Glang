@@ -37,11 +37,12 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from parser.ast_nodes import (
     Program, Decl, Expr, NamespaceDecl, UsingDecl,
-    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl,
+    FunctionDecl, ClassDecl, InterfaceDecl, EnumDecl, ModifierDecl, UnionDecl,
     StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl, Param,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType, NullableType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt,
+    MatchStmt, VariantPattern,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -265,6 +266,10 @@ class NamespaceResolver:
                     self._r_block_stmts(md.body, p)
                     self._scopes = []
             self._type_params = set()
+        elif isinstance(d, UnionDecl):
+            for v in d.variants:
+                for fd in v.fields:
+                    self._r_type(fd.type, p)
         # EnumDecl carries only integer variants — nothing to rewrite.
 
     def _r_ctor(self, ctor: ConstructorDecl, p: List[str]) -> None:
@@ -364,6 +369,13 @@ class NamespaceResolver:
             for clause in s.catches:
                 clause.catch_type = self._r_type(clause.catch_type, p)
                 self._r_block(clause.body, p)
+        elif isinstance(s, MatchStmt):
+            self._r_expr(s.scrutinee, p)
+            for arm in s.arms:
+                bindings = arm.pattern.bindings if isinstance(arm.pattern, VariantPattern) else []
+                self._scopes.append(set(bindings))
+                self._r_block(arm.body, p)
+                self._scopes.pop()
         elif isinstance(s, Expr):
             self._r_expr(s, p)
         # BreakStmt / ContinueStmt carry nothing.

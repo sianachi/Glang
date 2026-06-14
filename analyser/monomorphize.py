@@ -26,11 +26,12 @@ from typing import Dict, List, Optional, Tuple
 
 from parser.ast_nodes import (
     Program, Decl, Expr, FunctionDecl, ClassDecl, FieldDecl, StaticFieldDecl,
-    ConstructorDecl, DestructorDecl, MethodDecl, ModifierDecl,
+    ConstructorDecl, DestructorDecl, MethodDecl, ModifierDecl, UnionDecl,
     TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, GenericType,
     NullableType,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+    MatchStmt, VariantPattern,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
@@ -113,6 +114,9 @@ class Monomorphizer:
                 self._interface_names.add(d.name)
             elif isinstance(d, EnumDecl):
                 self._enum_names.add(d.name)
+            elif isinstance(d, UnionDecl):
+                # Track union names so type substitution recognises them.
+                self._class_names.add(d.name)
             elif isinstance(d, FunctionDecl) and not d.type_params:
                 self._function_returns[d.name] = d.return_type
 
@@ -279,6 +283,10 @@ class Monomorphizer:
             d.target = self._t_type(d.target, m)
             for md in d.methods:
                 self._t_decl(md, m)
+        elif isinstance(d, UnionDecl):
+            for v in d.variants:
+                for fd in v.fields:
+                    fd.type = self._t_type(fd.type, m)
 
     def _t_params(self, params, m: Dict[str, TypeNode]) -> None:
         for p in params:
@@ -355,6 +363,13 @@ class Monomorphizer:
                 clause.catch_type = self._t_type(clause.catch_type, m)
                 with self._scope():
                     self._t_block(clause.body, m)
+        elif isinstance(s, MatchStmt):
+            self._t_expr(s.scrutinee, m)
+            for arm in s.arms:
+                with self._scope():
+                    if isinstance(arm.pattern, VariantPattern):
+                        pass  # bindings are just names; no type substitution needed
+                    self._t_block(arm.body, m)
         elif isinstance(s, Expr):
             # A bare expression statement (e.g. `foo();`, `x.bar();`).
             self._t_expr(s, m)

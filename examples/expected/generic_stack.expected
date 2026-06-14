@@ -1,0 +1,19 @@
+count:
+3
+peek (top):
+30
+top-to-bottom via for_each:
+30
+20
+10
+is_empty after pushes:
+false
+string stack (top to bottom):
+say
+hello
+world
+count:
+3
+empty stack peek:
+None
+true

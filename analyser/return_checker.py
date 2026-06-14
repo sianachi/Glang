@@ -3,7 +3,7 @@ from typing import List
 
 from parser.ast_nodes import (
     Stmt, ReturnStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt, ForeachStmt,
-    Block, UsingStmt, ThrowStmt, TryCatchStmt,
+    Block, UsingStmt, ThrowStmt, TryCatchStmt, MatchStmt, WildcardPattern,
 )
 
 
@@ -40,6 +40,10 @@ def _stmt_always_returns(stmt: Stmt) -> bool:
         # The resource is disposed before the return propagates, so a body
         # that always returns makes the using statement always return.
         return always_returns(stmt.body.stmts)
+
+    if isinstance(stmt, MatchStmt):
+        all_arms_return = all(always_returns(a.body.stmts) for a in stmt.arms)
+        return all_arms_return
 
     if isinstance(stmt, (WhileStmt, DoWhileStmt, ForStmt, ForeachStmt)):
         return False

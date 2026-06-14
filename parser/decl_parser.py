@@ -12,6 +12,7 @@ try:
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
         EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
+        UnionDecl, UnionVariant,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -24,6 +25,7 @@ except ImportError:
         Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
         FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
         EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
+        UnionDecl, UnionVariant,
     )
 
 
@@ -81,6 +83,10 @@ class DeclParser:
             return self._parse_interface()
         if self._s.check(TokenType.KW_ENUM):
             return self._parse_enum()
+        # 'union' is context-sensitive (not a keyword) to avoid breaking method names.
+        tok2 = self._s.peek()
+        if tok2.type == TokenType.IDENT and tok2.value == "union":
+            return self._parse_union()
         return self._parse_function()
 
     # ------------------------------------------------------------------
@@ -156,6 +162,42 @@ class DeclParser:
         self._s.expect(TokenType.RBRACE)
         return EnumDecl(name=name_tok.value, variants=variants,
                         line=tok.line, col=tok.col)
+
+    def _parse_union(self) -> UnionDecl:
+        tok = self._s.advance()  # consume IDENT 'union'
+        name_tok = self._s.expect(TokenType.IDENT)
+        type_params: List[str] = []
+        if self._s.match(TokenType.LT):
+            while True:
+                tp_tok = self._s.expect(TokenType.IDENT)
+                type_params.append(tp_tok.value)
+                if not self._s.match(TokenType.COMMA):
+                    break
+            self._s.expect(TokenType.GT)
+        self._s.expect(TokenType.LBRACE)
+        variants: List[UnionVariant] = []
+        while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            v_tok = self._s.expect(TokenType.IDENT)
+            self._s.expect(TokenType.LBRACE)
+            fields: List[FieldDecl] = []
+            while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+                f_type = self._tp.parse_type()
+                f_name = self._s.expect(TokenType.IDENT)
+                self._s.expect(TokenType.SEMICOLON)
+                fields.append(FieldDecl(
+                    name=f_name.value, type=f_type,
+                    line=f_name.line, col=f_name.col,
+                ))
+            self._s.expect(TokenType.RBRACE)
+            variants.append(UnionVariant(
+                name=v_tok.value, fields=fields,
+                line=v_tok.line, col=v_tok.col,
+            ))
+        self._s.expect(TokenType.RBRACE)
+        return UnionDecl(
+            name=name_tok.value, type_params=type_params, variants=variants,
+            line=tok.line, col=tok.col,
+        )
 
     # ------------------------------------------------------------------
     # Functions

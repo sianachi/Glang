@@ -4,12 +4,13 @@ from typing import Dict, List, Set
 from parser.ast_nodes import (
     Program, FunctionDecl, ClassDecl, InterfaceDecl,
     MethodDecl, FieldDecl, StaticFieldDecl,
-    NamedType, PointerType, ArrayType, EnumDecl, ModifierDecl,
+    NamedType, PointerType, ArrayType, EnumDecl, ModifierDecl, UnionDecl,
 )
 from analyser.type_utils import type_str
 from errors.errors import TypeError
 from analyser.symbol_table import (
     GlobalEnv, FunctionInfo, ClassInfo, InterfaceInfo, EnumInfo,
+    UnionInfo, UnionVariantInfo,
 )
 
 
@@ -38,6 +39,9 @@ class Pass1Collector:
         for decl in program.declarations:
             if isinstance(decl, EnumDecl):
                 self._register_enum(decl)
+        for decl in program.declarations:
+            if isinstance(decl, UnionDecl):
+                self._register_union(decl)
         for decl in program.declarations:
             if isinstance(decl, InterfaceDecl):
                 self._register_interface(decl)
@@ -74,6 +78,7 @@ class Pass1Collector:
             or name in self._env.classes
             or name in self._env.interfaces
             or name in self._env.enums
+            or name in self._env.unions
         )
 
     def _register_function(self, decl: FunctionDecl) -> None:
@@ -186,6 +191,28 @@ class Pass1Collector:
         self._env.enums[decl.name] = EnumInfo(
             name=decl.name, variants=variants, decl=decl
         )
+
+    def _register_union(self, decl: UnionDecl) -> None:
+        if self._name_taken(decl.name):
+            raise TypeError(
+                f"name '{decl.name}' is already defined", decl.line, decl.col
+            )
+        # Register the union name first so self-referential field types resolve.
+        placeholder: Dict[str, UnionVariantInfo] = {}
+        self._env.unions[decl.name] = UnionInfo(
+            name=decl.name,
+            type_params=decl.type_params,
+            variants=placeholder,
+            decl=decl,
+        )
+        for v in decl.variants:
+            if v.name in placeholder:
+                raise TypeError(
+                    f"duplicate union variant '{v.name}'", v.line, v.col
+                )
+            for fd in v.fields:
+                self._env.resolve_type(fd.type)
+            placeholder[v.name] = UnionVariantInfo(name=v.name, fields=v.fields)
 
     # ------------------------------------------------------------------
     # Phase 2: validate the inheritance graph

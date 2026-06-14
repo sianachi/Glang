@@ -10,6 +10,7 @@ try:
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
         ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+        MatchStmt, MatchArm, VariantPattern, WildcardPattern,
     )
 except ImportError:
     from parser.token_stream import TokenStream  # type: ignore
@@ -21,6 +22,7 @@ except ImportError:
         Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
         DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
         ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+        MatchStmt, MatchArm, VariantPattern, WildcardPattern,
     )
 
 _TYPE_KWS = {
@@ -84,6 +86,11 @@ class StmtParser:
             self._s.advance()
             self._s.expect(TokenType.SEMICOLON)
             return ContinueStmt(line=tok.line, col=tok.col)
+
+        # match (expr) { ... } — context-sensitive: not a keyword
+        if (tok.type == TokenType.IDENT and tok.value == "match"
+                and self._s.peek(1).type == TokenType.LPAREN):
+            return self._parse_match()
 
         if self._is_var_decl_start():
             return self._parse_var_decl()
@@ -329,6 +336,52 @@ class StmtParser:
                 tok.line, tok.col,
             )
         return TryCatchStmt(body=body, catches=catches, line=tok.line, col=tok.col)
+
+    def _parse_match(self) -> MatchStmt:
+        tok = self._s.advance()  # consume 'match'
+        self._s.expect(TokenType.LPAREN)
+        scrutinee = self._ep.parse_expr()
+        self._s.expect(TokenType.RPAREN)
+        self._s.expect(TokenType.LBRACE)
+        arms: List[MatchArm] = []
+        while not self._s.check(TokenType.RBRACE) and not self._s.is_at_end():
+            arm_tok = self._s.peek()
+            # Wildcard arm: _ => { ... }
+            if arm_tok.type == TokenType.IDENT and arm_tok.value == "_":
+                self._s.advance()  # consume '_'
+                self._s.expect(TokenType.ASSIGN)   # first char of '=>'
+                self._s.expect(TokenType.GT)        # second char of '=>'
+                body = self.parse_block()
+                arms.append(MatchArm(
+                    pattern=WildcardPattern(line=arm_tok.line, col=arm_tok.col),
+                    body=body, line=arm_tok.line, col=arm_tok.col,
+                ))
+                break  # wildcard must be last
+            # Variant arm: UnionName.Variant or UnionName.Variant(b1, b2, ...)
+            union_name_tok = self._s.expect(TokenType.IDENT)
+            self._s.expect(TokenType.DOT)
+            variant_name_tok = self._s.expect(TokenType.IDENT)
+            bindings: List[str] = []
+            if self._s.match(TokenType.LPAREN):
+                if not self._s.check(TokenType.RPAREN):
+                    bindings.append(self._s.expect(TokenType.IDENT).value)
+                    while self._s.match(TokenType.COMMA):
+                        bindings.append(self._s.expect(TokenType.IDENT).value)
+                self._s.expect(TokenType.RPAREN)
+            self._s.expect(TokenType.ASSIGN)   # first char of '=>'
+            self._s.expect(TokenType.GT)        # second char of '=>'
+            body = self.parse_block()
+            arms.append(MatchArm(
+                pattern=VariantPattern(
+                    union_name=union_name_tok.value,
+                    variant_name=variant_name_tok.value,
+                    bindings=bindings,
+                    line=union_name_tok.line, col=union_name_tok.col,
+                ),
+                body=body, line=arm_tok.line, col=arm_tok.col,
+            ))
+        self._s.expect(TokenType.RBRACE)
+        return MatchStmt(scrutinee=scrutinee, arms=arms, line=tok.line, col=tok.col)
 
     def _parse_return(self) -> ReturnStmt:
         tok = self._s.advance()  # consume 'return'

@@ -314,6 +314,14 @@ class ExprParser:
         name = self._s.expect(TokenType.IDENT).value
         while self._s.match(TokenType.COLONCOLON):
             name += "::" + self._s.expect(TokenType.IDENT).value
+        # Union variant heap allocation: new Shape.Circle(args) or new Shape.Nil
+        if self._s.match(TokenType.DOT):
+            variant_tok = self._s.expect(TokenType.IDENT)
+            args = self.parse_arg_list() if self._s.check(TokenType.LPAREN) else []
+            # Encode as "UnionName.Variant" in class_name; pass2 and interpreter
+            # detect the dot to distinguish from class constructors.
+            return NewExpr(class_name=f"{name}.{variant_tok.value}", args=args,
+                           line=tok.line, col=tok.col)
         type_args = []
         if self._s.check(TokenType.LT):
             type_args = self._tp.parse_type_args()

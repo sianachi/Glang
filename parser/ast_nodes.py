@@ -1002,3 +1002,85 @@ class TryCatchStmt(Stmt):
     catches: 'List[CatchClause]'
     line: int = 0
     col: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Algebraic data types (tagged unions)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class UnionVariant(Node):
+    """One variant inside a union declaration.
+
+    Example:
+      union Expr { Number { int value; } ... }
+      → UnionVariant("Number", [FieldDecl("value", NamedType("int"))])
+    """
+    name: str
+    fields: List[FieldDecl]
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class UnionDecl(Decl):
+    """A tagged-union (ADT) declaration.
+
+    Example:
+      union Expr { Num { int value; } Add { Expr* left; Expr* right; } }
+    """
+    name: str
+    type_params: List[str]
+    variants: List[UnionVariant]
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class VariantPattern:
+    """A match arm pattern that names a specific union variant.
+
+    Bindings are positional: the nth binding receives the nth field value.
+
+    Example:
+      Expr.Add(l, r) => { ... }
+      → VariantPattern("Expr", "Add", ["l", "r"])
+    """
+    union_name: str
+    variant_name: str
+    bindings: List[str]
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class WildcardPattern:
+    """A match arm wildcard that matches any variant.
+
+    Example:
+      _ => { ... }
+    """
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MatchArm:
+    """One arm of a match statement."""
+    pattern: 'VariantPattern | WildcardPattern'
+    body: Block
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
+class MatchStmt(Stmt):
+    """Pattern-matching dispatch over a union value.
+
+    Example:
+      match (e) { Expr.Num(v) => { print(v); } _ => { } }
+    """
+    scrutinee: Expr
+    arms: List[MatchArm]
+    line: int = 0
+    col: int = 0

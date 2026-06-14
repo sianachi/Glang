@@ -1,0 +1,18 @@
+--- normal purchase ---
+[Idle]
+Insert a coin first.
+Coin inserted. Select your item.
+[HasCoin]
+Dispensing: Cola
+[Dispensing]
+Enjoy your Cola!
+[Idle]
+--- refund flow ---
+Coin inserted. Select your item.
+Coin refunded.
+[Idle]
+--- invalid transitions ---
+Nothing to collect.
+No coin to refund.
+Coin inserted. Select your item.
+Already have a coin.

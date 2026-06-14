@@ -1,0 +1,13 @@
+null
+true
+false
+42
+"hello"
+truthy checks:
+false
+false
+true
+true
+false
+true
+99

@@ -1,0 +1,124 @@
+// state_machine.lang — a vending machine modelled as an ADT state machine.
+//
+// The machine cycles through four states:
+//   Idle  →  (insert coin)  →  HasCoin
+//   HasCoin  →  (select)    →  Dispensing
+//   Dispensing  →  (collect) →  Idle
+//   HasCoin  →  (refund)    →  Idle
+//
+// Each transition is a plain function that takes the current State and returns
+// the next State.  match exhaustiveness checking means the compiler rejects any
+// transition handler that forgets a case.
+//
+// Demonstrates:
+//   - union as a state tag (all variants are no-field here; the "data" lives
+//     in the surrounding VendingMachine class)
+//   - match-driven state transitions in class methods
+//   - combining ADTs and classes
+//
+// Run with:
+//     python3 main.py run examples/state_machine.lang
+
+union State {
+    Idle       { }
+    HasCoin    { }
+    Dispensing { }
+    Sold       { }
+}
+
+class VendingMachine {
+    private State current;
+    private string item;
+    private int price;
+
+    VendingMachine(string item_name, int item_price) {
+        this.current = State.Idle;
+        this.item    = item_name;
+        this.price   = item_price;
+    }
+
+    void insert_coin() {
+        match (this.current) {
+            State.Idle    => {
+                print("Coin inserted. Select your item.");
+                this.current = State.HasCoin;
+            }
+            State.HasCoin => { print("Already have a coin."); }
+            State.Dispensing => { print("Please wait, dispensing."); }
+            State.Sold    => { print("Collecting item first."); }
+        }
+    }
+
+    void select() {
+        match (this.current) {
+            State.HasCoin => {
+                print("Dispensing: " + this.item);
+                this.current = State.Dispensing;
+            }
+            State.Idle    => { print("Insert a coin first."); }
+            State.Dispensing => { print("Already dispensing."); }
+            State.Sold    => { print("Collect your item first."); }
+        }
+    }
+
+    void collect() {
+        match (this.current) {
+            State.Dispensing => {
+                print("Enjoy your " + this.item + "!");
+                this.current = State.Idle;
+            }
+            State.Idle    => { print("Nothing to collect."); }
+            State.HasCoin => { print("Nothing dispensed yet."); }
+            State.Sold    => { print("Already collected."); }
+        }
+    }
+
+    void refund() {
+        match (this.current) {
+            State.HasCoin => {
+                print("Coin refunded.");
+                this.current = State.Idle;
+            }
+            State.Idle    => { print("No coin to refund."); }
+            State.Dispensing => { print("Cannot refund, already dispensing."); }
+            State.Sold    => { print("Cannot refund after dispensing."); }
+        }
+    }
+
+    void status() {
+        match (this.current) {
+            State.Idle       => { print("[Idle]"); }
+            State.HasCoin    => { print("[HasCoin]"); }
+            State.Dispensing => { print("[Dispensing]"); }
+            State.Sold       => { print("[Sold]"); }
+        }
+    }
+}
+
+int main() {
+    VendingMachine* vm = new VendingMachine("Cola", 150);
+
+    print("--- normal purchase ---");
+    vm->status();          // [Idle]
+    vm->select();          // Insert a coin first.
+    vm->insert_coin();     // Coin inserted. Select your item.
+    vm->status();          // [HasCoin]
+    vm->select();          // Dispensing: Cola
+    vm->status();          // [Dispensing]
+    vm->collect();         // Enjoy your Cola!
+    vm->status();          // [Idle]
+
+    print("--- refund flow ---");
+    vm->insert_coin();     // Coin inserted.
+    vm->refund();          // Coin refunded.
+    vm->status();          // [Idle]
+
+    print("--- invalid transitions ---");
+    vm->collect();         // Nothing to collect.
+    vm->refund();          // No coin to refund.
+    vm->insert_coin();
+    vm->insert_coin();     // Already have a coin.
+
+    delete vm;
+    return 0;
+}

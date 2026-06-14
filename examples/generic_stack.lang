@@ -1,0 +1,149 @@
+// generic_stack.lang — a generic stack (LIFO) paired with an Option type.
+//
+// Demonstrates:
+//   - a generic class `Stack<T>` backed by a singly-linked list of Node<T>
+//   - a private generic `Node<T>` with a pointer to its own type
+//   - ~Stack destructor walking the linked chain to free all nodes
+//   - a plain (non-generic) IntOption union used as a typed Maybe for pop/peek
+//   - passing a closure `fn(int) -> void` to for_each for safe iteration
+//   - combining generics (class) with ADTs (union) in one program
+//
+// Note: generic unions cannot yet be constructed by variant in expressions
+// (e.g. `Option<int>.Some(v)` is ambiguous to the parser), so IntOption is
+// a concrete union.  The Stack itself remains fully generic.
+//
+// Run with:
+//     python3 main.py run examples/generic_stack.lang
+
+// ---------------------------------------------------------------------------
+// IntOption — a typed Maybe for int values
+// ---------------------------------------------------------------------------
+
+union IntOption {
+    Some { int value; }
+    None { }
+}
+
+string int_option_str(IntOption o) {
+    match (o) {
+        IntOption.Some(v) => { return "Some"; }
+        IntOption.None    => { return "None"; }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stack<T> — generic LIFO container
+// ---------------------------------------------------------------------------
+
+private class Node<T> {
+    T value;
+    Node<T>* next;
+
+    Node(T v) {
+        this.value = v;
+        this.next  = null;
+    }
+}
+
+class Stack<T> {
+    private Node<T>* head;
+    private int sz;
+
+    Stack() {
+        this.head = null;
+        this.sz   = 0;
+    }
+
+    ~Stack() {
+        Node<T>* cur = this.head;
+        while (cur != null) {
+            Node<T>* nxt = cur->next;
+            delete cur;
+            cur = nxt;
+        }
+    }
+
+    void push(T value) {
+        Node<T>* node = new Node<T>(value);
+        node->next = this.head;
+        this.head  = node;
+        this.sz    = this.sz + 1;
+    }
+
+    bool is_empty() { return this.sz == 0; }
+    int  count()    { return this.sz; }
+
+    // Returns the top element; caller must check is_empty() first.
+    T top() {
+        return this.head->value;
+    }
+
+    // Call f(value) for every element from top to bottom.
+    void for_each(fn(T) -> void f) {
+        Node<T>* cur = this.head;
+        while (cur != null) {
+            f(cur->value);
+            cur = cur->next;
+        }
+    }
+}
+
+// Peek helpers return IntOption so callers don't need to check is_empty first.
+IntOption int_stack_peek(Stack<int>* s) {
+    if (s->is_empty()) { return IntOption.None; }
+    return IntOption.Some(s->top());
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+
+int main() {
+    Stack<int>* s = new Stack<int>();
+
+    s->push(10);
+    s->push(20);
+    s->push(30);
+
+    print("count:");
+    print(s->count());        // 3
+
+    print("peek (top):");
+    IntOption top = int_stack_peek(s);
+    match (top) {
+        IntOption.Some(v) => { print(v); }   // 30
+        IntOption.None    => { print("empty"); }
+    }
+
+    print("top-to-bottom via for_each:");
+    s->for_each((int x) -> void { print(x); });   // 30, 20, 10
+
+    print("is_empty after pushes:");
+    print(s->is_empty());     // false
+
+    delete s;
+
+    // String stack — same class, different type arg
+    Stack<string>* words = new Stack<string>();
+    words->push("world");
+    words->push("hello");
+    words->push("say");
+
+    print("string stack (top to bottom):");
+    words->for_each((string w) -> void { print(w); });  // say, hello, world
+
+    print("count:");
+    print(words->count());    // 3
+
+    delete words;
+
+    // Empty stack edge case
+    Stack<int>* empty = new Stack<int>();
+    print("empty stack peek:");
+    IntOption nothing = int_stack_peek(empty);
+    print(int_option_str(nothing));   // None
+    print(empty->is_empty());         // true
+    delete empty;
+
+    return 0;
+}

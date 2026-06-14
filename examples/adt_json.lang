@@ -1,0 +1,68 @@
+// adt_json.lang — a minimal JSON-like value type built with ADTs.
+//
+// Demonstrates:
+//   - union types with no-field variants (Null, True, False)
+//   - match on union values for dispatch and field extraction
+//   - heap-allocating union variants with `new`
+//   - calling stdlib for int-to-string conversion
+//
+// Run with:
+//     python3 main.py run examples/adt_json.lang
+
+import "std/string.lang";
+
+union JsonValue {
+    Null   { }
+    True   { }
+    False  { }
+    Number { int n; }
+    Str    { string s; }
+}
+
+string json_str(JsonValue v) {
+    match (v) {
+        JsonValue.Null     => { return "null"; }
+        JsonValue.True     => { return "true"; }
+        JsonValue.False    => { return "false"; }
+        JsonValue.Number(n) => { return strings::intToStr(n); }
+        JsonValue.Str(s)   => { return "\"" + s + "\""; }
+    }
+}
+
+bool json_truthy(JsonValue v) {
+    match (v) {
+        JsonValue.Null  => { return false; }
+        JsonValue.False => { return false; }
+        JsonValue.Number(n) => { return n != 0; }
+        _               => { return true; }
+    }
+}
+
+int main() {
+    JsonValue jnull  = JsonValue.Null;
+    JsonValue jtrue  = JsonValue.True;
+    JsonValue jfalse = JsonValue.False;
+    JsonValue jnum   = JsonValue.Number(42);
+    JsonValue jstr   = JsonValue.Str("hello");
+
+    print(json_str(jnull));    // null
+    print(json_str(jtrue));    // true
+    print(json_str(jfalse));   // false
+    print(json_str(jnum));     // 42
+    print(json_str(jstr));     // "hello"
+
+    print("truthy checks:");
+    print(json_truthy(jnull));    // false
+    print(json_truthy(jfalse));   // false
+    print(json_truthy(jtrue));    // true
+    print(json_truthy(jnum));     // true
+    print(json_truthy(JsonValue.Number(0)));  // false
+    print(json_truthy(jstr));     // true
+
+    // Heap-allocated variant
+    JsonValue* heapNum = new JsonValue.Number(99);
+    print(json_str(*heapNum));    // 99
+    delete heapNum;
+
+    return 0;
+}

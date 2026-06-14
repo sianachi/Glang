@@ -27,6 +27,7 @@ from parser.ast_nodes import (
     MethodDecl, ConstructorDecl, DestructorDecl,
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+    MatchStmt, VariantPattern, WildcardPattern,
     BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
@@ -75,6 +76,14 @@ class Pointer:
 class ObjectInstance:
     """A heap-allocated class instance."""
     class_name: str
+    fields: Dict[str, Box]
+
+
+@dataclass
+class VariantInstance:
+    """A tagged-union (ADT) value carrying one variant."""
+    union_name: str
+    variant_name: str
     fields: Dict[str, Box]
 
 
@@ -296,6 +305,35 @@ class Interpreter:
         finally:
             self._frame.pop_scope()
 
+    def _exec_match(self, stmt: MatchStmt) -> None:
+        val = self._eval(stmt.scrutinee)
+        # Auto-deref pointer-to-union.
+        if isinstance(val.raw, Pointer):
+            val = self._deref(val, stmt.line, stmt.col).value
+        inst = val.raw
+        if not isinstance(inst, VariantInstance):
+            raise GlangRuntimeError(
+                "match scrutinee is not a union value", stmt.line, stmt.col
+            )
+        for arm in stmt.arms:
+            if isinstance(arm.pattern, WildcardPattern):
+                self._exec_block(arm.body)
+                return
+            if arm.pattern.variant_name == inst.variant_name:
+                self._frame.push_scope()
+                try:
+                    field_names = list(inst.fields.keys())
+                    for binding, fname in zip(arm.pattern.bindings, field_names):
+                        self._frame.define(binding, inst.fields[fname])
+                    self._exec_block(arm.body)
+                finally:
+                    self._frame.pop_scope()
+                return
+        raise GlangRuntimeError(
+            f"non-exhaustive match: no arm matched variant '{inst.variant_name}'",
+            stmt.line, stmt.col,
+        )
+
     def _exec_stmt(self, stmt: Stmt) -> None:
         if isinstance(stmt, Block):
             self._exec_block(stmt)
@@ -417,6 +455,9 @@ class Interpreter:
                         break
                 if not handled:
                     raise
+
+        elif isinstance(stmt, MatchStmt):
+            self._exec_match(stmt)
 
         else:
             self._eval(stmt)  # bare expression statement
@@ -941,6 +982,26 @@ class Interpreter:
         raise GlangRuntimeError("invalid function pointer", line, col)
 
     def _eval_method_call(self, expr: MethodCallExpr) -> Value:
+        # Union variant constructor: Shape.Circle(radius)
+        if (
+            not expr.is_arrow
+            and isinstance(expr.object, IdentifierExpr)
+            and self._env.is_union(expr.object.name)
+            and self._frame.lookup(expr.object.name) is None
+        ):
+            union_name = expr.object.name
+            union_info = self._env.unions[union_name]
+            variant_info = union_info.variants[expr.method]
+            field_values = [self._eval(a) for a in expr.args]
+            fields = {
+                fd.name: self._new_box(self._coerce_value(fv, fd.type))
+                for fd, fv in zip(variant_info.fields, field_values)
+            }
+            inst = VariantInstance(
+                union_name=union_name, variant_name=expr.method, fields=fields
+            )
+            return Value(NamedType(union_name), inst)
+
         # Static method call: ClassName.method(args)
         if (
             not expr.is_arrow
@@ -975,6 +1036,22 @@ class Interpreter:
         return self._call_method(method, defining, this_val, args)
 
     def _eval_new(self, expr: NewExpr) -> Value:
+        # Union variant heap allocation: new Shape.Circle(args)
+        if "." in expr.class_name:
+            union_name, variant_name = expr.class_name.split(".", 1)
+            union_info = self._env.unions[union_name]
+            variant_info = union_info.variants[variant_name]
+            field_values = [self._eval(a) for a in expr.args]
+            fields = {
+                fd.name: self._new_box(self._coerce_value(fv, fd.type))
+                for fd, fv in zip(variant_info.fields, field_values)
+            }
+            inst = VariantInstance(
+                union_name=union_name, variant_name=variant_name, fields=fields
+            )
+            val = Value(NamedType(union_name), inst)
+            box = self._heap.alloc(val)
+            return Value(PointerType(NamedType(union_name)), Pointer(box))
         this_val = self._instantiate(expr.class_name, on_heap=True)
         args = [self._eval(a) for a in expr.args]
         self._run_constructor(expr.class_name, this_val, args)
@@ -994,11 +1071,12 @@ class Interpreter:
         """Run the destructor chain for a live class pointer, then free it."""
         box = value.raw.target
         instance = box.value.raw
-        # Destructor chain: most-derived class first, up to the base.
-        for cls in superclass_chain(instance.class_name, self._env):
-            info = self._env.classes.get(cls)
-            if info is not None and info.destructor is not None:
-                self._call_method(_as_method(info.destructor), cls, value, [])
+        if not isinstance(instance, VariantInstance):
+            # Destructor chain: most-derived class first, up to the base.
+            for cls in superclass_chain(instance.class_name, self._env):
+                info = self._env.classes.get(cls)
+                if info is not None and info.destructor is not None:
+                    self._call_method(_as_method(info.destructor), cls, value, [])
         self._heap.free(box)
 
     # -- using blocks ------------------------------------------------------
@@ -1285,6 +1363,18 @@ class Interpreter:
             return self._field_box(box.value.raw, expr.field_name, expr.line, expr.col)
 
         if isinstance(expr, FieldAccessExpr):
+            # Union no-field variant: Expr.Nil
+            if (
+                isinstance(expr.object, IdentifierExpr)
+                and self._env.is_union(expr.object.name)
+                and self._frame.lookup(expr.object.name) is None
+            ):
+                union_name = expr.object.name
+                inst = VariantInstance(
+                    union_name=union_name, variant_name=expr.field_name, fields={}
+                )
+                return self._new_box(Value(NamedType(union_name), inst))
+
             # Enum variant: Color.RED
             if (
                 isinstance(expr.object, IdentifierExpr)
@@ -1429,6 +1519,14 @@ class Interpreter:
                 return Value(t, "")
             if self._env.is_enum(t.name):
                 return Value(t, 0)
+            if self._env.is_union(t.name):
+                info = self._env.unions[t.name]
+                first_name, first_variant = next(iter(info.variants.items()))
+                fields = {
+                    fd.name: self._new_box(self._zero_value(fd.type))
+                    for fd in first_variant.fields
+                }
+                return Value(t, VariantInstance(t.name, first_name, fields))
             # class-typed field with no pointer: treat as null reference
             return Value(t, Pointer(None))
         return Value(t, None)
