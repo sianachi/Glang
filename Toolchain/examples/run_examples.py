@@ -17,6 +17,7 @@ tests/. ``tests/test_examples.py`` runs the same examples under pytest.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -51,12 +52,17 @@ def run_example(lang_path: str) -> tuple[int, list[str]]:
     env = Analyser().analyse(program)
     interp = Interpreter(env)
     cwd = os.getcwd()
+    saved_stdin = sys.stdin
     with tempfile.TemporaryDirectory() as scratch:
         os.chdir(scratch)
+        # Deterministic empty stdin so examples that call readStdin() are golden-able
+        # (and so pytest's stdin capture doesn't raise).
+        sys.stdin = io.StringIO("")
         try:
             code = interp.run(program)
         finally:
             os.chdir(cwd)
+            sys.stdin = saved_stdin
     return code, interp.output
 
 
