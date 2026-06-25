@@ -3,7 +3,7 @@
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
+1. [Overview](#1-overview) — including [Implementation & Toolchain](#implementation--toolchain)
 2. [Lexical Structure](#2-lexical-structure)
 3. [Types](#3-types) — including [Nullable types (§3.5)](#35-nullable-types-t)
 4. [Variables & Declarations](#4-variables--declarations)
@@ -34,6 +34,70 @@ A statically-typed, manually-managed, C-style language with single inheritance a
 - Explicit control over memory
 - A type system expressive enough to write a standard library
 - A small, auditable runtime
+
+---
+
+## Implementation & Toolchain
+
+Glang has two execution paths that share one front-end:
+
+```
+source.lang
+  └─▶ Loader → Analyser (namespace → monomorphize → Pass1 → Pass2)
+        ├─▶ Interpreter   (tree-walking, via Python: `python3 main.py run`)
+        └─▶ Compiler      (emits C → gcc → native binary)
+```
+
+**The compiler is self-hosting** — the entire pipeline (lexer, parser, loader,
+analyser, and the AST→C emitter) is written in Glang itself, under `compiler/`:
+
+| Piece | File(s) |
+|---|---|
+| Lexer | `compiler/token.lang`, `glexer.lang` |
+| Typed AST + parser | `compiler/ast.lang`, `type_parser.lang`, `expr_parser.lang`, `stmt_parser.lang`, `decl_parser.lang` |
+| Loader + analyser | `compiler/loader.lang`, `namespace.lang`, `mono.lang`, `pass1.lang`, `pass2.lang`, `symtab.lang`, `tu_core.lang`, `tu_env.lang`, `retcheck.lang`, `ast_clone.lang` |
+| C emitter + driver | `compiler/emit.lang`, `glangc.lang` |
+| C runtime | `runtime/glang_runtime.c` |
+
+Python is needed only **once**, to bootstrap. A pre-generated seed, `glangc.c`
+(produced by the compiler compiling its own source — a self-compilation fixed
+point), is committed so the toolchain can be built from scratch with just a C
+compiler.
+
+### Build the compiler
+
+```bash
+# Bootstrap from the committed seed (no Python needed):
+gcc -O1 glangc.c runtime/glang_runtime.c -o glangc
+```
+
+Or regenerate the seed from source via the Python-driven transpiler (one-time):
+
+```bash
+python3 main.py compile compiler/glangc.lang -o glangc.c
+gcc -O1 glangc.c runtime/glang_runtime.c -o glangc
+```
+
+### Compile a program with no Python
+
+```bash
+./glangc examples/hello_world.lang hello.c          # .lang -> C
+gcc hello.c runtime/glang_runtime.c -o hello        # C -> binary
+./hello
+```
+
+### Self-compile (reproduce the fixed point)
+
+```bash
+./glangc compiler/glangc.lang glangc_gen2.c
+gcc -O1 glangc_gen2.c runtime/glang_runtime.c -o glangc2
+./glangc2 compiler/glangc.lang glangc_gen3.c
+diff glangc_gen2.c glangc_gen3.c     # byte-identical: glangc is self-hosting
+```
+
+The Python implementation (`lexer/`, `parser/`, `analyser/`, `interpreter/`,
+`glang_loader/`) remains the reference and the differential-test oracle: the
+Glang front-end is validated module-by-module and end-to-end against it.
 
 ---
 
@@ -1200,10 +1264,15 @@ int main() {
 ## 19. Running Programs and Examples
 
 ```bash
-# Run a program
+# Run a program (interpreter)
 python3 main.py run path/to/program.lang
 
-# Run all unit tests
+# Compile a program with the self-hosted compiler (no Python) — see
+# "Implementation & Toolchain" above for the bootstrap.
+./glangc path/to/program.lang out.c
+gcc out.c runtime/glang_runtime.c -o program && ./program
+
+# Run all unit tests (Python reference + Glang differential suites)
 python3 -m pytest tests/ -v
 ```
 

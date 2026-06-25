@@ -39,3 +39,26 @@ CLAUDE.md
 AGENTS.md
 
 plan.md
+
+# Compiled C-extension / transpiler-generated artifacts (regenerated from sources).
+# NOTE: glangc.c and runtime/*.c are intentionally NOT ignored — they are the
+# bootstrap seed + runtime needed to build the compiler from scratch.
+*.so
+/analyser/*.c
+/lexer/*.c
+/parser/*.c
+/errors/*.c
+/glang_loader/*.c
+/interpreter/*.c
+/compiler/*.c
+
+# Built program outputs (rebuild from sources)
+/glangc
+/mini_lexer
+/mini_lexer.c
+/console_io
+/console_io.c
+
+# Working / planning notes (not part of the shipped compiler)
+/compiler/notes/
+/compiler/SELFHOST.md
