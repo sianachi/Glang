@@ -1,0 +1,101 @@
+// compiler/glangc.lang — the self-hosted Glang compiler driver (NO Python).
+//
+// Reads a .lang file path + output .c path from argv, runs the entire pipeline in
+// Glang — lex → parse → inject Exception → namespace_resolve → monomorphize →
+// pass1 → pass2 → emit (typed-AST C emitter) — and writes the C output.
+//
+//   glangc <input.lang> <output.c>
+//
+// This is the bridge that removes Python from the toolchain: build this with the
+// existing transpiler once, and the resulting native binary compiles .lang itself.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "symtab.lang";
+import "tu_core.lang";
+import "tu_env.lang";
+import "pass2_support.lang";
+import "retcheck.lang";
+import "namespace.lang";
+import "mono.lang";
+import "pass1.lang";
+import "pass2.lang";
+import "loader.lang";
+import "emit.lang";
+
+// Built-in Exception class (port of analyser/analyser.py::_make_exception_decl).
+Decl* make_exception_decl() {
+    List<FieldDecl*> fields = List<FieldDecl*>();
+    fields.add(new FieldDecl("message", new TypeNode.NamedType("string"), false, "public"));
+    List<StaticFieldDecl*> sfields = List<StaticFieldDecl*>();
+    List<MethodDecl*> methods = List<MethodDecl*>();
+    Expr* target = new Expr.FieldAccessExpr(new Expr.ThisExpr(), "message");
+    Stmt* assign = new Stmt.AssignStmt(target, "=", new Expr.IdentifierExpr("msg"));
+    List<Stmt*> ctorStmts = List<Stmt*>();
+    ctorStmts.add(assign);
+    List<Param*> ctorParams = List<Param*>();
+    ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));
+    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, new Stmt.Block(ctorStmts), false, List<Expr*>());
+    List<string> ifaces = List<string>();
+    List<string> typeParams = List<string>();
+    Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+    return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
+                              ctor, null, "public", typeParams, bounds);
+}
+
+int main() {
+    if (getArgCount() < 2) {
+        printErr("usage: glangc <input.lang> <output.c>");
+        return 2;
+    }
+    string inPath = getArg(0);
+    string outPath = getArg(1);
+
+    try {
+        // Front-end (all Glang).
+        Program* prog = load(inPath);
+
+        // Prepend the built-in Exception class.
+        List<Decl*> withExc = List<Decl*>();
+        withExc.add(make_exception_decl());
+        List<Decl*> decls = prog->declarations;
+        int dn = decls.length();
+        for (int i = 0; i < dn; ++i) { withExc.add(decls.get(i)); }
+        Program* prog2 = new Program(prog->imports, withExc);
+
+        Program* resolved = namespace_resolve(prog2);
+        Program* mono = monomorphize(resolved);
+        GlobalEnv* env = new GlobalEnv();
+        pass1_collect(env, mono);
+        Pass2Checker checker = Pass2Checker(env);
+        checker.check_program(mono);
+
+        // Back-end: typed-AST → C.
+        string cCode = emit(mono, env);
+        writeFile(outPath, cCode);
+        print("wrote " + outPath);
+        return 0;
+    } catch (AnalyzeError* ae) {
+        printErr("error: " + ae->message);
+        return 1;
+    } catch (ParseError* pe) {
+        printErr("error: " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        printErr("error: " + le->message);
+        return 1;
+    } catch (LoadError* le) {
+        printErr("error: " + le->message);
+        return 1;
+    }
+    return 0;
+}

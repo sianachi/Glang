@@ -1,0 +1,1503 @@
+// compiler/emit.lang — typed-AST C emitter for the self-hosted compiler.
+//
+// Reworks the transpiler to consume the typed AST (Expr/Stmt/Decl/TypeNode unions
+// from ast.lang) + the real GlobalEnv directly — no serialized text, no generic
+// AstNode.  Ports the C-emission logic from compiler/transpiler.lang's CEmitter,
+// replacing AstNode-tag navigation with `match` on the unions.
+//
+// INCREMENTAL: this is the first vertical slice (functions + basic statements /
+// expressions / print dispatch) to establish the architecture and the first
+// Python-free end-to-end compile.  Classes/unions/enums/closures/methods/foreach/
+// match emission are added in subsequent slices.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "ast.lang";
+import "symtab.lang";
+
+// ── Type-string helpers (string-based, reused via showType) ─────────────────
+// showType(TypeNode*) (ast.lang) gives the canonical no-space string; the C type
+// mapping then works on that string exactly as the original transpiler did.
+
+string mangleName(string s) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    int i = 0;
+    while (i < n) {
+        char c = s[i];
+        if (c == '<') { sb.appendChar('_'); }
+        else if (c == '>') { }
+        else if (c == ',') { sb.appendChar('_'); }
+        else if (c == ' ') { }
+        else if (c == ':' && i + 1 < n && s[i+1] == ':') { sb.append("__"); i = i + 2; continue; }
+        else if (c == '*' || c == '?' || c == '[' || c == ']') { }
+        else { sb.appendChar(c); }
+        i = i + 1;
+    }
+    return sb.build();
+}
+
+string cTypeOf(string t) {
+    if (t == "int")    { return "int64_t"; }
+    if (t == "float")  { return "double"; }
+    if (t == "bool")   { return "int"; }
+    if (t == "char")   { return "char"; }
+    if (t == "byte")   { return "uint8_t"; }
+    if (t == "string") { return "char*"; }
+    if (t == "void")   { return "void"; }
+    if (t == "null")   { return "void*"; }
+    if (startsWith(t, "fn(")) { return "GlangFn"; }
+    if (endsWith(t, "*")) { return cTypeOf(substr(t, 0, len(t) - 1)) + "*"; }
+    if (endsWith(t, "?")) { return cTypeOf(substr(t, 0, len(t) - 1)); }
+    if (endsWith(t, "]")) {
+        int lb = strings::indexOf(t, '[');
+        if (lb >= 0) { return cTypeOf(substr(t, 0, lb)); }
+    }
+    return mangleName(t);
+}
+
+string cTypeDecl(string t, string varName) {
+    if (endsWith(t, "]")) {
+        int lb = strings::indexOf(t, '[');
+        if (lb >= 0) {
+            string base = substr(t, 0, lb);
+            string size = substr(t, lb + 1, len(t) - 1);
+            return cTypeOf(base) + " " + varName + "[" + size + "]";
+        }
+    }
+    return cTypeOf(t) + " " + varName;
+}
+
+// C type of a TypeNode, adding the reference '*' for bare class types.
+string cTypeOfNode(TypeNode* t, GlobalEnv* env) {
+    return cTypeStrC(showType(t), env);
+}
+// C type of a Glang type STRING, adding the reference '*' for bare class types.
+string cTypeStrC(string s, GlobalEnv* env) {
+    if (env->is_class(s)) { return cTypeOf(s) + "*"; }
+    return cTypeOf(s);
+}
+
+bool emitListHas(List<string> xs, string v) {
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) { if (xs.get(i) == v) { return true; } }
+    return false;
+}
+
+// "fn(int,bool)->void" → "int,bool|void"  (params | ret)
+string parseFnType(string fnType) {
+    if (len(fnType) < 3) { return ""; }
+    if (substr(fnType, 0, 3) != "fn(") { return ""; }
+    int closePos = strings::indexOf(fnType, ')');
+    if (closePos < 0) { return ""; }
+    string paramsStr = substr(fnType, 3, closePos);
+    string retStr    = substr(fnType, closePos + 3, len(fnType));
+    return paramsStr + "|" + retStr;
+}
+
+// Call through a GlangFn value `varName` of type fnType with already-emitted argStrs.
+string emitGlangFnCall(string varName, string fnType, List<string> argStrs) {
+    string parts = parseFnType(fnType);
+    string retStr = "int";
+    string paramsStr = "";
+    int pipe = strings::indexOf(parts, '|');
+    if (pipe >= 0) {
+        paramsStr = substr(parts, 0, pipe);
+        retStr    = substr(parts, pipe + 1, len(parts));
+    }
+    StringBuilder cast = StringBuilder();
+    cast.append(cTypeOf(retStr) + "(*)(void*");
+    if (len(paramsStr) > 0) {
+        List<string> ptypes = strings::split(paramsStr, ',');
+        for (int i = 0; i < ptypes.length(); ++i) { cast.append(", " + cTypeOf(ptypes.get(i))); }
+    }
+    cast.append(")");
+    StringBuilder call = StringBuilder();
+    call.append("((" + cast.build() + ")" + varName + ".fn)(" + varName + ".cap");
+    for (int i = 0; i < argStrs.length(); ++i) { call.append(", " + argStrs.get(i)); }
+    call.append(")");
+    return call.build();
+}
+
+// ── The emitter ─────────────────────────────────────────────────────────────
+
+class CEmit {
+    StringBuilder out;
+    StringBuilder preamble;
+    StringBuilder structs;
+    StringBuilder enums;
+    StringBuilder protos;
+    StringBuilder closureDefs;           // closure structs/fns, emitted before bodies
+    GlobalEnv* env;
+    int indentLevel;
+    int closureCounter;
+    string currentClass;                 // raw name of enclosing class ("" if none)
+    List<Map<string, string>*> scopes;   // name -> Glang type string (for infer)
+    List<string> hierEntries;            // class/super name pairs for instanceof
+    List<string> thunksEmitted;          // free-fn names already given a GlangFn thunk
+
+    CEmit(GlobalEnv* e) {
+        this.out = StringBuilder();
+        this.preamble = StringBuilder();
+        this.structs = StringBuilder();
+        this.enums = StringBuilder();
+        this.protos = StringBuilder();
+        this.closureDefs = StringBuilder();
+        this.env = e;
+        this.indentLevel = 0;
+        this.closureCounter = 0;
+        this.currentClass = "";
+        this.scopes = List<Map<string, string>*>();
+        this.hierEntries = List<string>();
+        this.thunksEmitted = List<string>();
+    }
+
+    // ── Class-info helpers (from the real GlobalEnv) ─────────────────────
+    Decl* classDeclOf(string name) {
+        if (!(this.env->is_class(name))) { return null; }
+        ClassInfo* ci = this.env->classes.getOr(name, null);
+        if (ci == null) { return null; }
+        return ci->decl;
+    }
+    string classSuperOf(string name) {
+        ClassInfo* ci = this.env->classes.getOr(name, null);
+        if (ci == null) { return ""; }
+        return ci->superclass;
+    }
+    List<FieldDecl*> ownFieldsOf(string name) {
+        Decl* d = this.classDeclOf(name);
+        if (d != null) {
+            match (*d) {
+                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn) => { return fields; }
+                _ => { }
+            }
+        }
+        return List<FieldDecl*>();
+    }
+    List<MethodDecl*> ownMethodsOf(string name) {
+        Decl* d = this.classDeclOf(name);
+        if (d != null) {
+            match (*d) {
+                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn) => { return m; }
+                _ => { }
+            }
+        }
+        return List<MethodDecl*>();
+    }
+    // The class that actually declares `method` (walk the super chain).
+    string methodOwnerClass(string cls, string method) {
+        string cur = cls;
+        while (cur != "") {
+            List<MethodDecl*> ms = this.ownMethodsOf(cur);
+            for (int i = 0; i < ms.length(); ++i) {
+                if (ms.get(i)->name == method) { return cur; }
+            }
+            cur = this.classSuperOf(cur);
+        }
+        return cls;
+    }
+    string methodReturnTypeOf(string cls, string method) {
+        ClassInfo* ci = this.env->classes.getOr(cls, null);
+        if (ci != null) {
+            MethodDecl* md = ci->instance_methods.getOr(method, null);
+            if (md != null) { return showType(md->returnType); }
+        }
+        return "";
+    }
+    string fieldTypeOf(string cls, string field) {
+        ClassInfo* ci = this.env->classes.getOr(cls, null);
+        if (ci != null) {
+            FieldDecl* fd = ci->fields.getOr(field, null);
+            if (fd != null) { return showType(fd->fieldType); }
+        }
+        return "";
+    }
+
+    void pushScope() { this.scopes.add(Map<string, string>()); }
+    void popScope() { this.scopes.removeAt(this.scopes.length() - 1); }
+    void define(string name, string type) {
+        if (this.scopes.length() > 0) { this.scopes.get(this.scopes.length() - 1).set(name, type); }
+    }
+    string lookupVar(string name) {
+        int i = this.scopes.length() - 1;
+        while (i >= 0) {
+            Map<string, string>* sc = this.scopes.get(i);
+            if (sc.has(name)) { return sc.getOr(name, ""); }
+            i = i - 1;
+        }
+        return "";
+    }
+
+    string ind() {
+        string s = "";
+        for (int i = 0; i < this.indentLevel; ++i) { s = s + "    "; }
+        return s;
+    }
+    void ln(string s) { this.out.append(this.ind()); this.out.appendLine(s); }
+
+    // ── Program ──────────────────────────────────────────────────────────
+    void emitProgram(Program* program) {
+        List<Decl*> decls = program->declarations;
+        int n = decls.length();
+        // Pass 1: forward typedefs for class + union structs.
+        for (int i = 0; i < n; ++i) {
+            match (*(decls.get(i))) {
+                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn) => {
+                    string cn = mangleName(nm);
+                    this.preamble.appendLine("typedef struct " + cn + " " + cn + ";");
+                    if (sup != "") {
+                        this.hierEntries.add(mangleName(nm));
+                        this.hierEntries.add(mangleName(sup));
+                    }
+                }
+                Decl.UnionDecl(nm, tps, variants) => {
+                    string cn = mangleName(nm);
+                    this.preamble.appendLine("typedef struct " + cn + " " + cn + ";");
+                }
+                _ => { }
+            }
+        }
+        // Pass 2a: enums (into the enums buffer — emitted before structs).
+        for (int i = 0; i < n; ++i) {
+            match (*(decls.get(i))) {
+                Decl.EnumDecl(nm, variants) => { this.emitEnum(nm, variants); }
+                _ => { }
+            }
+        }
+        // Pass 2b: class + union struct bodies.
+        for (int i = 0; i < n; ++i) {
+            match (*(decls.get(i))) {
+                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn) => {
+                    this.emitClassStruct(nm);
+                }
+                Decl.UnionDecl(nm, tps, variants) => {
+                    this.emitUnionStruct(nm, variants);
+                }
+                _ => { }
+            }
+        }
+        // Pass 3: prototypes.
+        for (int i = 0; i < n; ++i) { this.emitPrototype(decls.get(i)); }
+        // Pass 4: bodies.
+        for (int i = 0; i < n; ++i) { this.emitDecl(decls.get(i)); }
+
+        this.out.appendLine("");
+        this.out.appendLine("int main(int argc, char** argv) {");
+        this.out.appendLine("    glang_argc = argc;");
+        this.out.appendLine("    glang_argv = argv;");
+        this.out.appendLine("    return (int)glang_main();");
+        this.out.appendLine("}");
+    }
+
+    // ── Class struct bodies (base fields first, then own) ─────────────────
+    void emitClassStruct(string name) {
+        string cn = mangleName(name);
+        this.structs.appendLine("struct " + cn + " {");
+        this.emitFieldsRec(name);
+        this.structs.appendLine("};");
+        this.structs.appendLine("");
+    }
+    void emitFieldsRec(string name) {
+        string sup = this.classSuperOf(name);
+        if (sup != "") { this.emitFieldsRec(sup); }
+        List<FieldDecl*> fs = this.ownFieldsOf(name);
+        for (int i = 0; i < fs.length(); ++i) {
+            FieldDecl* fd = fs.get(i);
+            string fty = showType(fd->fieldType);
+            if (this.env->is_class(fty)) { fty = fty + "*"; }
+            this.structs.appendLine("    " + cTypeDecl(fty, mangleName(fd->name)) + ";");
+        }
+    }
+
+    string cRetTypeOf(TypeNode* t) {
+        string s = showType(t);
+        if (this.env->is_class(s)) { return cTypeOf(s) + "*"; }
+        return cTypeOf(s);
+    }
+
+    string buildParamList(List<Param*> params) {
+        StringBuilder sb = StringBuilder();
+        int n = params.length();
+        if (n == 0) { return "void"; }
+        for (int i = 0; i < n; ++i) {
+            if (i > 0) { sb.append(", "); }
+            Param* p = params.get(i);
+            sb.append(cTypeOfNode(p->type, this.env) + " " + p->name);
+        }
+        return sb.build();
+    }
+
+    void emitEnum(string rawName, List<EnumVariant*> variants) {
+        string nm = mangleName(rawName);
+        this.enums.appendLine("typedef int64_t " + nm + ";");
+        int next = 0;
+        int n = variants.length();
+        for (int i = 0; i < n; ++i) {
+            EnumVariant* v = variants.get(i);
+            int val = next;
+            if (v->hasValue) { val = v->value; }
+            this.enums.appendLine("#define " + nm + "__" + v->name + " ((int64_t)" + strings::intToStr(val) + ")");
+            next = val + 1;
+        }
+        this.enums.appendLine("");
+    }
+
+    void emitUnionStruct(string rawName, List<UnionVariant*> variants) {
+        string nm = mangleName(rawName);
+        int n = variants.length();
+        this.structs.appendLine("typedef enum {");
+        for (int i = 0; i < n; ++i) { this.structs.appendLine("    " + nm + "__" + variants.get(i)->name + ","); }
+        this.structs.appendLine("} " + nm + "_tag;");
+        this.structs.appendLine("");
+        this.structs.appendLine("struct " + nm + " {");
+        this.structs.appendLine("    " + nm + "_tag tag;");
+        this.structs.appendLine("    union {");
+        for (int i = 0; i < n; ++i) {
+            UnionVariant* v = variants.get(i);
+            List<FieldDecl*> fs = v->fields;
+            if (fs.length() == 0) {
+                this.structs.appendLine("        struct { int __dummy; } as_" + v->name + ";");
+            } else {
+                this.structs.appendLine("        struct {");
+                for (int j = 0; j < fs.length(); ++j) {
+                    FieldDecl* f = fs.get(j);
+                    string fty = showType(f->fieldType);
+                    if (this.env->is_class(fty)) { fty = fty + "*"; }
+                    this.structs.appendLine("            " + cTypeDecl(fty, f->name) + ";");
+                }
+                this.structs.appendLine("        } as_" + v->name + ";");
+            }
+        }
+        this.structs.appendLine("    } data;");
+        this.structs.appendLine("};");
+        this.structs.appendLine("");
+        for (int i = 0; i < n; ++i) {
+            UnionVariant* v = variants.get(i);
+            List<FieldDecl*> fs = v->fields;
+            StringBuilder pl = StringBuilder();
+            bool first = true;
+            for (int j = 0; j < fs.length(); ++j) {
+                FieldDecl* f = fs.get(j);
+                if (!first) { pl.append(", "); }
+                string fty = showType(f->fieldType);
+                if (this.env->is_class(fty)) { fty = fty + "*"; }
+                pl.append(cTypeDecl(fty, f->name));
+                first = false;
+            }
+            if (fs.length() == 0) {
+                this.structs.appendLine("static " + nm + " " + nm + "__" + v->name + "_new(void) {");
+            } else {
+                this.structs.appendLine("static " + nm + " " + nm + "__" + v->name + "_new(" + pl.build() + ") {");
+            }
+            this.structs.appendLine("    " + nm + " __v;");
+            this.structs.appendLine("    __v.tag = " + nm + "__" + v->name + ";");
+            for (int j = 0; j < fs.length(); ++j) {
+                FieldDecl* f = fs.get(j);
+                this.structs.appendLine("    __v.data.as_" + v->name + "." + f->name + " = " + f->name + ";");
+            }
+            this.structs.appendLine("    return __v;");
+            this.structs.appendLine("}");
+            this.structs.appendLine("");
+        }
+    }
+
+    List<FieldDecl*> unionVariantFields(string un, string vn) {
+        UnionInfo* ui = this.env->unions.getOr(un, null);
+        if (ui != null) {
+            UnionVariantInfo* vi = ui->variants.getOr(vn, null);
+            if (vi != null) { return vi->fields; }
+        }
+        return List<FieldDecl*>();
+    }
+
+    string throwClass(Expr* v) {
+        match (*v) {
+            Expr.NewExpr(cn, args, ta) => { return mangleName(cn); }
+            _ => {
+                string t = this.infer(v);
+                if (endsWith(t, "*")) { t = substr(t, 0, len(t) - 1); }
+                if (this.env->is_class(t)) { return mangleName(t); }
+                return "Exception";
+            }
+        }
+    }
+
+    void emitTryCatch(Stmt* body, List<CatchClause*> catches) {
+        this.ln("GLANG_TRY_BEGIN");
+        this.indentLevel = this.indentLevel + 1;
+        this.emitBlock(body);
+        this.indentLevel = this.indentLevel - 1;
+        this.ln("GLANG_TRY_END");
+        int nc = catches.length();
+        for (int i = 0; i < nc; ++i) {
+            CatchClause* c = catches.get(i);
+            string baseType = mangleName(showType(c->catchType));   // "IOError*" → "IOError"
+            string ptrType = baseType + "*";
+            if (i > 0) { this.ln("else"); }
+            this.ln("if (glang_instanceof(__exc_frame__.class_name, \"" + baseType + "\", __glang_hier__, __glang_hier_len__)) {");
+            this.indentLevel = this.indentLevel + 1;
+            this.ln(ptrType + " " + c->varName + " = (" + ptrType + ")__exc_frame__.obj;");
+            this.pushScope();
+            this.define(c->varName, baseType + "*");
+            this.emitBlockInner(c->body);
+            this.popScope();
+            this.indentLevel = this.indentLevel - 1;
+            this.ln("}");
+        }
+        this.ln("else { GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name); }");
+        this.ln("GLANG_CATCH_DONE");
+    }
+
+    void emitMatch(Expr* scrutinee, List<MatchArm*> arms) {
+        string st = this.infer(scrutinee);
+        if (endsWith(st, "*")) { st = substr(st, 0, len(st) - 1); }
+        string scrutType = mangleName(st);
+        this.ln("{");
+        this.indentLevel = this.indentLevel + 1;
+        this.ln(scrutType + " __match__ = " + this.emitExpr(scrutinee) + ";");
+        this.ln("switch (__match__.tag) {");
+        int na = arms.length();
+        for (int i = 0; i < na; ++i) {
+            MatchArm* arm = arms.get(i);
+            Pattern* pat = arm->pattern;
+            match (*pat) {
+                Pattern.WildcardPattern() => {
+                    this.ln("default: {");
+                    this.indentLevel = this.indentLevel + 1;
+                    this.emitBlock(arm->body);
+                    this.ln("break;");
+                    this.indentLevel = this.indentLevel - 1;
+                    this.ln("}");
+                }
+                Pattern.VariantPattern(un, vn, binds) => {
+                    string umn = mangleName(un);
+                    this.ln("case " + umn + "__" + vn + ": {");
+                    this.indentLevel = this.indentLevel + 1;
+                    this.pushScope();
+                    List<FieldDecl*> vf = this.unionVariantFields(un, vn);
+                    int nb = binds.length();
+                    for (int j = 0; j < nb; ++j) {
+                        string bname = binds.get(j);
+                        FieldDecl* f = vf.get(j);
+                        string fty = showType(f->fieldType);
+                        string boundType = fty;
+                        if (this.env->is_class(fty)) { boundType = fty + "*"; }
+                        this.ln(cTypeDecl(boundType, bname) + " = __match__.data.as_" + vn + "." + f->name + ";");
+                        this.define(bname, boundType);
+                    }
+                    this.emitBlock(arm->body);
+                    this.popScope();
+                    this.ln("break;");
+                    this.indentLevel = this.indentLevel - 1;
+                    this.ln("}");
+                }
+            }
+        }
+        this.ln("}");
+        this.indentLevel = this.indentLevel - 1;
+        this.ln("}");
+    }
+
+    string buildParamListWith(List<Param*> params, string extraFirst) {
+        StringBuilder sb = StringBuilder();
+        sb.append(extraFirst);
+        int n = params.length();
+        for (int i = 0; i < n; ++i) {
+            sb.append(", ");
+            Param* p = params.get(i);
+            sb.append(cTypeOfNode(p->type, this.env) + " " + p->name);
+        }
+        return sb.build();
+    }
+
+    void emitPrototype(Decl* d) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                string cname = mangleName(name);
+                if (cname == "main") { cname = "glang_main"; }
+                this.protos.appendLine(this.cRetTypeOf(ret) + " " + cname + "(" + this.buildParamList(params) + ");");
+            }
+            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn) => {
+                string cn = mangleName(name);
+                string selfp = cn + "* self";
+                if (ctor != null) {
+                    this.protos.appendLine(cn + "* " + cn + "_new(" + this.buildParamList(ctor->params) + ");");
+                    this.protos.appendLine("void " + cn + "__init(" + this.buildParamListWith(ctor->params, selfp) + ");");
+                } else {
+                    this.protos.appendLine(cn + "* " + cn + "_new(void);");
+                    this.protos.appendLine("void " + cn + "__init(" + cn + "* self);");
+                }
+                this.protos.appendLine("void " + cn + "_delete(" + cn + "* self);");
+                int mn = methods.length();
+                for (int i = 0; i < mn; ++i) {
+                    MethodDecl* m = methods.get(i);
+                    string mc = cn + "__" + mangleName(m->name);
+                    string pl = "";
+                    if (m->isStatic) { pl = this.buildParamList(m->params); }
+                    else { pl = this.buildParamListWith(m->params, selfp); }
+                    this.protos.appendLine(this.cRetTypeOf(m->returnType) + " " + mc + "(" + pl + ");");
+                }
+            }
+            Decl.ModifierDecl(tps, target, methods) => {
+                string rawTarget = showType(target);
+                string tgt = mangleName(rawTarget);
+                string selfParam = cTypeOf(rawTarget) + " self";
+                if (this.env->is_class(rawTarget)) { selfParam = tgt + "* self"; }
+                int mn = methods.length();
+                for (int i = 0; i < mn; ++i) {
+                    MethodDecl* m = methods.get(i);
+                    this.protos.appendLine(this.cRetTypeOf(m->returnType) + " " + tgt + "__" + mangleName(m->name)
+                                           + "(" + this.buildParamListWith(m->params, selfParam) + ");");
+                }
+            }
+            _ => { }
+        }
+    }
+
+    void emitDecl(Decl* d) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                this.emitFunc(name, params, ret, body);
+            }
+            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn) => {
+                this.emitClass(name, methods, sup, ctor, dtor);
+            }
+            Decl.ModifierDecl(tps, target, methods) => {
+                this.emitModifier(showType(target), target, methods);
+            }
+            _ => { }   // enums/unions emitted in the struct pass
+        }
+    }
+
+    void emitClass(string rawName, List<MethodDecl*> methods, string sup, ConstructorDecl* ctor, DestructorDecl* dtor) {
+        string cn = mangleName(rawName);
+        // constructor (__init + _new)
+        if (ctor != null) {
+            this.emitConstructor(rawName, ctor, sup);
+        } else {
+            this.out.appendLine("");
+            this.out.appendLine("void " + cn + "__init(" + cn + "* self) {");
+            if (sup != "") {
+                string sn = mangleName(sup);
+                this.out.appendLine("    " + sn + "__init((" + sn + "*)self);");
+            }
+            this.out.appendLine("}");
+            this.out.appendLine(cn + "* " + cn + "_new(void) {");
+            this.out.appendLine("    " + cn + "* self = (" + cn + "*)calloc(1, sizeof(" + cn + "));");
+            this.out.appendLine("    " + cn + "__init(self);");
+            this.out.appendLine("    return self;");
+            this.out.appendLine("}");
+        }
+        // destructor + delete
+        if (dtor != null) { this.emitDestructor(rawName, dtor); }
+        this.out.appendLine("");
+        this.out.appendLine("void " + cn + "_delete(" + cn + "* self) {");
+        this.out.appendLine("    if (self == NULL) return;");
+        if (dtor != null) { this.out.appendLine("    " + cn + "_dtor(self);"); }
+        if (sup != "") {
+            string sn = mangleName(sup);
+            this.out.appendLine("    " + sn + "_delete((" + sn + "*)self);");
+            this.out.appendLine("    return;");
+        } else {
+            this.out.appendLine("    free(self);");
+        }
+        this.out.appendLine("}");
+        // methods
+        int mn = methods.length();
+        for (int i = 0; i < mn; ++i) { this.emitMethod(rawName, methods.get(i)); }
+    }
+
+    void emitConstructor(string rawName, ConstructorDecl* ctor, string sup) {
+        string cn = mangleName(rawName);
+        this.out.appendLine("");
+        this.out.appendLine("void " + cn + "__init(" + this.buildParamListWith(ctor->params, cn + "* self") + ") {");
+        this.indentLevel = 1;
+        this.pushScope();
+        string savedClass = this.currentClass;
+        this.currentClass = rawName;
+        this.define("self", rawName + "*");
+        int pn = ctor->params.length();
+        for (int i = 0; i < pn; ++i) { Param* p = ctor->params.get(i); this.define(p->name, showType(p->type)); }
+        if (ctor->hasSuper && sup != "") {
+            string sn = mangleName(sup);
+            StringBuilder sc = StringBuilder();
+            sc.append(sn + "__init((" + sn + "*)self");
+            int sa = ctor->superArgs.length();
+            for (int i = 0; i < sa; ++i) { sc.append(", " + this.emitExpr(ctor->superArgs.get(i))); }
+            sc.append(")");
+            this.ln(sc.build() + ";");
+        }
+        this.emitBlockInner(ctor->body);
+        this.currentClass = savedClass;
+        this.popScope();
+        this.indentLevel = 0;
+        this.out.appendLine("}");
+        // _new
+        this.out.appendLine("");
+        this.out.appendLine(cn + "* " + cn + "_new(" + this.buildParamList(ctor->params) + ") {");
+        this.out.appendLine("    " + cn + "* self = (" + cn + "*)calloc(1, sizeof(" + cn + "));");
+        StringBuilder ic = StringBuilder();
+        ic.append("    " + cn + "__init(self");
+        for (int i = 0; i < pn; ++i) { ic.append(", " + ctor->params.get(i)->name); }
+        ic.append(");");
+        this.out.appendLine(ic.build());
+        this.out.appendLine("    return self;");
+        this.out.appendLine("}");
+    }
+
+    void emitDestructor(string rawName, DestructorDecl* dtor) {
+        string cn = mangleName(rawName);
+        this.out.appendLine("");
+        this.out.appendLine("void " + cn + "_dtor(" + cn + "* self) {");
+        this.indentLevel = 1;
+        this.pushScope();
+        string savedClass = this.currentClass;
+        this.currentClass = rawName;
+        this.define("self", rawName + "*");
+        this.emitBlockInner(dtor->body);
+        this.currentClass = savedClass;
+        this.popScope();
+        this.indentLevel = 0;
+        this.out.appendLine("}");
+    }
+
+    void emitMethod(string rawName, MethodDecl* m) {
+        string cn = mangleName(rawName);
+        string mc = cn + "__" + mangleName(m->name);
+        string pl = "";
+        if (m->isStatic) { pl = this.buildParamList(m->params); }
+        else { pl = this.buildParamListWith(m->params, cn + "* self"); }
+        this.out.appendLine("");
+        this.out.appendLine(this.cRetTypeOf(m->returnType) + " " + mc + "(" + pl + ") {");
+        this.indentLevel = 1;
+        this.pushScope();
+        string savedClass = this.currentClass;
+        this.currentClass = rawName;
+        if (!(m->isStatic)) { this.define("self", rawName + "*"); }
+        int pn = m->params.length();
+        for (int i = 0; i < pn; ++i) { Param* p = m->params.get(i); this.define(p->name, showType(p->type)); }
+        if (m->body != null) { this.emitBlockInner(m->body); }
+        this.currentClass = savedClass;
+        this.popScope();
+        this.indentLevel = 0;
+        this.out.appendLine("}");
+    }
+
+    void emitFunc(string name, List<Param*> params, TypeNode* ret, Stmt* body) {
+        string cname = mangleName(name);
+        if (cname == "main") { cname = "glang_main"; }
+        this.out.appendLine("");
+        this.out.appendLine(this.cRetTypeOf(ret) + " " + cname + "(" + this.buildParamList(params) + ") {");
+        this.indentLevel = 1;
+        this.pushScope();
+        int pn = params.length();
+        for (int i = 0; i < pn; ++i) {
+            Param* p = params.get(i);
+            this.define(p->name, showType(p->type));
+        }
+        this.emitBlockInner(body);
+        this.popScope();
+        this.indentLevel = 0;
+        this.out.appendLine("}");
+    }
+
+    // emit the statements of a Block (without extra braces/scope push beyond what caller set)
+    void emitBlockInner(Stmt* block) {
+        match (*block) {
+            Stmt.Block(stmts) => {
+                int n = stmts.length();
+                for (int i = 0; i < n; ++i) { this.emitStmt(stmts.get(i)); }
+            }
+            _ => { this.emitStmt(block); }
+        }
+    }
+
+    void emitBlock(Stmt* block) {
+        this.pushScope();
+        this.emitBlockInner(block);
+        this.popScope();
+    }
+
+    // ── Statements ─────────────────────────────────────────────────────────
+    void emitStmt(Stmt* s) {
+        match (*s) {
+            Stmt.Block(stmts) => {
+                this.ln("{");
+                this.indentLevel = this.indentLevel + 1;
+                this.emitBlock(s);
+                this.indentLevel = this.indentLevel - 1;
+                this.ln("}");
+            }
+            Stmt.ExprStmt(e) => { this.ln(this.emitExpr(e) + ";"); }
+            Stmt.ReturnStmt(v) => {
+                if (v == null) { this.ln("return;"); }
+                else { this.ln("return " + this.emitExpr(v) + ";"); }
+            }
+            Stmt.VarDecl(nm, ty, init, c) => {
+                string ts = showType(ty);
+                string cdecl = "";
+                if (ts == "var") {
+                    // `var` inference is resolved here (Pass2 only put it in scope, not the AST).
+                    string it = this.infer(init);
+                    this.define(nm, it);
+                    cdecl = cTypeStrC(it, this.env);
+                } else {
+                    this.define(nm, ts);
+                    cdecl = cTypeOfNode(ty, this.env);
+                }
+                this.ln(cdecl + " " + nm + " = " + this.emitExpr(init) + ";");
+            }
+            Stmt.AssignStmt(target, op, val) => {
+                this.ln(this.emitExpr(target) + " " + op + " " + this.emitExpr(val) + ";");
+            }
+            Stmt.IfStmt(cond, th, el) => {
+                this.ln("if (" + this.emitExpr(cond) + ") {");
+                this.indentLevel = this.indentLevel + 1;
+                this.emitBlock(th);
+                this.indentLevel = this.indentLevel - 1;
+                if (el != null) {
+                    this.ln("} else {");
+                    this.indentLevel = this.indentLevel + 1;
+                    this.emitBlock(el);
+                    this.indentLevel = this.indentLevel - 1;
+                }
+                this.ln("}");
+            }
+            Stmt.WhileStmt(cond, body) => {
+                this.ln("while (" + this.emitExpr(cond) + ") {");
+                this.indentLevel = this.indentLevel + 1;
+                this.emitBlock(body);
+                this.indentLevel = this.indentLevel - 1;
+                this.ln("}");
+            }
+            Stmt.ForStmt(init, cond, post, body) => {
+                this.pushScope();
+                string initStr = this.renderForInit(init);
+                string condStr = this.emitExpr(cond);
+                string postStr = this.renderForPost(post);
+                this.ln("for (" + initStr + "; " + condStr + "; " + postStr + ") {");
+                this.indentLevel = this.indentLevel + 1;
+                this.emitBlockInner(body);
+                this.indentLevel = this.indentLevel - 1;
+                this.ln("}");
+                this.popScope();
+            }
+            Stmt.DoWhileStmt(body, cond) => {
+                this.ln("do {");
+                this.indentLevel = this.indentLevel + 1;
+                this.emitBlock(body);
+                this.indentLevel = this.indentLevel - 1;
+                this.ln("} while (" + this.emitExpr(cond) + ");");
+            }
+            Stmt.MatchStmt(scrut, arms) => { this.emitMatch(scrut, arms); }
+            Stmt.ForeachStmt(vt, vn, it, body, c) => { this.emitForeach(vt, vn, it, body); }
+            Stmt.ThrowStmt(v) => { this.ln("GLANG_THROW(" + this.emitExpr(v) + ", \"" + this.throwClass(v) + "\");"); }
+            Stmt.TryCatchStmt(body, catches) => { this.emitTryCatch(body, catches); }
+            Stmt.UsingStmt(decl, body) => { this.emitUsing(decl, body); }
+            Stmt.BreakStmt() => { this.ln("break;"); }
+            Stmt.ContinueStmt() => { this.ln("continue;"); }
+            _ => { this.ln("/* TODO stmt */;"); }   // foreach/using/try/throw later
+        }
+    }
+
+    void emitForeach(TypeNode* varType, string varName, Expr* iterable, Stmt* body) {
+        string vt = showType(varType);
+        string iterStr = this.emitExpr(iterable);
+        string iterType = this.infer(iterable);
+        // resolve `var` element type from the iterable
+        if (vt == "var") {
+            if (iterType == "string") { vt = "char"; }
+            else {
+                string bt = iterType;
+                if (endsWith(bt, "*")) { bt = substr(bt, 0, len(bt) - 1); }
+                vt = this.methodReturnTypeOf(bt, "get");   // List<T>.get(int)->T element type
+                if (vt == "") { vt = "int"; }
+            }
+        }
+        string vdecl = cTypeStrC(vt, this.env);
+        this.pushScope();
+        this.define(varName, vt);
+        this.ln("{");
+        this.indentLevel = this.indentLevel + 1;
+        if (iterType == "string") {
+            this.ln("char* __it__ = " + iterStr + ";");
+            this.ln("int64_t __n__ = (int64_t)strlen(__it__);");
+            this.ln("for (int64_t __k__ = 0; __k__ < __n__; __k__++) {");
+            this.indentLevel = this.indentLevel + 1;
+            this.ln(vdecl + " " + varName + " = __it__[__k__];");
+            this.emitBlockInner(body);
+        } else if (endsWith(iterType, "]")) {
+            int lb = strings::indexOf(iterType, '[');
+            string size = "0";
+            if (lb >= 0) { size = substr(iterType, lb + 1, len(iterType) - 1); }
+            this.ln("int64_t __n__ = (int64_t)" + size + ";");
+            this.ln("for (int64_t __k__ = 0; __k__ < __n__; __k__++) {");
+            this.indentLevel = this.indentLevel + 1;
+            this.ln(vdecl + " " + varName + " = (" + iterStr + ")[__k__];");
+            this.emitBlockInner(body);
+        } else {
+            string bt = iterType;
+            if (endsWith(bt, "*")) { bt = substr(bt, 0, len(bt) - 1); }
+            string mi = mangleName(bt);
+            this.ln(cTypeStrC(iterType, this.env) + " __it__ = " + iterStr + ";");
+            // Class handles are already pointers in C, so pass __it__ directly;
+            // only take the address of a genuine value type.
+            string selfRef = "&__it__";
+            if (endsWith(iterType, "*") || this.env->is_class(bt)) { selfRef = "__it__"; }
+            this.ln("int64_t __n__ = " + mi + "__length(" + selfRef + ");");
+            this.ln("for (int64_t __k__ = 0; __k__ < __n__; __k__++) {");
+            this.indentLevel = this.indentLevel + 1;
+            this.ln(vdecl + " " + varName + " = " + mi + "__get(" + selfRef + ", __k__);");
+            this.emitBlockInner(body);
+        }
+        this.indentLevel = this.indentLevel - 1;
+        this.ln("}");
+        this.indentLevel = this.indentLevel - 1;
+        this.ln("}");
+        this.popScope();
+    }
+
+    string emitAlloc(TypeNode* allocType, Expr* count) {
+        string ct = cTypeOf(showType(allocType));
+        if (count != null) {
+            return "(" + ct + "*)calloc((size_t)(" + this.emitExpr(count) + "), sizeof(" + ct + "))";
+        }
+        return "(" + ct + "*)malloc(sizeof(" + ct + "))";
+    }
+
+    string renderForInit(Stmt* init) {
+        match (*init) {
+            Stmt.VarDecl(nm, ty, ini, c) => {
+                this.define(nm, showType(ty));
+                return cTypeOfNode(ty, this.env) + " " + nm + " = " + this.emitExpr(ini);
+            }
+            _ => { return ""; }
+        }
+    }
+    string renderForPost(Stmt* post) {
+        match (*post) {
+            Stmt.AssignStmt(t, op, v) => { return this.emitExpr(t) + " " + op + " " + this.emitExpr(v); }
+            Stmt.ExprStmt(e) => { return this.emitExpr(e); }
+            _ => { return ""; }
+        }
+    }
+
+    // ── Expressions ──────────────────────────────────────────────────────
+    string emitExpr(Expr* e) {
+        match (*e) {
+            Expr.LiteralExpr(k, v) => { return this.emitLit(k, v); }
+            Expr.IdentifierExpr(n) => {
+                // A free-function name used as a value → wrap as a GlangFn thunk.
+                if (this.lookupVar(n) == "" && this.env->functions.has(n)) { return this.emitFnThunkValue(n); }
+                return mangleName(n);
+            }
+            Expr.ThisExpr() => { return "self"; }
+            Expr.SuperExpr() => { return "self"; }
+            Expr.NullExpr() => { return "NULL"; }
+            Expr.UnaryExpr(op, o) => { return "(" + op + this.emitExpr(o) + ")"; }
+            Expr.BinaryExpr(l, op, r) => { return this.emitBinary(l, op, r); }
+            Expr.CastExpr(ty, x) => { return "((" + cTypeOfNode(ty, this.env) + ")(" + this.emitExpr(x) + "))"; }
+            Expr.CallExpr(nm, args, ta) => { return this.emitCall(nm, args); }
+            Expr.MethodCallExpr(obj, m, args, arrow) => { return this.emitMethodCall(obj, m, args); }
+            Expr.NewExpr(cn, args, ta) => { return this.emitNew(cn, args); }
+            Expr.DeleteExpr(o) => {
+                string t = this.infer(o);
+                string base = t;
+                if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
+                if (this.env->is_class(base)) { return mangleName(base) + "_delete(" + this.emitExpr(o) + ")"; }
+                return "free(" + this.emitExpr(o) + ")";
+            }
+            Expr.FreeExpr(o) => { return "free(" + this.emitExpr(o) + ")"; }
+            Expr.AllocExpr(t, cnt) => { return this.emitAlloc(t, cnt); }
+            Expr.AddressOfExpr(o) => { return "(&" + this.emitExpr(o) + ")"; }
+            Expr.DerefExpr(o) => { return "(*" + this.emitExpr(o) + ")"; }
+            Expr.IndexExpr(a, i) => { return this.emitExpr(a) + "[" + this.emitExpr(i) + "]"; }
+            Expr.FieldAccessExpr(obj, f) => { return this.emitFieldAccess(obj, f); }
+            Expr.ArrowAccessExpr(p, f) => { return this.emitExpr(p) + "->" + f; }
+            Expr.ClosureExpr(ps, rt, body, caps) => { return this.emitClosure(ps, rt, body); }
+            Expr.IndirectCallExpr(c, args) => { return this.emitIndirectCall(c, args); }
+            _ => { return "/* TODO expr */ 0"; }
+        }
+    }
+
+    string emitFieldAccess(Expr* obj, string field) {
+        // Enum / union-variant access on a bare type name used as a namespace.
+        match (*obj) {
+            Expr.IdentifierExpr(bname) => {
+                if (this.env->is_enum(bname)) { return mangleName(bname) + "__" + field; }
+                if (this.env->is_union(bname)) { return mangleName(bname) + "__" + field + "_new()"; }
+            }
+            _ => { }
+        }
+        string objStr = this.emitExpr(obj);
+        string baseType = this.infer(obj);
+        string lookup = baseType;
+        if (endsWith(lookup, "*")) { lookup = substr(lookup, 0, len(lookup) - 1); }
+        if (this.env->is_enum(lookup)) { return mangleName(lookup) + "__" + field; }
+        bool isRef = endsWith(baseType, "*") || this.env->is_class(lookup);
+        if (isRef) { return objStr + "->" + field; }
+        return objStr + "." + field;
+    }
+
+    string emitMethodCall(Expr* obj, string method, List<Expr*> args) {
+        // Union variant construction via a bare union type name: U.V(args).
+        match (*obj) {
+            Expr.IdentifierExpr(bn) => {
+                if (this.env->is_union(bn)) {
+                    return mangleName(bn) + "__" + method + "_new(" + this.emitArgs(args) + ")";
+                }
+            }
+            _ => { }
+        }
+        string objStr = this.emitExpr(obj);
+        string objType = this.infer(obj);
+        bool isPtr = endsWith(objType, "*");
+        string baseType = objType;
+        if (isPtr) { baseType = substr(objType, 0, len(objType) - 1); }
+        // Union variant construction: U.V(args) → U__V_new(args)
+        if (this.env->is_union(baseType)) {
+            return mangleName(baseType) + "__" + method + "_new(" + this.emitArgs(args) + ")";
+        }
+        string selfArg = objStr;
+        if (!isPtr && !(this.env->is_class(baseType))) { selfArg = "&" + objStr; }
+        // Modifier method dispatch: Target__method(self, args).
+        if (this.hasModifier(baseType, method)) {
+            string tgt = mangleName(baseType);
+            string mrest = this.emitArgs(args);
+            string margs = selfArg;
+            if (mrest != "") { margs = selfArg + ", " + mrest; }
+            return tgt + "__" + mangleName(method) + "(" + margs + ")";
+        }
+        string defCls = this.methodOwnerClass(baseType, method);
+        string clsName = mangleName(defCls);
+        string castSelf = selfArg;
+        if (defCls != baseType && isPtr) { castSelf = "((" + clsName + "*)" + selfArg + ")"; }
+        string rest = this.emitArgs(args);
+        string allArgs = castSelf;
+        if (rest != "") { allArgs = castSelf + ", " + rest; }
+        return clsName + "__" + mangleName(method) + "(" + allArgs + ")";
+    }
+
+    string emitNew(string cls, List<Expr*> args) {
+        int dot = strings::indexOf(cls, '.');
+        if (dot >= 0) {
+            string uname = mangleName(substr(cls, 0, dot));
+            string vname = substr(cls, dot + 1, len(cls));
+            string ctorCall = uname + "__" + vname + "_new(" + this.emitArgs(args) + ")";
+            return "({ " + uname + "* __up = (" + uname + "*)malloc(sizeof(" + uname + ")); *__up = " + ctorCall + "; __up; })";
+        }
+        return mangleName(cls) + "_new(" + this.emitArgs(args) + ")";
+    }
+
+    string emitLit(string kind, string value) {
+        if (kind == "int")   { return value; }
+        if (kind == "float") { return value; }
+        if (kind == "bool")  { if (value == "true") { return "1"; } return "0"; }
+        if (kind == "char")  { return this.cCharLit(value); }
+        if (kind == "string") { return this.cStringLit(value); }
+        return value;
+    }
+
+    string cStringLit(string val) {
+        StringBuilder sb = StringBuilder();
+        sb.appendChar('"');
+        int n = len(val);
+        for (int i = 0; i < n; ++i) {
+            char c = val[i];
+            if (c == '"')       { sb.append("\\\""); }
+            else if (c == '\\') { sb.append("\\\\"); }
+            else if (c == '\n') { sb.append("\\n"); }
+            else if (c == '\r') { sb.append("\\r"); }
+            else if (c == '\t') { sb.append("\\t"); }
+            else { sb.appendChar(c); }
+        }
+        sb.appendChar('"');
+        return sb.build();
+    }
+
+    string cCharLit(string val) {
+        if (val == "\n") { return "'\\n'"; }
+        if (val == "\t") { return "'\\t'"; }
+        if (val == "\r") { return "'\\r'"; }
+        if (val == "\\") { return "'\\\\'"; }
+        if (val == "'")  { return "'\\''"; }
+        if (len(val) == 0) { return "'\\0'"; }
+        return "'" + val + "'";
+    }
+
+    // Minimal expression-type inference (for print dispatch); returns a Glang type string.
+    string infer(Expr* e) {
+        match (*e) {
+            Expr.LiteralExpr(k, v) => { return k; }
+            Expr.IdentifierExpr(n) => { return this.lookupVar(n); }
+            Expr.ThisExpr() => { if (this.currentClass != "") { return this.currentClass + "*"; } return ""; }
+            Expr.NullExpr() => { return "null"; }
+            Expr.BinaryExpr(l, op, r) => {
+                if (op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
+                    || op == "&&" || op == "||") { return "bool"; }
+                string lt = this.infer(l);
+                if (lt != "") { return lt; }
+                return this.infer(r);
+            }
+            Expr.UnaryExpr(op, o) => { if (op == "!") { return "bool"; } return this.infer(o); }
+            Expr.CastExpr(ty, x) => { return showType(ty); }
+            Expr.CallExpr(nm, args, ta) => {
+                if (nm == "len" || nm == "parseInt" || nm == "indexOf" || nm == "getArgCount") { return "int"; }
+                if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg") { return "string"; }
+                if (nm == "parseFloat") { return "float"; }
+                if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains") { return "bool"; }
+                if (this.env->functions.has(nm)) {
+                    FunctionInfo* fi = this.env->functions.getOr(nm, null);
+                    if (fi != null) { return showType(fi->return_type); }
+                }
+                return "";
+            }
+            Expr.NewExpr(cn, args, ta) => {
+                int dot = strings::indexOf(cn, '.');
+                if (dot >= 0) { return substr(cn, 0, dot) + "*"; }
+                return cn + "*";
+            }
+            Expr.FieldAccessExpr(obj, f) => {
+                match (*obj) {
+                    Expr.IdentifierExpr(bn) => { if (this.env->is_enum(bn)) { return bn; } }
+                    _ => { }
+                }
+                string base = this.infer(obj);
+                if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
+                return this.fieldTypeOf(base, f);
+            }
+            Expr.ArrowAccessExpr(p, f) => {
+                string base = this.infer(p);
+                if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
+                return this.fieldTypeOf(base, f);
+            }
+            Expr.MethodCallExpr(obj, m, args, arrow) => {
+                string base = this.infer(obj);
+                if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
+                if (this.env->is_union(base)) { return base + "*"; }
+                if (this.hasModifier(base, m)) {
+                    Map<string, MethodDecl*>* mm = this.env->modifier_methods.getOr(base, null);
+                    if (mm != null) {
+                        MethodDecl* md = mm->getOr(m, null);
+                        if (md != null) { return showType(md->returnType); }
+                    }
+                }
+                return this.methodReturnTypeOf(base, m);
+            }
+            Expr.DerefExpr(o) => {
+                string t = this.infer(o);
+                if (endsWith(t, "*")) { return substr(t, 0, len(t) - 1); }
+                return t;
+            }
+            Expr.AddressOfExpr(o) => { return this.infer(o) + "*"; }
+            Expr.IndexExpr(a, i) => {
+                string t = this.infer(a);
+                if (t == "string") { return "char"; }
+                if (endsWith(t, "*")) { return substr(t, 0, len(t) - 1); }
+                return "";
+            }
+            Expr.ClosureExpr(ps, rt, body, caps) => {
+                StringBuilder sb = StringBuilder();
+                sb.append("fn(");
+                int pn = ps.length();
+                for (int i = 0; i < pn; ++i) { if (i > 0) { sb.appendChar(','); } sb.append(showType(ps.get(i)->type)); }
+                sb.append(")->");
+                sb.append(showType(rt));
+                return sb.build();
+            }
+            Expr.IndirectCallExpr(c, args) => {
+                string parts = parseFnType(this.infer(c));
+                int pipe = strings::indexOf(parts, '|');
+                if (pipe >= 0) { return substr(parts, pipe + 1, len(parts)); }
+                return "";
+            }
+            _ => { return ""; }
+        }
+    }
+
+    string emitCall(string name, List<Expr*> args) {
+        // Call through a fn-pointer variable (GlangFn): op(a, b).
+        string fpt = this.lookupVar(name);
+        if (startsWith(fpt, "fn(")) {
+            List<string> argStrs = List<string>();
+            int an = args.length();
+            for (int i = 0; i < an; ++i) { argStrs.add(this.emitExpr(args.get(i))); }
+            return emitGlangFnCall(mangleName(name), fpt, argStrs);
+        }
+        // print / printErr — dispatch on the argument's inferred type.
+        if (name == "print" || name == "printErr") {
+            string pfx = "glang_print_";
+            if (name == "printErr") { pfx = "glang_printerr_"; }
+            if (args.length() == 0) { return pfx + "string(\"\")"; }
+            string a0 = this.emitExpr(args.get(0));
+            string t = this.infer(args.get(0));
+            if (t == "string" || t == "float" || t == "bool" || t == "char" || t == "int") {
+                return pfx + t + "(" + a0 + ")";
+            }
+            // byte / enum / unknown → print as int
+            return pfx + "int((int64_t)" + a0 + ")";
+        }
+        if (name == "toString") {
+            string at = "string";
+            if (args.length() > 0) { string inf = this.infer(args.get(0)); if (inf != "") { at = inf; } }
+            return "glang_tostring_" + at + "(" + this.emitArgs(args) + ")";
+        }
+        if (name == "len") {
+            if (args.length() > 0 && this.infer(args.get(0)) == "string") {
+                return "(int64_t)strlen(" + this.emitExpr(args.get(0)) + ")";
+            }
+            return "(int64_t)strlen(" + this.emitArgs(args) + ")";
+        }
+        if (name == "substr")     { return "glang_str_substr(" + this.emitArgs(args) + ")"; }
+        if (name == "startsWith") { return "glang_startswith(" + this.emitArgs(args) + ")"; }
+        if (name == "endsWith")   { return "glang_endswith(" + this.emitArgs(args) + ")"; }
+        if (name == "contains")   { return "glang_strcontains(" + this.emitArgs(args) + ")"; }
+        if (name == "indexOf")    { return "glang_indexof_str(" + this.emitArgs(args) + ")"; }
+        if (name == "parseInt")   { return "glang_parseint(" + this.emitArgs(args) + ")"; }
+        if (name == "parseFloat") { return "glang_parsefloat(" + this.emitArgs(args) + ")"; }
+        if (name == "intToStr")   { return "glang_inttostr(" + this.emitArgs(args) + ")"; }
+        if (name == "readFile")   { return "glang_readfile(" + this.emitArgs(args) + ")"; }
+        if (name == "writeFile")  { return "glang_writefile(" + this.emitArgs(args) + ")"; }
+        if (name == "fileExists") { return "glang_fileexists(" + this.emitArgs(args) + ")"; }
+        if (name == "readStdin")  { return "glang_readstdin()"; }
+        if (name == "getArgCount") { return "(int64_t)(glang_argc - 1)"; }
+        if (name == "getArg") {
+            if (args.length() > 0) { return "glang_argv[(int)(" + this.emitExpr(args.get(0)) + ") + 1]"; }
+            return "NULL";
+        }
+        if (name == "exit") {
+            if (args.length() > 0) { return "exit((int)(" + this.emitExpr(args.get(0)) + "))"; }
+            return "exit(0)";
+        }
+        // Constructor call written as ClassName() without 'new'.
+        if (this.env->is_class(name)) {
+            return mangleName(name) + "_new(" + this.emitArgs(args) + ")";
+        }
+        // Normal function call.
+        string cname = mangleName(name);
+        if (cname == "main") { cname = "glang_main"; }
+        return cname + "(" + this.emitArgs(args) + ")";
+    }
+
+    string emitArgs(List<Expr*> args) {
+        StringBuilder sb = StringBuilder();
+        int n = args.length();
+        for (int i = 0; i < n; ++i) {
+            if (i > 0) { sb.append(", "); }
+            sb.append(this.emitExpr(args.get(i)));
+        }
+        return sb.build();
+    }
+
+    // ── Assemble final C ───────────────────────────────────────────────────
+    // ── Free-variable analysis for closures (Pass2 can't write captures to the
+    //    immutable ClosureExpr node, so the emitter computes them) ───────────
+    void collectUsedIdents(Expr* e, List<string> used) {
+        match (*e) {
+            Expr.IdentifierExpr(n) => { used.add(n); }
+            Expr.UnaryExpr(op, o) => { this.collectUsedIdents(o, used); }
+            Expr.BinaryExpr(l, op, r) => { this.collectUsedIdents(l, used); this.collectUsedIdents(r, used); }
+            Expr.CastExpr(t, x) => { this.collectUsedIdents(x, used); }
+            Expr.CallExpr(nm, args, ta) => { used.add(nm); this.collectArgIdents(args, used); }
+            Expr.IndirectCallExpr(c, args) => { this.collectUsedIdents(c, used); this.collectArgIdents(args, used); }
+            Expr.MethodCallExpr(obj, m, args, arrow) => { this.collectUsedIdents(obj, used); this.collectArgIdents(args, used); }
+            Expr.NewExpr(cn, args, ta) => { this.collectArgIdents(args, used); }
+            Expr.FieldAccessExpr(obj, f) => { this.collectUsedIdents(obj, used); }
+            Expr.ArrowAccessExpr(p, f) => { this.collectUsedIdents(p, used); }
+            Expr.IndexExpr(a, i) => { this.collectUsedIdents(a, used); this.collectUsedIdents(i, used); }
+            Expr.AddressOfExpr(o) => { this.collectUsedIdents(o, used); }
+            Expr.DerefExpr(o) => { this.collectUsedIdents(o, used); }
+            Expr.DeleteExpr(o) => { this.collectUsedIdents(o, used); }
+            Expr.FreeExpr(o) => { this.collectUsedIdents(o, used); }
+            Expr.AllocExpr(t, cnt) => { if (cnt != null) { this.collectUsedIdents(cnt, used); } }
+            Expr.ClosureExpr(ps, rt, body, caps) => { this.collectStmtIdents(body, used, List<string>()); }
+            _ => { }
+        }
+    }
+    void collectArgIdents(List<Expr*> args, List<string> used) {
+        int n = args.length();
+        for (int i = 0; i < n; ++i) { this.collectUsedIdents(args.get(i), used); }
+    }
+    void collectStmtIdents(Stmt* s, List<string> used, List<string> declared) {
+        match (*s) {
+            Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.collectStmtIdents(stmts.get(i), used, declared); } }
+            Stmt.ExprStmt(e) => { this.collectUsedIdents(e, used); }
+            Stmt.VarDecl(nm, ty, init, c) => { this.collectUsedIdents(init, used); declared.add(nm); }
+            Stmt.AssignStmt(t, op, v) => { this.collectUsedIdents(t, used); this.collectUsedIdents(v, used); }
+            Stmt.IfStmt(cond, th, el) => { this.collectUsedIdents(cond, used); this.collectStmtIdents(th, used, declared); if (el != null) { this.collectStmtIdents(el, used, declared); } }
+            Stmt.WhileStmt(cond, body) => { this.collectUsedIdents(cond, used); this.collectStmtIdents(body, used, declared); }
+            Stmt.DoWhileStmt(body, cond) => { this.collectStmtIdents(body, used, declared); this.collectUsedIdents(cond, used); }
+            Stmt.ForStmt(init, cond, post, body) => { this.collectStmtIdents(init, used, declared); this.collectUsedIdents(cond, used); this.collectStmtIdents(post, used, declared); this.collectStmtIdents(body, used, declared); }
+            Stmt.ForeachStmt(vt, vn, it, body, c) => { this.collectUsedIdents(it, used); declared.add(vn); this.collectStmtIdents(body, used, declared); }
+            Stmt.ReturnStmt(v) => { if (v != null) { this.collectUsedIdents(v, used); } }
+            Stmt.ThrowStmt(v) => { this.collectUsedIdents(v, used); }
+            Stmt.UsingStmt(decl, body) => { this.collectStmtIdents(decl, used, declared); this.collectStmtIdents(body, used, declared); }
+            Stmt.TryCatchStmt(body, catches) => {
+                this.collectStmtIdents(body, used, declared);
+                int n = catches.length();
+                for (int i = 0; i < n; ++i) { CatchClause* cc = catches.get(i); declared.add(cc->varName); this.collectStmtIdents(cc->body, used, declared); }
+            }
+            Stmt.MatchStmt(scrut, arms) => {
+                this.collectUsedIdents(scrut, used);
+                int n = arms.length();
+                for (int i = 0; i < n; ++i) {
+                    MatchArm* arm = arms.get(i);
+                    Pattern* p = arm->pattern;
+                    match (*p) {
+                        Pattern.VariantPattern(un, vn, binds) => { int bn = binds.length(); for (int j = 0; j < bn; ++j) { declared.add(binds.get(j)); } }
+                        _ => { }
+                    }
+                    this.collectStmtIdents(arm->body, used, declared);
+                }
+            }
+            _ => { }
+        }
+    }
+
+    string emitClosure(List<Param*> params, TypeNode* returnType, Stmt* body) {
+        string cid = strings::intToStr(this.closureCounter);
+        this.closureCounter = this.closureCounter + 1;
+        string capType = "__cap_" + cid + "_t";
+        string fnName = "__closure_" + cid + "_fn";
+        string ret = this.cRetTypeOf(returnType);
+        int pn = params.length();
+        // capture analysis
+        List<string> used = List<string>();
+        List<string> declared = List<string>();
+        for (int i = 0; i < pn; ++i) { declared.add(params.get(i)->name); }
+        this.collectStmtIdents(body, used, declared);
+        List<string> caps = List<string>();
+        int un = used.length();
+        for (int i = 0; i < un; ++i) {
+            string u = used.get(i);
+            if (!(emitListHas(declared, u)) && !(emitListHas(caps, u)) && this.lookupVar(u) != "") { caps.add(u); }
+        }
+        int cn = caps.length();
+        // capture struct
+        this.closureDefs.appendLine("typedef struct {");
+        for (int i = 0; i < cn; ++i) {
+            this.closureDefs.appendLine("    " + cTypeStrC(this.lookupVar(caps.get(i)), this.env) + " " + caps.get(i) + ";");
+        }
+        if (cn == 0) { this.closureDefs.appendLine("    int __dummy;"); }
+        this.closureDefs.appendLine("} " + capType + ";");
+        // closure fn
+        StringBuilder fp = StringBuilder();
+        fp.append("void* __cap__");
+        for (int i = 0; i < pn; ++i) { Param* p = params.get(i); fp.append(", " + cTypeOfNode(p->type, this.env) + " " + p->name); }
+        this.closureDefs.appendLine("static " + ret + " " + fnName + "(" + fp.build() + ") {");
+        this.closureDefs.appendLine("    " + capType + "* c = (" + capType + "*)__cap__;");
+        for (int i = 0; i < cn; ++i) { this.closureDefs.appendLine("#define " + caps.get(i) + " (c->" + caps.get(i) + ")"); }
+        this.pushScope();
+        for (int i = 0; i < pn; ++i) { Param* p = params.get(i); this.define(p->name, showType(p->type)); }
+        for (int i = 0; i < cn; ++i) { this.define(caps.get(i), this.lookupVar(caps.get(i))); }
+        int savedIndent = this.indentLevel;
+        this.indentLevel = 1;
+        StringBuilder savedOut = this.out;
+        this.out = this.closureDefs;
+        this.emitBlockInner(body);
+        this.out = savedOut;
+        this.indentLevel = savedIndent;
+        this.popScope();
+        for (int i = 0; i < cn; ++i) { this.closureDefs.appendLine("#undef " + caps.get(i)); }
+        this.closureDefs.appendLine("}");
+        this.closureDefs.appendLine("");
+        // build the GlangFn value
+        StringBuilder ci = StringBuilder();
+        ci.append("({ " + capType + "* __cp__ = (" + capType + "*)malloc(sizeof(" + capType + ")); ");
+        for (int i = 0; i < cn; ++i) { ci.append("__cp__->" + caps.get(i) + " = " + mangleName(caps.get(i)) + "; "); }
+        ci.append("(GlangFn){ (void*)" + fnName + ", __cp__ }; })");
+        return ci.build();
+    }
+
+    string emitIndirectCall(Expr* callee, List<Expr*> args) {
+        string calleeStr = this.emitExpr(callee);
+        string ct = this.infer(callee);
+        if (startsWith(ct, "fn(")) {
+            List<string> argStrs = List<string>();
+            int n = args.length();
+            for (int i = 0; i < n; ++i) { argStrs.add(this.emitExpr(args.get(i))); }
+            string call = emitGlangFnCall("__gfn__", ct, argStrs);
+            return "({ GlangFn __gfn__ = " + calleeStr + "; " + call + "; })";
+        }
+        return calleeStr + "(" + this.emitArgs(args) + ")";
+    }
+
+    string emitBinary(Expr* l, string op, Expr* r) {
+        string left = this.emitExpr(l);
+        string right = this.emitExpr(r);
+        if (op == "??") { return "(" + left + " != NULL ? " + left + " : " + right + ")"; }
+        string lt = this.infer(l);
+        string rt = this.infer(r);
+        if (op == "+" && (lt == "string" || rt == "string")) {
+            return "glang_str_concat(" + left + ", " + right + ")";
+        }
+        if ((op == "==" || op == "!=") && (lt == "string" || rt == "string")) {
+            if (op == "==") { return "(strcmp(" + left + ", " + right + ") == 0)"; }
+            return "(strcmp(" + left + ", " + right + ") != 0)";
+        }
+        return "(" + left + " " + op + " " + right + ")";
+    }
+
+    void emitUsing(Stmt* declStmt, Stmt* body) {
+        match (*declStmt) {
+            Stmt.VarDecl(nm, ty, init, c) => {
+                string vt = showType(ty);
+                this.pushScope();
+                this.define(nm, vt);
+                this.ln("{");
+                this.indentLevel = this.indentLevel + 1;
+                this.ln(cTypeOfNode(ty, this.env) + " " + nm + " = " + this.emitExpr(init) + ";");
+                this.emitBlockInner(body);
+                string mt = mangleName(vt);
+                if (endsWith(vt, "*")) { this.ln(mt + "_delete(" + nm + ");"); }
+                else if (this.env->is_class(vt)) { this.ln(mt + "__dispose(&" + nm + ");"); }
+                this.indentLevel = this.indentLevel - 1;
+                this.ln("}");
+                this.popScope();
+            }
+            _ => { }
+        }
+    }
+
+    void emitModifier(string rawTarget, TypeNode* targetType, List<MethodDecl*> methods) {
+        string target = mangleName(rawTarget);
+        string selfParam = cTypeOf(rawTarget) + " self";
+        if (this.env->is_class(rawTarget)) { selfParam = target + "* self"; }
+        int mn = methods.length();
+        for (int i = 0; i < mn; ++i) {
+            MethodDecl* m = methods.get(i);
+            string cname = target + "__" + mangleName(m->name);
+            this.out.appendLine("");
+            this.out.appendLine(this.cRetTypeOf(m->returnType) + " " + cname + "(" + this.buildParamListWith(m->params, selfParam) + ") {");
+            this.indentLevel = 1;
+            this.pushScope();
+            string saved = this.currentClass;
+            this.currentClass = rawTarget;
+            this.define("self", rawTarget);
+            int pn = m->params.length();
+            for (int j = 0; j < pn; ++j) { Param* p = m->params.get(j); this.define(p->name, showType(p->type)); }
+            if (m->body != null) { this.emitBlockInner(m->body); }
+            this.currentClass = saved;
+            this.popScope();
+            this.indentLevel = 0;
+            this.out.appendLine("}");
+        }
+    }
+
+    bool hasModifier(string target, string method) {
+        Map<string, MethodDecl*>* mm = this.env->modifier_methods.getOr(target, null);
+        if (mm == null) { return false; }
+        return mm->has(method);
+    }
+
+    string emitFnThunkValue(string fname) {
+        string cf = mangleName(fname);
+        if (!(emitListHas(this.thunksEmitted, fname))) {
+            this.thunksEmitted.add(fname);
+            FunctionInfo* fi = this.env->functions.getOr(fname, null);
+            if (fi != null) {
+                string ret = this.cRetTypeOf(fi->return_type);
+                StringBuilder ps = StringBuilder();
+                StringBuilder callArgs = StringBuilder();
+                int pn = fi->params.length();
+                for (int i = 0; i < pn; ++i) {
+                    Param* p = fi->params.get(i);
+                    ps.append(", " + cTypeOfNode(p->type, this.env) + " " + p->name);
+                    if (i > 0) { callArgs.append(", "); }
+                    callArgs.append(p->name);
+                }
+                this.closureDefs.appendLine("static " + ret + " " + cf + "__thunk(void* __cap__" + ps.build() + ") {");
+                if (showType(fi->return_type) == "void") {
+                    this.closureDefs.appendLine("    " + cf + "(" + callArgs.build() + ");");
+                } else {
+                    this.closureDefs.appendLine("    return " + cf + "(" + callArgs.build() + ");");
+                }
+                this.closureDefs.appendLine("}");
+            }
+        }
+        return "((GlangFn){ (void*)" + cf + "__thunk, NULL })";
+    }
+
+    string build() {
+        StringBuilder f = StringBuilder();
+        f.appendLine("/* Generated by glangc (typed-AST emitter) */");
+        f.appendLine("#include <inttypes.h>");
+        f.appendLine("#include <stdio.h>");
+        f.appendLine("#include <stdlib.h>");
+        f.appendLine("#include <string.h>");
+        f.appendLine("#include <stdint.h>");
+        f.appendLine("#include <setjmp.h>");
+        f.appendLine("#include <math.h>");
+        f.appendLine("typedef struct { void* fn; void* cap; } GlangFn;");
+        f.appendLine("char* glang_str_concat(const char* a, const char* b);");
+        f.appendLine("char* glang_str_substr(const char* s, int64_t start, int64_t end);");
+        f.appendLine("int64_t glang_str_len(const char* s);");
+        f.appendLine("int64_t glang_indexof_str(const char* s, const char* needle);");
+        f.appendLine("int   glang_startswith(const char* s, const char* prefix);");
+        f.appendLine("int   glang_endswith(const char* s, const char* suffix);");
+        f.appendLine("int   glang_strcontains(const char* s, const char* needle);");
+        f.appendLine("char* glang_inttostr(int64_t n);");
+        f.appendLine("char* glang_floattostr(double f);");
+        f.appendLine("char* glang_chartostr(char c);");
+        f.appendLine("char* glang_booltostr(int b);");
+        f.appendLine("int64_t glang_parseint(const char* s);");
+        f.appendLine("double  glang_parsefloat(const char* s);");
+        f.appendLine("char*   glang_readfile(const char* path);");
+        f.appendLine("void    glang_writefile(const char* path, const char* content);");
+        f.appendLine("int     glang_fileexists(const char* path);");
+        f.appendLine("char*   glang_readstdin(void);");
+        f.appendLine("void glang_print_int(int64_t v);");
+        f.appendLine("void glang_print_float(double v);");
+        f.appendLine("void glang_print_bool(int v);");
+        f.appendLine("void glang_print_char(char v);");
+        f.appendLine("void glang_print_string(const char* v);");
+        f.appendLine("void glang_printerr_int(int64_t v);");
+        f.appendLine("void glang_printerr_float(double v);");
+        f.appendLine("void glang_printerr_bool(int v);");
+        f.appendLine("void glang_printerr_char(char v);");
+        f.appendLine("void glang_printerr_string(const char* v);");
+        f.appendLine("char* glang_tostring_int(int64_t v);");
+        f.appendLine("char* glang_tostring_float(double v);");
+        f.appendLine("char* glang_tostring_bool(int v);");
+        f.appendLine("char* glang_tostring_char(char v);");
+        f.appendLine("char* glang_tostring_string(const char* v);");
+        f.appendLine("extern int    glang_argc;");
+        f.appendLine("extern char** glang_argv;");
+        f.appendLine("typedef struct GlangExcFrame {");
+        f.appendLine("    void* obj; const char* class_name;");
+        f.appendLine("    jmp_buf env; struct GlangExcFrame* prev;");
+        f.appendLine("} GlangExcFrame;");
+        f.appendLine("extern GlangExcFrame* __glang_exc_top;");
+        f.appendLine("void glang_throw(void* obj, const char* class_name);");
+        f.appendLine("int  glang_instanceof(const char* actual, const char* target, const char** hier, int n);");
+        f.appendLine("#define GLANG_TRY_BEGIN { GlangExcFrame __exc_frame__; __exc_frame__.obj=NULL; __exc_frame__.class_name=NULL; __exc_frame__.prev=__glang_exc_top; __glang_exc_top=&__exc_frame__; if(setjmp(__exc_frame__.env)==0) {");
+        f.appendLine("#define GLANG_TRY_END   __glang_exc_top=__exc_frame__.prev; } else { __glang_exc_top=__exc_frame__.prev;");
+        f.appendLine("#define GLANG_CATCH_DONE } }");
+        f.appendLine("#define GLANG_THROW(o,c) glang_throw((void*)(o),(c))");
+        // class-hierarchy table for instanceof (flattened child,parent pairs)
+        int hn = this.hierEntries.length();
+        StringBuilder hier = StringBuilder();
+        hier.append("static const char* __glang_hier__[] = { ");
+        for (int i = 0; i < hn; ++i) { hier.append("\"" + this.hierEntries.get(i) + "\", "); }
+        hier.append("0 };");
+        f.appendLine(hier.build());
+        f.appendLine("#define __glang_hier_len__ " + strings::intToStr(hn));
+        f.appendLine("");
+        f.append(this.preamble.build());
+        f.append(this.enums.build());
+        f.append(this.structs.build());
+        f.append(this.protos.build());
+        f.append(this.closureDefs.build());
+        f.append(this.out.build());
+        return f.build();
+    }
+}
+
+// Entry point: typed Program + GlobalEnv → C source string.
+string emit(Program* program, GlobalEnv* env) {
+    CEmit em = CEmit(env);
+    em.emitProgram(program);
+    return em.build();
+}
