@@ -5,7 +5,10 @@ Usage:
     glang run     <file.lang> [args...]
     glang compile <file.lang> [-o output.c]
 
-Pipeline: load (resolve imports) -> analyse -> interpret/transpile.
+`run` interprets via the Python reference front-end + interpreter.
+`compile` is pure GScript: it builds the self-hosted `glangc` (from the
+committed `glangc.c` seed) and uses it to emit C — no Python front-end involved.
+
 Any Glang error is printed to stderr and reported as exit code 1;
 a usage error is exit code 2; otherwise exits with main()'s return value.
 """
@@ -13,8 +16,8 @@ a usage error is exit code 2; otherwise exits with main()'s return value.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
-import tempfile
 
 # Allow running as `python main.py ...` from any directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,28 +44,31 @@ def run_file(path: str, prog_args: list[str] | None = None) -> int:
     return interpreter.run(program)
 
 
+def _ensure_glangc() -> str:
+    """Build (if missing/stale) and return the path to the native ``glangc``.
+
+    Bootstraps from the committed ``glangc.c`` seed — no Python front-end.
+    """
+    glangc = os.path.join(_ROOT, 'glangc')
+    seed = os.path.join(_ROOT, 'glangc.c')
+    runtime = os.path.join(_ROOT, 'runtime', 'glang_runtime.c')
+    if not os.path.exists(seed):
+        raise FileNotFoundError(
+            "glangc.c seed not found; regenerate it on a branch with the Python "
+            "compile path, or run build.sh"
+        )
+    stale = (not os.path.exists(glangc)
+             or os.path.getmtime(glangc) < os.path.getmtime(seed))
+    if stale:
+        subprocess.run(['gcc', '-O1', '-w', seed, runtime, '-o', glangc],
+                       cwd=_ROOT, check=True)
+    return glangc
+
+
 def compile_file(path: str, out_c: str) -> int:
-    """Load, analyse, serialise, and transpile ``path`` to C at ``out_c``."""
-    from compiler.ast_serializer import serialize
-
-    program = Loader().load(path)
-    env = Analyser().analyse(program)
-    ast_text = serialize(program, env)
-
-    with tempfile.NamedTemporaryFile(
-        mode='w', suffix='.glast', delete=False, encoding='utf-8'
-    ) as f:
-        f.write(ast_text)
-        ast_file = f.name
-
-    transpiler = os.path.join(_ROOT, 'compiler', 'transpiler.lang')
-    try:
-        return run_file(transpiler, prog_args=[ast_file, out_c])
-    finally:
-        try:
-            os.unlink(ast_file)
-        except OSError:
-            pass
+    """Compile ``path`` to C at ``out_c`` using the self-hosted ``glangc``."""
+    glangc = _ensure_glangc()
+    return subprocess.run([glangc, path, out_c], cwd=_ROOT).returncode
 
 
 def main(argv: list[str] | None = None) -> int:

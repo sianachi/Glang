@@ -64,17 +64,21 @@ Python is needed only **once**, to bootstrap. A pre-generated seed, `glangc.c`
 point), is committed so the toolchain can be built from scratch with just a C
 compiler.
 
+> **This branch (`pure-gscript`)** has no Python compile bridge: the compiler is
+> `glangc` (pure GScript). `python3 main.py compile` is a thin wrapper that builds
+> and invokes `glangc`. The Python lexer/parser/analyser/interpreter are kept only
+> as the reference oracle for `python3 main.py run` and the differential tests.
+
 ### Build the compiler
 
 ```bash
-# Bootstrap from the committed seed (no Python needed):
-gcc -O1 glangc.c runtime/glang_runtime.c -o glangc
+./build.sh        # gcc glangc.c runtime/glang_runtime.c -o glangc
 ```
 
-Or regenerate the seed from source via the Python-driven transpiler (one-time):
+Regenerate the seed by self-compiling (the compiler reproduces its own source):
 
 ```bash
-python3 main.py compile compiler/glangc.lang -o glangc.c
+./glangc compiler/glangc.lang glangc.c
 gcc -O1 glangc.c runtime/glang_runtime.c -o glangc
 ```
 
