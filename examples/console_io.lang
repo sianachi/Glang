@@ -1,0 +1,36 @@
+// console_io.lang — interactive console I/O.
+//
+// Reads all of stdin, reports character/line/word counts, and echoes the text
+// back upper-cased. Greets using the first command-line argument if given.
+//
+// Build & run (self-hosted, no Python):
+//   ./glangc examples/console_io.lang console_io.c
+//   gcc console_io.c runtime/glang_runtime.c -o console_io
+//   echo "hello there world" | ./console_io Ada
+
+import "std/string.lang";
+import "std/list.lang";
+
+int main() {
+    string name = "stranger";
+    if (getArgCount() > 0) { name = getArg(0); }
+    printErr("Hi " + name + " — type some text, then press Ctrl-D:");
+
+    string input = readStdin();
+
+    int chars = len(input);
+    List<string> lines = strings::split(input, '\n');
+    List<string> parts = strings::split(input, ' ');
+    int words = 0;
+    for (int i = 0; i < parts.length(); ++i) {
+        if (len(strings::trim(parts.get(i))) > 0) { words = words + 1; }
+    }
+
+    print("=== stats ===");
+    print("characters: " + toString(chars));
+    print("lines:      " + toString(lines.length()));
+    print("words:      " + toString(words));
+    print("=== echo (UPPER) ===");
+    print(strings::toUpperStr(input));
+    return 0;
+}
