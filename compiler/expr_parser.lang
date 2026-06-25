@@ -1,0 +1,342 @@
+// compiler/expr_parser.lang — Pratt expression parser (port of
+// parser/expr_parser.py).  Builds Expr unions (see ast.lang).
+//
+// Closures are detected (so ordinary parenthesised expressions still parse) but
+// their bodies are statements, so construction is deferred to the statement
+// slice; parseClosure throws until then.
+
+import "std/list.lang";
+import "std/string.lang";
+import "token.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+
+// Infix binding powers (left, right); null means "not an infix operator".
+// Assignment operators are intentionally absent — handled by the statement
+// parser, not the Pratt loop.
+class Bp {
+    int left;
+    int right;
+    Bp(int l, int r) { this.left = l; this.right = r; }
+}
+
+Bp* infixBp(TokenType t) {
+    if (t == TokenType.QUESTION_QUESTION) { return new Bp(9, 10); }
+    if (t == TokenType.OR)       { return new Bp(11, 12); }
+    if (t == TokenType.AND)      { return new Bp(21, 22); }
+    if (t == TokenType.PIPE)     { return new Bp(31, 32); }
+    if (t == TokenType.CARET)    { return new Bp(41, 42); }
+    if (t == TokenType.AMP)      { return new Bp(51, 52); }
+    if (t == TokenType.EQ)       { return new Bp(61, 62); }
+    if (t == TokenType.NEQ)      { return new Bp(61, 62); }
+    if (t == TokenType.LT)       { return new Bp(71, 72); }
+    if (t == TokenType.GT)       { return new Bp(71, 72); }
+    if (t == TokenType.LTE)      { return new Bp(71, 72); }
+    if (t == TokenType.GTE)      { return new Bp(71, 72); }
+    if (t == TokenType.LSHIFT)   { return new Bp(81, 82); }
+    if (t == TokenType.RSHIFT)   { return new Bp(81, 82); }
+    if (t == TokenType.PLUS)     { return new Bp(91, 92); }
+    if (t == TokenType.MINUS)    { return new Bp(91, 92); }
+    if (t == TokenType.STAR)     { return new Bp(101, 102); }
+    if (t == TokenType.SLASH)    { return new Bp(101, 102); }
+    if (t == TokenType.PERCENT)  { return new Bp(101, 102); }
+    if (t == TokenType.DOT)      { return new Bp(141, 142); }
+    if (t == TokenType.ARROW)    { return new Bp(141, 142); }
+    if (t == TokenType.LBRACKET) { return new Bp(141, 0); }
+    if (t == TokenType.LPAREN)   { return new Bp(141, 0); }
+    return null;
+}
+
+class ExprParser {
+    TokenStream* s;
+    TypeParser* tp;
+    // Hook to parse a closure body (a Block).  The statement parser wires this
+    // via setBlockHook; this breaks the Expr<->Stmt cycle without a circular
+    // import (Glang's loader forbids those).  Defaults to a closure that throws.
+    fn() -> Stmt* blockHook;
+
+    ExprParser(TokenStream* stream, TypeParser* typeParser) {
+        this.s  = stream;
+        this.tp = typeParser;
+        this.blockHook = () -> Stmt* {
+            throw new ParseError("closure body requires a statement parser (hook not wired)", 0, 0);
+        };
+    }
+
+    void setBlockHook(fn() -> Stmt* hook) {
+        this.blockHook = hook;
+    }
+
+    Expr* parseExpr(int minBp) {
+        Expr* left = this.parsePrefix();
+        while (true) {
+            Bp* bp = infixBp(this.s->peek(0)->type);
+            if (bp == null) { break; }
+            if (bp->left <= minBp) { break; }
+            left = this.parsePostfix(left, bp->right);
+        }
+        return left;
+    }
+
+    List<Expr*> parseArgList() {
+        this.s->expect(TokenType.LPAREN);
+        List<Expr*> args = List<Expr*>();
+        if (!(this.s->check(TokenType.RPAREN))) {
+            args.add(this.parseExpr(0));
+            while (this.s->accept(TokenType.COMMA)) {
+                args.add(this.parseExpr(0));
+            }
+        }
+        this.s->expect(TokenType.RPAREN);
+        return args;
+    }
+
+    Expr* parsePrefix() {
+        Token* tok = this.s->peek(0);
+        TokenType t = tok->type;
+
+        if (t == TokenType.BANG || t == TokenType.TILDE
+            || t == TokenType.PLUS_PLUS || t == TokenType.MINUS_MINUS
+            || t == TokenType.MINUS) {
+            this.s->advance();
+            Expr* operand = this.parsePrefix();
+            return new Expr.UnaryExpr(tok->value, operand);
+        }
+        if (t == TokenType.AMP) {
+            this.s->advance();
+            return new Expr.AddressOfExpr(this.parsePrefix());
+        }
+        if (t == TokenType.STAR) {
+            this.s->advance();
+            return new Expr.DerefExpr(this.parsePrefix());
+        }
+        if (t == TokenType.LPAREN) {
+            if (this.isClosureStart()) {
+                return this.parseClosure();
+            }
+            return this.parseParenOrCast();
+        }
+        if (t == TokenType.KW_NEW) {
+            return this.parseNew();
+        }
+        if (t == TokenType.KW_DELETE) {
+            this.s->advance();
+            return new Expr.DeleteExpr(this.parseExpr(0));
+        }
+        if (t == TokenType.KW_ALLOC) {
+            this.s->advance();
+            this.s->expect(TokenType.LPAREN);
+            TypeNode* at = this.tp->parseType();
+            Expr* count = null;
+            if (this.s->accept(TokenType.COMMA)) {
+                count = this.parseExpr(0);
+            }
+            this.s->expect(TokenType.RPAREN);
+            return new Expr.AllocExpr(at, count);
+        }
+        if (t == TokenType.KW_FREE) {
+            this.s->advance();
+            this.s->expect(TokenType.LPAREN);
+            Expr* operand = this.parseExpr(0);
+            this.s->expect(TokenType.RPAREN);
+            return new Expr.FreeExpr(operand);
+        }
+        if (t == TokenType.KW_THIS)  { this.s->advance(); return new Expr.ThisExpr(); }
+        if (t == TokenType.KW_SUPER) { this.s->advance(); return new Expr.SuperExpr(); }
+        if (t == TokenType.KW_NULL)  { this.s->advance(); return new Expr.NullExpr(); }
+        if (t == TokenType.KW_TRUE)  { this.s->advance(); return new Expr.LiteralExpr("bool", "true"); }
+        if (t == TokenType.KW_FALSE) { this.s->advance(); return new Expr.LiteralExpr("bool", "false"); }
+        if (t == TokenType.INT_LIT)    { this.s->advance(); return new Expr.LiteralExpr("int", tok->value); }
+        if (t == TokenType.FLOAT_LIT)  { this.s->advance(); return new Expr.LiteralExpr("float", tok->value); }
+        if (t == TokenType.CHAR_LIT)   { this.s->advance(); return new Expr.LiteralExpr("char", tok->value); }
+        if (t == TokenType.STRING_LIT) { this.s->advance(); return new Expr.LiteralExpr("string", tok->value); }
+
+        if (t == TokenType.IDENT) {
+            this.s->advance();
+            string name = tok->value;
+            while (this.s->accept(TokenType.COLONCOLON)) {
+                name = name + "::" + this.s->expect(TokenType.IDENT)->value;
+            }
+            Expr* generic = this.tryParseGenericCall(name);
+            if (generic != null) { return generic; }
+            return new Expr.IdentifierExpr(name);
+        }
+
+        throw this.s->error("Unexpected token '" + tokenName(t) + "' in expression");
+    }
+
+    // name<T, ...>(args) — explicit generic call/construction.  Returns null
+    // (restoring the stream) when the '<' was just a comparison.
+    Expr* tryParseGenericCall(string name) {
+        if (!(this.s->check(TokenType.LT))) { return null; }
+        int mark = this.s->mark();
+        List<TypeNode*> typeArgs = List<TypeNode*>();
+        bool ok = true;
+        try {
+            typeArgs = this.tp->parseTypeArgs();
+        } catch (ParseError* pe) {
+            ok = false;
+        }
+        if (!ok) {
+            this.s->reset(mark);
+            return null;
+        }
+        if (!(this.s->check(TokenType.LPAREN))) {
+            this.s->reset(mark);
+            return null;
+        }
+        List<Expr*> args = this.parseArgList();
+        return new Expr.CallExpr(name, args, typeArgs);
+    }
+
+    Expr* parseParenOrCast() {
+        this.s->advance();   // consume '('
+        Token* next = this.s->peek(0);
+        bool isCast = false;
+        if (isTypeKeyword(next->type) || next->type == TokenType.KW_FN) {
+            isCast = true;
+        } else if (next->type == TokenType.IDENT && this.s->peek(1)->type == TokenType.RPAREN) {
+            isCast = true;
+        } else if (next->type == TokenType.IDENT && this.s->peek(1)->type == TokenType.COLONCOLON) {
+            // Qualified cast `(ns::T)x`: trial-parse; it's a cast only when the
+            // whole parenthesis is a type.
+            int mark = this.s->mark();
+            try {
+                this.tp->parseType();
+                isCast = this.s->check(TokenType.RPAREN);
+            } catch (ParseError* pe) {
+                isCast = false;
+            }
+            this.s->reset(mark);
+        }
+
+        if (isCast) {
+            TypeNode* ct = this.tp->parseType();
+            this.s->expect(TokenType.RPAREN);
+            Expr* operand = this.parsePrefix();
+            return new Expr.CastExpr(ct, operand);
+        }
+
+        Expr* inner = this.parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        return inner;
+    }
+
+    bool isClosureStart() {
+        int mark = this.s->mark();
+        bool result = false;
+        try {
+            this.s->expect(TokenType.LPAREN);
+            if (!(this.s->check(TokenType.RPAREN))) {
+                this.parseClosureParamProbe();
+                while (this.s->accept(TokenType.COMMA)) {
+                    this.parseClosureParamProbe();
+                }
+            }
+            this.s->expect(TokenType.RPAREN);
+            result = this.s->check(TokenType.ARROW);
+        } catch (ParseError* pe) {
+            result = false;
+        }
+        this.s->reset(mark);
+        return result;
+    }
+
+    void parseClosureParamProbe() {
+        this.s->accept(TokenType.KW_CONST);
+        if (!(isTypeStart(this.s))) {
+            throw this.s->error("Expected closure parameter type");
+        }
+        this.tp->parseType();
+        this.s->expect(TokenType.IDENT);
+    }
+
+    Expr* parseClosure() {
+        this.s->expect(TokenType.LPAREN);
+        List<Param*> params = List<Param*>();
+        if (!(this.s->check(TokenType.RPAREN))) {
+            params.add(this.parseClosureParam());
+            while (this.s->accept(TokenType.COMMA)) {
+                params.add(this.parseClosureParam());
+            }
+        }
+        this.s->expect(TokenType.RPAREN);
+        this.s->expect(TokenType.ARROW);
+        TypeNode* returnType = this.tp->parseType();
+        fn() -> Stmt* hook = this.blockHook;
+        Stmt* body = hook();
+        return new Expr.ClosureExpr(params, returnType, body, List<string>());
+    }
+
+    Param* parseClosureParam() {
+        bool isConst = this.s->accept(TokenType.KW_CONST);
+        TypeNode* t = this.tp->parseType();
+        Token* n = this.s->expect(TokenType.IDENT);
+        return new Param(n->value, t, isConst);
+    }
+
+    Expr* parseNew() {
+        this.s->advance();   // consume 'new'
+        string name = this.s->expect(TokenType.IDENT)->value;
+        while (this.s->accept(TokenType.COLONCOLON)) {
+            name = name + "::" + this.s->expect(TokenType.IDENT)->value;
+        }
+        // Union variant allocation: new Shape.Circle(args) / new Shape.Nil
+        if (this.s->accept(TokenType.DOT)) {
+            Token* variantTok = this.s->expect(TokenType.IDENT);
+            List<Expr*> vargs = List<Expr*>();
+            if (this.s->check(TokenType.LPAREN)) { vargs = this.parseArgList(); }
+            return new Expr.NewExpr(name + "." + variantTok->value, vargs, List<TypeNode*>());
+        }
+        List<TypeNode*> typeArgs = List<TypeNode*>();
+        if (this.s->check(TokenType.LT)) { typeArgs = this.tp->parseTypeArgs(); }
+        List<Expr*> args = this.parseArgList();
+        return new Expr.NewExpr(name, args, typeArgs);
+    }
+
+    Expr* parsePostfix(Expr* left, int rightBp) {
+        Token* tok = this.s->advance();   // consume the operator
+
+        if (tok->type == TokenType.DOT) {
+            Token* nameTok = this.s->expect(TokenType.IDENT);
+            if (this.s->check(TokenType.LPAREN)) {
+                List<Expr*> args = this.parseArgList();
+                return new Expr.MethodCallExpr(left, nameTok->value, args, false);
+            }
+            return new Expr.FieldAccessExpr(left, nameTok->value);
+        }
+        if (tok->type == TokenType.ARROW) {
+            Token* nameTok = this.s->expect(TokenType.IDENT);
+            if (this.s->check(TokenType.LPAREN)) {
+                List<Expr*> args = this.parseArgList();
+                return new Expr.MethodCallExpr(left, nameTok->value, args, true);
+            }
+            return new Expr.ArrowAccessExpr(left, nameTok->value);
+        }
+        if (tok->type == TokenType.LBRACKET) {
+            Expr* index = this.parseExpr(0);
+            this.s->expect(TokenType.RBRACKET);
+            return new Expr.IndexExpr(left, index);
+        }
+        if (tok->type == TokenType.LPAREN) {
+            List<Expr*> args = List<Expr*>();
+            if (!(this.s->check(TokenType.RPAREN))) {
+                args.add(this.parseExpr(0));
+                while (this.s->accept(TokenType.COMMA)) {
+                    args.add(this.parseExpr(0));
+                }
+            }
+            this.s->expect(TokenType.RPAREN);
+            match (*left) {
+                Expr.IdentifierExpr(nm) => { return new Expr.CallExpr(nm, args, List<TypeNode*>()); }
+                _ => { return new Expr.IndirectCallExpr(left, args); }
+            }
+        }
+
+        // Binary operator.
+        string op = tok->value;
+        Expr* right = this.parseExpr(rightBp);
+        return new Expr.BinaryExpr(left, op, right);
+    }
+}

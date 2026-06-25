@@ -1,0 +1,468 @@
+// compiler/decl_parser.lang — top-level declaration parser (port of
+// parser/decl_parser.py) and the Parser entry point (parser/parser.py).
+// Builds Decl unions and member records (see ast.lang).
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/map.lang";
+import "token.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+
+bool isAccessKw(TokenType t) {
+    return t == TokenType.KW_PRIVATE || t == TokenType.KW_PROTECTED || t == TokenType.KW_PUBLIC;
+}
+
+bool isOverloadableOp(TokenType t) {
+    return t == TokenType.PLUS || t == TokenType.MINUS || t == TokenType.STAR
+        || t == TokenType.SLASH || t == TokenType.PERCENT || t == TokenType.EQ
+        || t == TokenType.NEQ || t == TokenType.LT || t == TokenType.LTE
+        || t == TokenType.GT || t == TokenType.GTE;
+}
+
+// Result of parsing a `<T, U extends Bound, ...>` type-parameter list.
+class TypeParams {
+    List<string> names;
+    Map<string, TypeNode*> bounds;
+    TypeParams(List<string> n, Map<string, TypeNode*> b) { this.names = n; this.bounds = b; }
+}
+
+class DeclParser {
+    TokenStream* s;
+    TypeParser* tp;
+    ExprParser* ep;
+    StmtParser* sp;
+
+    DeclParser(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, StmtParser* stmtParser) {
+        this.s  = stream;
+        this.tp = typeParser;
+        this.ep = exprParser;
+        this.sp = stmtParser;
+    }
+
+    // ------------------------------------------------------------------
+    // Public
+    // ------------------------------------------------------------------
+
+    Decl* parseImport() {
+        this.s->expect(TokenType.KW_IMPORT);
+        Token* pathTok = this.s->expect(TokenType.STRING_LIT);
+        this.s->expect(TokenType.SEMICOLON);
+        return new Decl.ImportDecl(pathTok->value);
+    }
+
+    Decl* parseTopLevelDecl() {
+        if (this.s->check(TokenType.KW_NAMESPACE)) { return this.parseNamespace(); }
+        if (this.s->check(TokenType.KW_USING))     { return this.parseUsing(); }
+        if (this.s->check(TokenType.KW_MODIFIER))  { return this.parseModifier(); }
+        string access = "public";
+        if (isAccessKw(this.s->peek(0)->type)) {
+            access = this.s->advance()->value;
+        }
+        if (this.s->check(TokenType.KW_CLASS))     { return this.parseClass(access); }
+        if (this.s->check(TokenType.KW_INTERFACE)) { return this.parseInterface(); }
+        if (this.s->check(TokenType.KW_ENUM))      { return this.parseEnum(); }
+        // 'union' is context-sensitive (not a keyword).
+        Token* t2 = this.s->peek(0);
+        if (t2->type == TokenType.IDENT && t2->value == "union") {
+            return this.parseUnion();
+        }
+        return this.parseFunction();
+    }
+
+    // ------------------------------------------------------------------
+    // Namespaces / using
+    // ------------------------------------------------------------------
+
+    Decl* parseNamespace() {
+        this.s->advance();   // consume 'namespace'
+        string name = this.parseQualifiedName();
+        this.s->expect(TokenType.LBRACE);
+        List<Decl*> decls = List<Decl*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            if (this.s->check(TokenType.KW_IMPORT)) {
+                throw this.s->error("imports are not allowed inside a namespace");
+            }
+            if (this.s->check(TokenType.KW_USING)) {
+                throw this.s->error("using declarations are not allowed inside a namespace");
+            }
+            decls.add(this.parseTopLevelDecl());
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Decl.NamespaceDecl(name, decls);
+    }
+
+    Decl* parseUsing() {
+        Token* tok = this.s->advance();   // consume 'using'
+        if (this.s->check(TokenType.LPAREN)) {
+            throw this.s->error("'using (...)' is a statement; it must appear inside a function body");
+        }
+        if (this.s->accept(TokenType.KW_NAMESPACE)) {
+            string nsName = this.parseQualifiedName();
+            this.s->expect(TokenType.SEMICOLON);
+            return new Decl.UsingDecl(nsName, true);
+        }
+        string name = this.parseQualifiedName();
+        // A qualified name's only ':' usage is '::', so any ':' means qualified.
+        if (strings::indexOf(name, ':') < 0) {
+            throw new ParseError(
+                "using declaration needs a qualified name like 'ns::" + name + "' (or 'using namespace " + name + ";')",
+                tok->line, tok->col);
+        }
+        this.s->expect(TokenType.SEMICOLON);
+        return new Decl.UsingDecl(name, false);
+    }
+
+    string parseQualifiedName() {
+        string name = this.s->expect(TokenType.IDENT)->value;
+        while (this.s->accept(TokenType.COLONCOLON)) {
+            name = name + "::" + this.s->expect(TokenType.IDENT)->value;
+        }
+        return name;
+    }
+
+    // ------------------------------------------------------------------
+    // Enums / unions
+    // ------------------------------------------------------------------
+
+    Decl* parseEnum() {
+        this.s->advance();   // consume 'enum'
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        this.s->expect(TokenType.LBRACE);
+        List<EnumVariant*> variants = List<EnumVariant*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            Token* vTok = this.s->expect(TokenType.IDENT);
+            bool hasValue = false;
+            int value = 0;
+            if (this.s->accept(TokenType.ASSIGN)) {
+                Token* valTok = this.s->expect(TokenType.INT_LIT);
+                hasValue = true;
+                value = parseInt(valTok->value);
+            }
+            variants.add(new EnumVariant(vTok->value, hasValue, value));
+            if (!(this.s->accept(TokenType.COMMA))) { break; }
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Decl.EnumDecl(nameTok->value, variants);
+    }
+
+    List<string> parseTypeParamNames() {
+        List<string> names = List<string>();
+        this.s->expect(TokenType.LT);
+        bool more = true;
+        while (more) {
+            names.add(this.s->expect(TokenType.IDENT)->value);
+            more = this.s->accept(TokenType.COMMA);
+        }
+        this.s->expect(TokenType.GT);
+        return names;
+    }
+
+    Decl* parseUnion() {
+        this.s->advance();   // consume IDENT 'union'
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        List<string> typeParams = List<string>();
+        if (this.s->check(TokenType.LT)) {
+            typeParams = this.parseTypeParamNames();
+        }
+        this.s->expect(TokenType.LBRACE);
+        List<UnionVariant*> variants = List<UnionVariant*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            Token* vTok = this.s->expect(TokenType.IDENT);
+            this.s->expect(TokenType.LBRACE);
+            List<FieldDecl*> fields = List<FieldDecl*>();
+            while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+                TypeNode* fType = this.tp->parseType();
+                Token* fName = this.s->expect(TokenType.IDENT);
+                this.s->expect(TokenType.SEMICOLON);
+                fields.add(new FieldDecl(fName->value, fType, false, "public"));
+            }
+            this.s->expect(TokenType.RBRACE);
+            variants.add(new UnionVariant(vTok->value, fields));
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Decl.UnionDecl(nameTok->value, typeParams, variants);
+    }
+
+    // ------------------------------------------------------------------
+    // Functions
+    // ------------------------------------------------------------------
+
+    TypeParams* parseTypeParams() {
+        List<string> names = List<string>();
+        Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+        if (!(this.s->accept(TokenType.LT))) {
+            return new TypeParams(names, bounds);
+        }
+        this.parseOneTypeParam(names, bounds);
+        while (this.s->accept(TokenType.COMMA)) {
+            this.parseOneTypeParam(names, bounds);
+        }
+        this.s->expect(TokenType.GT);
+        return new TypeParams(names, bounds);
+    }
+
+    void parseOneTypeParam(List<string> names, Map<string, TypeNode*> bounds) {
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        names.add(nameTok->value);
+        if (this.s->accept(TokenType.KW_EXTENDS)) {
+            bounds.set(nameTok->value, this.tp->parseType());
+        }
+    }
+
+    Decl* parseFunction() {
+        TypeNode* retType = this.tp->parseType();
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        TypeParams* tps = this.parseTypeParams();
+        List<Param*> params = this.parseParamList();
+        Stmt* body = this.sp->parseBlock();
+        return new Decl.FunctionDecl(nameTok->value, params, retType, body, tps->names, tps->bounds);
+    }
+
+    // ------------------------------------------------------------------
+    // Classes
+    // ------------------------------------------------------------------
+
+    Decl* parseClass(string access) {
+        this.s->advance();   // consume 'class'
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        TypeParams* tps = this.parseTypeParams();
+
+        string superclass = "";
+        if (this.s->accept(TokenType.KW_EXTENDS)) {
+            superclass = this.parseQualifiedName();
+        }
+        List<string> interfaces = List<string>();
+        if (this.s->accept(TokenType.KW_IMPLEMENTS)) {
+            interfaces.add(this.parseQualifiedName());
+            while (this.s->accept(TokenType.COMMA)) {
+                interfaces.add(this.parseQualifiedName());
+            }
+        }
+
+        // Class body.
+        this.s->expect(TokenType.LBRACE);
+        List<StaticFieldDecl*> staticFields = List<StaticFieldDecl*>();
+        List<FieldDecl*> fields = List<FieldDecl*>();
+        List<MethodDecl*> methods = List<MethodDecl*>();
+        ConstructorDecl* constructor = null;
+        DestructorDecl* destructor = null;
+        int phase = 0;   // 0=static fields, 1=instance fields, 2=ctor/dtor, 3=methods
+
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            string memberAccess = "public";
+            if (isAccessKw(this.s->peek(0)->type)) {
+                memberAccess = this.s->advance()->value;
+            }
+            Token* tok = this.s->peek(0);
+
+            // Static member.
+            if (tok->type == TokenType.KW_STATIC) {
+                this.s->advance();
+                bool isConst = this.s->accept(TokenType.KW_CONST);
+                TypeNode* retType = this.tp->parseType();
+                string memberName = this.parseMemberName();
+                if (this.s->check(TokenType.LPAREN)) {
+                    phase = 3;
+                    List<Param*> params = this.parseParamList();
+                    Stmt* body = this.sp->parseBlock();
+                    methods.add(new MethodDecl(memberName, params, retType, body, true, memberAccess));
+                } else {
+                    if (startsWith(memberName, "operator")) {
+                        throw this.s->error("operator overload must be a method");
+                    }
+                    if (phase > 0) {
+                        throw this.s->error("Static fields must appear before instance fields");
+                    }
+                    this.s->expect(TokenType.ASSIGN);
+                    Expr* init = this.ep->parseExpr(0);
+                    this.s->expect(TokenType.SEMICOLON);
+                    staticFields.add(new StaticFieldDecl(memberName, retType, init, isConst, memberAccess));
+                }
+                continue;
+            }
+
+            // Destructor.
+            if (tok->type == TokenType.TILDE) {
+                if (phase > 2) { throw this.s->error("Destructor must appear before methods"); }
+                if (phase < 2) { phase = 2; }
+                this.s->advance();   // consume '~'
+                Token* dtorName = this.s->expect(TokenType.IDENT);
+                if (dtorName->value != nameTok->value) {
+                    throw new ParseError(
+                        "Destructor name '" + dtorName->value + "' must match class name '" + nameTok->value + "'",
+                        dtorName->line, dtorName->col);
+                }
+                this.s->expect(TokenType.LPAREN);
+                this.s->expect(TokenType.RPAREN);
+                Stmt* body = this.sp->parseBlock();
+                destructor = new DestructorDecl(body);
+                continue;
+            }
+
+            // Constructor: class name followed by '('.
+            if (tok->type == TokenType.IDENT && tok->value == nameTok->value
+                && this.s->peek(1)->type == TokenType.LPAREN) {
+                if (phase > 2) { throw this.s->error("Constructor must appear before methods"); }
+                if (phase < 2) { phase = 2; }
+                this.s->advance();   // consume class name
+                List<Param*> params = this.parseParamList();
+                bool hasSuper = false;
+                List<Expr*> superArgs = List<Expr*>();
+                if (this.s->accept(TokenType.COLON)) {
+                    this.s->expect(TokenType.KW_SUPER);
+                    hasSuper = true;
+                    superArgs = this.ep->parseArgList();
+                }
+                Stmt* body = this.sp->parseBlock();
+                constructor = new ConstructorDecl(params, body, hasSuper, superArgs);
+                continue;
+            }
+
+            // Type-led member: instance field or instance method.
+            bool isConst = this.s->accept(TokenType.KW_CONST);
+            TypeNode* retType = this.tp->parseType();
+            string memberName = this.parseMemberName();
+            if (this.s->check(TokenType.LPAREN)) {
+                phase = 3;
+                List<Param*> params = this.parseParamList();
+                Stmt* body = this.sp->parseBlock();
+                methods.add(new MethodDecl(memberName, params, retType, body, false, memberAccess));
+            } else {
+                if (startsWith(memberName, "operator")) {
+                    throw this.s->error("operator overload must be a method");
+                }
+                if (phase > 1) {
+                    throw this.s->error("Instance fields must appear before constructor/destructor/methods");
+                }
+                if (phase < 1) { phase = 1; }
+                this.s->expect(TokenType.SEMICOLON);
+                fields.add(new FieldDecl(memberName, retType, isConst, memberAccess));
+            }
+        }
+        this.s->expect(TokenType.RBRACE);
+
+        return new Decl.ClassDecl(nameTok->value, fields, staticFields, methods,
+                                  superclass, interfaces, constructor, destructor,
+                                  access, tps->names, tps->bounds);
+    }
+
+    // ------------------------------------------------------------------
+    // Interfaces / modifiers
+    // ------------------------------------------------------------------
+
+    Decl* parseInterface() {
+        this.s->advance();   // consume 'interface'
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        this.s->expect(TokenType.LBRACE);
+        List<MethodDecl*> methods = List<MethodDecl*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            TypeNode* retType = this.tp->parseType();
+            string mName = this.parseMemberName();
+            List<Param*> params = this.parseParamList();
+            this.s->expect(TokenType.SEMICOLON);
+            methods.add(new MethodDecl(mName, params, retType, null, false, "public"));
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Decl.InterfaceDecl(nameTok->value, methods);
+    }
+
+    Decl* parseModifier() {
+        this.s->advance();   // consume 'modifier'
+        List<string> typeParams = List<string>();
+        if (this.s->check(TokenType.LT)) {
+            typeParams = this.parseTypeParamNames();
+        }
+        this.s->expect(TokenType.KW_FOR);
+        TypeNode* target = this.tp->parseType();
+        this.s->expect(TokenType.LBRACE);
+        List<MethodDecl*> methods = List<MethodDecl*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            string memberAccess = "public";
+            if (isAccessKw(this.s->peek(0)->type)) {
+                memberAccess = this.s->advance()->value;
+            }
+            TypeNode* retType = this.tp->parseType();
+            string mName = this.parseMemberName();
+            List<Param*> params = this.parseParamList();
+            Stmt* body = this.sp->parseBlock();
+            methods.add(new MethodDecl(mName, params, retType, body, false, memberAccess));
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Decl.ModifierDecl(typeParams, target, methods);
+    }
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+
+    string parseMemberName() {
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        if (nameTok->value != "operator") { return nameTok->value; }
+        Token* opTok = this.s->peek(0);
+        if (opTok->type == TokenType.LBRACKET) {
+            this.s->advance();
+            this.s->expect(TokenType.RBRACKET);
+            return "operator[]";
+        }
+        if (!(isOverloadableOp(opTok->type))) {
+            throw new ParseError("Expected overloadable operator after 'operator'", opTok->line, opTok->col);
+        }
+        this.s->advance();
+        return "operator" + opTok->value;
+    }
+
+    List<Param*> parseParamList() {
+        this.s->expect(TokenType.LPAREN);
+        List<Param*> params = List<Param*>();
+        if (!(this.s->check(TokenType.RPAREN))) {
+            params.add(this.parseOneParam());
+            while (this.s->accept(TokenType.COMMA)) {
+                params.add(this.parseOneParam());
+            }
+        }
+        this.s->expect(TokenType.RPAREN);
+        return params;
+    }
+
+    Param* parseOneParam() {
+        bool isConst = this.s->accept(TokenType.KW_CONST);
+        TypeNode* t = this.tp->parseType();
+        Token* n = this.s->expect(TokenType.IDENT);
+        return new Param(n->value, t, isConst);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Parser — wires the four sub-parsers and parses a whole program.
+// ═══════════════════════════════════════════════════════════════════════════
+
+class Parser {
+    TokenStream* s;
+    DeclParser* dp;
+
+    Parser(List<Token*> tokens) {
+        this.s = new TokenStream(tokens);
+        TypeParser* tparser = new TypeParser(this.s);
+        ExprParser* eparser = new ExprParser(this.s, tparser);
+        StmtParser* sparser = new StmtParser(this.s, tparser, eparser);
+        eparser->setBlockHook(() -> Stmt* { return sparser->parseBlock(); });
+        this.dp = new DeclParser(this.s, tparser, eparser, sparser);
+    }
+
+    Program* parse() {
+        List<Decl*> imports = List<Decl*>();
+        List<Decl*> declarations = List<Decl*>();
+        while (!(this.s->isAtEnd())) {
+            if (this.s->check(TokenType.KW_IMPORT)) {
+                imports.add(this.dp->parseImport());
+            } else {
+                declarations.add(this.dp->parseTopLevelDecl());
+            }
+        }
+        return new Program(imports, declarations);
+    }
+}

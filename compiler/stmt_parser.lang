@@ -1,0 +1,345 @@
+// compiler/stmt_parser.lang — statement parser (port of parser/stmt_parser.py).
+// Builds Stmt unions (see ast.lang).  Shares the TokenStream with the type and
+// expression parsers, and wires ExprParser's closure-body hook to parseBlock
+// (see the driver / full Parser) to break the Expr<->Stmt import cycle.
+
+import "std/list.lang";
+import "std/string.lang";
+import "token.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+
+bool isAssignOp(TokenType t) {
+    return t == TokenType.ASSIGN || t == TokenType.PLUS_ASSIGN || t == TokenType.MINUS_ASSIGN
+        || t == TokenType.STAR_ASSIGN || t == TokenType.SLASH_ASSIGN || t == TokenType.PERCENT_ASSIGN
+        || t == TokenType.AMP_ASSIGN || t == TokenType.PIPE_ASSIGN || t == TokenType.CARET_ASSIGN
+        || t == TokenType.LSHIFT_ASSIGN || t == TokenType.RSHIFT_ASSIGN;
+}
+
+// The token kinds that can begin a var-decl type (the Python _TYPE_KWS).
+bool isStmtTypeKw(TokenType t) {
+    return isTypeKeyword(t) || t == TokenType.KW_FN || t == TokenType.KW_VAR;
+}
+
+class StmtParser {
+    TokenStream* s;
+    TypeParser* tp;
+    ExprParser* ep;
+
+    StmtParser(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser) {
+        this.s  = stream;
+        this.tp = typeParser;
+        this.ep = exprParser;
+    }
+
+    // ------------------------------------------------------------------
+    // Public
+    // ------------------------------------------------------------------
+
+    Stmt* parseBlock() {
+        this.s->expect(TokenType.LBRACE);
+        List<Stmt*> stmts = List<Stmt*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            stmts.add(this.parseStatement());
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Stmt.Block(stmts);
+    }
+
+    Stmt* parseStatement() {
+        Token* tok = this.s->peek(0);
+        TokenType t = tok->type;
+
+        if (t == TokenType.LBRACE)    { return this.parseBlock(); }
+        if (t == TokenType.KW_IF)     { return this.parseIf(); }
+        if (t == TokenType.KW_WHILE)  { return this.parseWhile(); }
+        if (t == TokenType.KW_FOR)    { return this.parseFor(); }
+        if (t == TokenType.KW_DO)     { return this.parseDoWhile(); }
+        if (t == TokenType.KW_FOREACH){ return this.parseForeach(); }
+        if (t == TokenType.KW_RETURN) { return this.parseReturn(); }
+        if (t == TokenType.KW_THROW)  { return this.parseThrow(); }
+        if (t == TokenType.KW_TRY)    { return this.parseTryCatch(); }
+        if (t == TokenType.KW_USING)  { return this.parseUsing(); }
+        if (t == TokenType.KW_BREAK) {
+            this.s->advance();
+            this.s->expect(TokenType.SEMICOLON);
+            return new Stmt.BreakStmt();
+        }
+        if (t == TokenType.KW_CONTINUE) {
+            this.s->advance();
+            this.s->expect(TokenType.SEMICOLON);
+            return new Stmt.ContinueStmt();
+        }
+
+        // match (expr) { ... } — context-sensitive, not a keyword.
+        if (t == TokenType.IDENT && tok->value == "match"
+            && this.s->peek(1)->type == TokenType.LPAREN) {
+            return this.parseMatch();
+        }
+
+        if (this.isVarDeclStart()) {
+            return this.parseVarDecl();
+        }
+
+        return this.parseAssignOrExprStmt(true);
+    }
+
+    // ------------------------------------------------------------------
+    // Var-decl detection
+    // ------------------------------------------------------------------
+
+    bool isVarDeclStart() {
+        Token* tok = this.s->peek(0);
+        if (tok->type == TokenType.KW_CONST) { return true; }
+        if (isStmtTypeKw(tok->type)) { return true; }
+        if (tok->type != TokenType.IDENT) { return false; }
+        if (this.s->peek(1)->type == TokenType.IDENT) { return true; }
+        if (this.s->peek(1)->type == TokenType.LT) { return this.looksLikeGenericVarDecl(); }
+        if (this.s->peek(1)->type == TokenType.COLONCOLON) { return this.looksLikeQualifiedVarDecl(); }
+        // User-defined pointer type: `Dog* d = ...`.  Require the trailing `=`
+        // so `a * b;` (a multiplication statement) is not mistaken for a decl.
+        int i = 1;
+        while (this.s->peek(i)->type == TokenType.STAR) { i = i + 1; }
+        if (i > 1 && this.s->peek(i)->type == TokenType.IDENT
+            && this.s->peek(i + 1)->type == TokenType.ASSIGN) {
+            return true;
+        }
+        return false;
+    }
+
+    bool looksLikeGenericVarDecl() {
+        int mark = this.s->mark();
+        int savedPending = this.tp->pendingGt;
+        bool result = false;
+        try {
+            this.tp->parseType();
+            result = this.s->check(TokenType.IDENT) && this.s->peek(1)->type == TokenType.ASSIGN;
+        } catch (ParseError* pe) {
+            result = false;
+        }
+        this.s->reset(mark);
+        this.tp->pendingGt = savedPending;
+        return result;
+    }
+
+    bool looksLikeQualifiedVarDecl() {
+        int mark = this.s->mark();
+        int savedPending = this.tp->pendingGt;
+        bool result = false;
+        try {
+            TypeNode* t = this.tp->parseType();
+            if (!(this.s->check(TokenType.IDENT))) {
+                result = false;
+            } else {
+                match (*t) {
+                    TypeNode.NamedType(n) => { result = true; }
+                    _ => { result = this.s->peek(1)->type == TokenType.ASSIGN; }
+                }
+            }
+        } catch (ParseError* pe) {
+            result = false;
+        }
+        this.s->reset(mark);
+        this.tp->pendingGt = savedPending;
+        return result;
+    }
+
+    // ------------------------------------------------------------------
+    // Statements
+    // ------------------------------------------------------------------
+
+    TypeNode* parseVarOrType() {
+        if (this.s->accept(TokenType.KW_VAR)) {
+            return new TypeNode.NamedType("var");
+        }
+        return this.tp->parseType();
+    }
+
+    Stmt* parseVarDecl() {
+        bool isConst = this.s->accept(TokenType.KW_CONST);
+        TypeNode* typeNode = this.parseVarOrType();
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        if (!(this.s->check(TokenType.ASSIGN))) {
+            throw this.s->error("Variable declaration requires an initialiser");
+        }
+        this.s->expect(TokenType.ASSIGN);
+        Expr* init = this.ep->parseExpr(0);
+        if (this.s->check(TokenType.COMMA)) {
+            throw this.s->error("Only one variable per declaration statement");
+        }
+        this.s->expect(TokenType.SEMICOLON);
+        return new Stmt.VarDecl(nameTok->value, typeNode, init, isConst);
+    }
+
+    Stmt* parseAssignOrExprStmt(bool consumeSemi) {
+        Expr* expr = this.ep->parseExpr(0);
+        if (isAssignOp(this.s->peek(0)->type)) {
+            Token* opTok = this.s->advance();
+            Expr* rhs = this.ep->parseExpr(0);
+            if (consumeSemi) { this.s->expect(TokenType.SEMICOLON); }
+            return new Stmt.AssignStmt(expr, opTok->value, rhs);
+        }
+        if (consumeSemi) { this.s->expect(TokenType.SEMICOLON); }
+        return new Stmt.ExprStmt(expr);
+    }
+
+    Stmt* parseIf() {
+        this.s->advance();   // consume 'if'
+        this.s->expect(TokenType.LPAREN);
+        Expr* cond = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        Stmt* thenBranch = this.parseBlock();
+        Stmt* elseBranch = null;
+        if (this.s->accept(TokenType.KW_ELSE)) {
+            if (this.s->check(TokenType.KW_IF)) {
+                elseBranch = this.parseIf();
+            } else {
+                elseBranch = this.parseBlock();
+            }
+        }
+        return new Stmt.IfStmt(cond, thenBranch, elseBranch);
+    }
+
+    Stmt* parseWhile() {
+        this.s->advance();
+        this.s->expect(TokenType.LPAREN);
+        Expr* cond = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        Stmt* body = this.parseBlock();
+        return new Stmt.WhileStmt(cond, body);
+    }
+
+    Stmt* parseFor() {
+        this.s->advance();
+        this.s->expect(TokenType.LPAREN);
+        Stmt* init = this.parseVarDecl();             // consumes its ';'
+        Expr* cond = this.ep->parseExpr(0);
+        this.s->expect(TokenType.SEMICOLON);
+        Stmt* post = this.parseAssignOrExprStmt(false);   // no ';' before ')'
+        this.s->expect(TokenType.RPAREN);
+        Stmt* body = this.parseBlock();
+        return new Stmt.ForStmt(init, cond, post, body);
+    }
+
+    Stmt* parseDoWhile() {
+        this.s->advance();
+        Stmt* body = this.parseBlock();
+        this.s->expect(TokenType.KW_WHILE);
+        this.s->expect(TokenType.LPAREN);
+        Expr* cond = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        this.s->expect(TokenType.SEMICOLON);
+        return new Stmt.DoWhileStmt(body, cond);
+    }
+
+    Stmt* parseForeach() {
+        this.s->advance();
+        this.s->expect(TokenType.LPAREN);
+        bool isConst = this.s->accept(TokenType.KW_CONST);
+        TypeNode* varType = this.parseVarOrType();
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        this.s->expect(TokenType.KW_IN);
+        Expr* iterable = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        Stmt* body = this.parseBlock();
+        return new Stmt.ForeachStmt(varType, nameTok->value, iterable, body, isConst);
+    }
+
+    Stmt* parseUsing() {
+        this.s->advance();   // consume 'using'
+        if (!(this.s->check(TokenType.LPAREN))) {
+            throw this.s->error("expected '(' after 'using' (namespace imports belong at the top level of a file)");
+        }
+        this.s->expect(TokenType.LPAREN);
+        TypeNode* typeNode = this.tp->parseType();
+        Token* nameTok = this.s->expect(TokenType.IDENT);
+        if (!(this.s->check(TokenType.ASSIGN))) {
+            throw this.s->error("'using' resource requires an initialiser");
+        }
+        this.s->expect(TokenType.ASSIGN);
+        Expr* init = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        Stmt* body = this.parseBlock();
+        // The resource variable is implicitly const.
+        Stmt* decl = new Stmt.VarDecl(nameTok->value, typeNode, init, true);
+        return new Stmt.UsingStmt(decl, body);
+    }
+
+    Stmt* parseThrow() {
+        this.s->advance();
+        Expr* value = this.ep->parseExpr(0);
+        this.s->expect(TokenType.SEMICOLON);
+        return new Stmt.ThrowStmt(value);
+    }
+
+    Stmt* parseTryCatch() {
+        Token* tok = this.s->advance();   // consume 'try'
+        Stmt* body = this.parseBlock();
+        List<CatchClause*> catches = List<CatchClause*>();
+        while (this.s->check(TokenType.KW_CATCH)) {
+            this.s->advance();
+            this.s->expect(TokenType.LPAREN);
+            TypeNode* catchType = this.tp->parseType();
+            Token* varTok = this.s->expect(TokenType.IDENT);
+            this.s->expect(TokenType.RPAREN);
+            Stmt* handler = this.parseBlock();
+            catches.add(new CatchClause(catchType, varTok->value, handler));
+        }
+        if (catches.length() == 0) {
+            throw new ParseError("try block requires at least one catch clause", tok->line, tok->col);
+        }
+        return new Stmt.TryCatchStmt(body, catches);
+    }
+
+    Stmt* parseMatch() {
+        this.s->advance();   // consume 'match'
+        this.s->expect(TokenType.LPAREN);
+        Expr* scrutinee = this.ep->parseExpr(0);
+        this.s->expect(TokenType.RPAREN);
+        this.s->expect(TokenType.LBRACE);
+        List<MatchArm*> arms = List<MatchArm*>();
+        while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            Token* armTok = this.s->peek(0);
+            if (armTok->type == TokenType.IDENT && armTok->value == "_") {
+                this.s->advance();
+                this.s->expect(TokenType.ASSIGN);   // '=' of '=>'
+                this.s->expect(TokenType.GT);        // '>' of '=>'
+                Stmt* body = this.parseBlock();
+                arms.add(new MatchArm(new Pattern.WildcardPattern(), body));
+                break;   // wildcard must be last
+            }
+            Token* unionTok = this.s->expect(TokenType.IDENT);
+            this.s->expect(TokenType.DOT);
+            Token* variantTok = this.s->expect(TokenType.IDENT);
+            List<string> bindings = List<string>();
+            if (this.s->accept(TokenType.LPAREN)) {
+                if (!(this.s->check(TokenType.RPAREN))) {
+                    bindings.add(this.s->expect(TokenType.IDENT)->value);
+                    while (this.s->accept(TokenType.COMMA)) {
+                        bindings.add(this.s->expect(TokenType.IDENT)->value);
+                    }
+                }
+                this.s->expect(TokenType.RPAREN);
+            }
+            this.s->expect(TokenType.ASSIGN);
+            this.s->expect(TokenType.GT);
+            Stmt* body = this.parseBlock();
+            arms.add(new MatchArm(new Pattern.VariantPattern(unionTok->value, variantTok->value, bindings), body));
+        }
+        this.s->expect(TokenType.RBRACE);
+        return new Stmt.MatchStmt(scrutinee, arms);
+    }
+
+    Stmt* parseReturn() {
+        this.s->advance();
+        if (this.s->check(TokenType.SEMICOLON)) {
+            this.s->advance();
+            return new Stmt.ReturnStmt(null);
+        }
+        Expr* value = this.ep->parseExpr(0);
+        this.s->expect(TokenType.SEMICOLON);
+        return new Stmt.ReturnStmt(value);
+    }
+}

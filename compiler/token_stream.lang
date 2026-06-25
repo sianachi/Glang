@@ -1,0 +1,91 @@
+// compiler/token_stream.lang — cursor over a token list (port of
+// parser/token_stream.py) plus ParseError.
+//
+// Note: Glang reserves `match` as a keyword (ADT matching), so the stream's
+// "consume-if-matches" method is named `accept` instead of `match`.
+
+import "std/list.lang";
+import "token.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ParseError — raised on malformed token sequences (mirrors errors.ParseError)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class ParseError extends Exception {
+    int line;
+    int col;
+    ParseError(string msg, int ln, int c) : super(msg) {
+        this.line = ln;
+        this.col  = c;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TokenStream
+// ═══════════════════════════════════════════════════════════════════════════
+
+class TokenStream {
+    List<Token*> tokens;
+    int pos;
+
+    TokenStream(List<Token*> toks) {
+        this.tokens = toks;
+        this.pos    = 0;
+    }
+
+    Token* peek(int offset) {
+        int idx = this.pos + offset;
+        if (idx < this.tokens.length()) {
+            return this.tokens.get(idx);
+        }
+        return this.tokens.get(this.tokens.length() - 1);   // EOF token
+    }
+
+    Token* advance() {
+        Token* tok = this.peek(0);
+        if (tok->type != TokenType.EOF) {
+            this.pos = this.pos + 1;
+        }
+        return tok;
+    }
+
+    Token* expect(TokenType ty) {
+        Token* tok = this.peek(0);
+        if (tok->type != ty) {
+            throw new ParseError(
+                "Expected " + tokenName(ty) + ", got '" + tokenName(tok->type) + "'",
+                tok->line, tok->col);
+        }
+        return this.advance();
+    }
+
+    // Consume the next token iff it has type `ty` (the Python `match`).
+    bool accept(TokenType ty) {
+        if (this.peek(0)->type == ty) {
+            this.advance();
+            return true;
+        }
+        return false;
+    }
+
+    bool check(TokenType ty) {
+        return this.peek(0)->type == ty;
+    }
+
+    int mark() {
+        return this.pos;
+    }
+
+    void reset(int p) {
+        this.pos = p;
+    }
+
+    bool isAtEnd() {
+        return this.peek(0)->type == TokenType.EOF;
+    }
+
+    ParseError* error(string msg) {
+        Token* tok = this.peek(0);
+        return new ParseError(msg, tok->line, tok->col);
+    }
+}

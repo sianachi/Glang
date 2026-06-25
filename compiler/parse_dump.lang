@@ -1,0 +1,31 @@
+// compiler/parse_dump.lang — test driver for the full parser.
+// Reads a whole Glang program from stdin, parses it, and prints its canonical
+// form (showProgram).  On error prints `PARSEERROR <msg>` / `LEXERROR <msg>`.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+        print(showProgram(prog));
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

@@ -1,0 +1,150 @@
+// compiler/type_parser.lang — parses type annotations into TypeNode unions.
+// Port of parser/type_parser.py.
+
+import "std/list.lang";
+import "std/string.lang";
+import "token.lang";
+import "token_stream.lang";
+import "ast.lang";
+
+// True if the current token can begin a type annotation.
+bool isTypeStart(TokenStream* s) {
+    TokenType t = s->peek(0)->type;
+    return isTypeKeyword(t) || t == TokenType.IDENT || t == TokenType.KW_FN;
+}
+
+bool isTypeKeyword(TokenType t) {
+    return t == TokenType.KW_INT || t == TokenType.KW_FLOAT || t == TokenType.KW_BOOL
+        || t == TokenType.KW_CHAR || t == TokenType.KW_BYTE || t == TokenType.KW_STRING
+        || t == TokenType.KW_VOID;
+}
+
+string typeKeywordName(TokenType t) {
+    if (t == TokenType.KW_INT)    { return "int"; }
+    if (t == TokenType.KW_FLOAT)  { return "float"; }
+    if (t == TokenType.KW_BOOL)   { return "bool"; }
+    if (t == TokenType.KW_CHAR)   { return "char"; }
+    if (t == TokenType.KW_BYTE)   { return "byte"; }
+    if (t == TokenType.KW_STRING) { return "string"; }
+    return "void";
+}
+
+bool isPointerOrFn(TypeNode* t) {
+    match (*t) {
+        TypeNode.PointerType(b)            => { return true; }
+        TypeNode.FunctionPointerType(p, r) => { return true; }
+        TypeNode.NamedType(n)              => { return false; }
+        TypeNode.ArrayType(b, sz)          => { return false; }
+        TypeNode.GenericType(nm, a)        => { return false; }
+        TypeNode.NullableType(b)           => { return false; }
+    }
+}
+
+class TypeParser {
+    TokenStream* s;
+    // Count of pending '>' tokens "owed" after splitting a '>>' (RSHIFT)
+    // encountered while closing nested generic argument lists.
+    int pendingGt;
+
+    TypeParser(TokenStream* stream) {
+        this.s = stream;
+        this.pendingGt = 0;
+    }
+
+    TypeNode* parseType() {
+        Token* tok = this.s->peek(0);
+        TypeNode* node = null;
+
+        if (tok->type == TokenType.KW_FN) {
+            node = this.parseFunctionPointerType();
+        } else if (isTypeKeyword(tok->type)) {
+            this.s->advance();
+            node = new TypeNode.NamedType(typeKeywordName(tok->type));
+        } else if (tok->type == TokenType.IDENT) {
+            this.s->advance();
+            string name = tok->value;
+            while (this.s->accept(TokenType.COLONCOLON)) {
+                name = name + "::" + this.s->expect(TokenType.IDENT)->value;
+            }
+            if (this.s->check(TokenType.LT)) {
+                node = new TypeNode.GenericType(name, this.parseTypeArgs());
+            } else {
+                node = new TypeNode.NamedType(name);
+            }
+        } else {
+            throw this.s->error("Expected type, got '" + tokenName(tok->type) + "'");
+        }
+
+        while (this.s->check(TokenType.STAR)) {
+            this.s->advance();
+            node = new TypeNode.PointerType(node);
+        }
+
+        if (this.s->check(TokenType.QUESTION)) {
+            Token* q = this.s->advance();
+            if (isPointerOrFn(node)) {
+                throw new ParseError(
+                    "pointer types are already nullable; use 'T*' without '?'",
+                    q->line, q->col);
+            }
+            node = new TypeNode.NullableType(node);
+        }
+
+        if (this.s->check(TokenType.LBRACKET)) {
+            this.s->advance();
+            Token* sizeTok = this.s->expect(TokenType.INT_LIT);
+            this.s->expect(TokenType.RBRACKET);
+            node = new TypeNode.ArrayType(node, parseInt(sizeTok->value));
+        }
+
+        return node;
+    }
+
+    // Parse `<T1, T2, ...>` starting at the opening `<`.
+    List<TypeNode*> parseTypeArgs() {
+        this.s->expect(TokenType.LT);
+        List<TypeNode*> args = List<TypeNode*>();
+        args.add(this.parseType());
+        while (this.s->accept(TokenType.COMMA)) {
+            args.add(this.parseType());
+        }
+        this.expectGt();
+        return args;
+    }
+
+    // Consume one closing `>`.  A `>>` (RSHIFT) closes two levels: the first
+    // call consumes it and leaves one `>` pending for the outer argument list.
+    void expectGt() {
+        if (this.pendingGt > 0) {
+            this.pendingGt = this.pendingGt - 1;
+            return;
+        }
+        Token* tok = this.s->peek(0);
+        if (tok->type == TokenType.GT) {
+            this.s->advance();
+            return;
+        }
+        if (tok->type == TokenType.RSHIFT) {
+            this.s->advance();
+            this.pendingGt = this.pendingGt + 1;
+            return;
+        }
+        throw this.s->error("Expected '>' to close type arguments");
+    }
+
+    TypeNode* parseFunctionPointerType() {
+        this.s->expect(TokenType.KW_FN);
+        this.s->expect(TokenType.LPAREN);
+        List<TypeNode*> paramTypes = List<TypeNode*>();
+        if (!(this.s->check(TokenType.RPAREN))) {
+            paramTypes.add(this.parseType());
+            while (this.s->accept(TokenType.COMMA)) {
+                paramTypes.add(this.parseType());
+            }
+        }
+        this.s->expect(TokenType.RPAREN);
+        this.s->expect(TokenType.ARROW);
+        TypeNode* returnType = this.parseType();
+        return new TypeNode.FunctionPointerType(paramTypes, returnType);
+    }
+}

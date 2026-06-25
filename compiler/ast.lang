@@ -1,0 +1,630 @@
+// compiler/ast.lang — the typed AST for the self-hosted Glang front-end.
+//
+// A Glang port of parser/ast_nodes.py.  Glang has no isinstance over class
+// hierarchies, but it has unions (ADTs) with exhaustive `match`, which is the
+// idiomatic way to model a typed AST here (cf. examples/adt_expr.lang).  Each
+// syntactic category is one union; the parser builds these and the analyser /
+// transpiler consume them via `match`.
+//
+// Node-level source positions (line/col) are intentionally omitted: the
+// serialized AST format the transpiler consumes does not carry them, and the
+// parser reports positions from the token stream, not from nodes.
+//
+// Built incrementally per SELFHOST.md.  Currently: the type layer (TypeNode).
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TypeNode — type annotations (mirrors the TypeNode subclasses in ast_nodes.py)
+// ═══════════════════════════════════════════════════════════════════════════
+
+union TypeNode {
+    // Primitives and user-defined names alike (no separate ClassType/EnumType).
+    NamedType { string name; }
+    PointerType { TypeNode* base; }
+    ArrayType { TypeNode* base; int size; }
+    GenericType { string name; List<TypeNode*> typeArgs; }
+    NullableType { TypeNode* base; }
+    FunctionPointerType { List<TypeNode*> paramTypes; TypeNode* returnType; }
+}
+
+// Canonical textual form of a type — matches compiler/ast_serializer.py's
+// _type_str exactly (no spaces in generic argument lists), so a Glang-parsed
+// type serialises identically to a Python-parsed one.
+string showType(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => {
+            return n;
+        }
+        TypeNode.PointerType(b) => {
+            return showType(b) + "*";
+        }
+        TypeNode.ArrayType(b, sz) => {
+            return showType(b) + "[" + strings::intToStr(sz) + "]";
+        }
+        TypeNode.NullableType(b) => {
+            return showType(b) + "?";
+        }
+        TypeNode.GenericType(nm, args) => {
+            StringBuilder sb = StringBuilder();
+            sb.append(nm);
+            sb.appendChar('<');
+            int n = args.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(','); }
+                sb.append(showType(args.get(i)));
+            }
+            sb.appendChar('>');
+            return sb.build();
+        }
+        TypeNode.FunctionPointerType(ps, ret) => {
+            StringBuilder sb = StringBuilder();
+            sb.append("fn(");
+            int n = ps.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(','); }
+                sb.append(showType(ps.get(i)));
+            }
+            sb.append(")->");
+            sb.append(showType(ret));
+            return sb.build();
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Param — a function/closure parameter (auxiliary record, not a union member)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class Param {
+    string name;
+    TypeNode* type;
+    bool isConst;
+
+    Param(string n, TypeNode* t, bool c) {
+        this.name    = n;
+        this.type    = t;
+        this.isConst = c;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Expr — expressions (mirrors the Expr subclasses in ast_nodes.py).
+// ClosureExpr is deferred to the statement slice (its body is a Block/Stmt).
+// ═══════════════════════════════════════════════════════════════════════════
+
+union Expr {
+    LiteralExpr { string kind; string value; }       // kind: int|float|bool|char|string
+    IdentifierExpr { string name; }
+    NullExpr { }
+    ThisExpr { }
+    SuperExpr { }
+    UnaryExpr { string op; Expr* operand; }           // op: ! ~ ++ -- - +
+    BinaryExpr { Expr* left; string op; Expr* right; }
+    AddressOfExpr { Expr* operand; }
+    DerefExpr { Expr* operand; }
+    CastExpr { TypeNode* targetType; Expr* expr; }
+    CallExpr { string name; List<Expr*> args; List<TypeNode*> typeArgs; }
+    IndirectCallExpr { Expr* callee; List<Expr*> args; }
+    MethodCallExpr { Expr* object; string method; List<Expr*> args; bool isArrow; }
+    NewExpr { string className; List<Expr*> args; List<TypeNode*> typeArgs; }
+    DeleteExpr { Expr* operand; }
+    AllocExpr { TypeNode* allocType; Expr* count; }   // count is null when absent
+    FreeExpr { Expr* operand; }
+    FieldAccessExpr { Expr* object; string fieldName; }
+    ArrowAccessExpr { Expr* pointer; string fieldName; }
+    IndexExpr { Expr* array; Expr* index; }
+    // body is a Block (a Stmt); captures are filled in later by the analyser.
+    ClosureExpr { List<Param*> params; TypeNode* returnType; Stmt* body; List<string> captures; }
+}
+
+// Canonical S-expression form of an expression, used by the differential test
+// harness (tests/test_expr_parser_glang.py implements the identical Python form).
+string showExpr(Expr* e) {
+    match (*e) {
+        Expr.LiteralExpr(k, v)       => { return "lit:" + k + ":" + v; }
+        Expr.IdentifierExpr(n)       => { return "id:" + n; }
+        Expr.NullExpr()              => { return "null"; }
+        Expr.ThisExpr()              => { return "this"; }
+        Expr.SuperExpr()             => { return "super"; }
+        Expr.UnaryExpr(op, o)        => { return "(u " + op + " " + showExpr(o) + ")"; }
+        Expr.BinaryExpr(l, op, r)    => { return "(b " + op + " " + showExpr(l) + " " + showExpr(r) + ")"; }
+        Expr.AddressOfExpr(o)        => { return "(addr " + showExpr(o) + ")"; }
+        Expr.DerefExpr(o)            => { return "(deref " + showExpr(o) + ")"; }
+        Expr.CastExpr(t, x)          => { return "(cast " + showType(t) + " " + showExpr(x) + ")"; }
+        Expr.CallExpr(nm, args, ta)  => { return "(call " + nm + showTypeArgs(ta) + " " + showArgs(args) + ")"; }
+        Expr.IndirectCallExpr(c, a)  => { return "(icall " + showExpr(c) + " " + showArgs(a) + ")"; }
+        Expr.MethodCallExpr(obj, m, args, arrow) => {
+            string sep = ".";
+            if (arrow) { sep = "->"; }
+            return "(mcall " + sep + m + " " + showExpr(obj) + " " + showArgs(args) + ")";
+        }
+        Expr.NewExpr(cn, args, ta)   => { return "(new " + cn + showTypeArgs(ta) + " " + showArgs(args) + ")"; }
+        Expr.DeleteExpr(o)           => { return "(delete " + showExpr(o) + ")"; }
+        Expr.AllocExpr(t, cnt)       => {
+            string cs = "_";
+            if (cnt != null) { cs = showExpr(cnt); }
+            return "(alloc " + showType(t) + " " + cs + ")";
+        }
+        Expr.FreeExpr(o)             => { return "(free " + showExpr(o) + ")"; }
+        Expr.FieldAccessExpr(obj, f) => { return "(field " + f + " " + showExpr(obj) + ")"; }
+        Expr.ArrowAccessExpr(p, f)   => { return "(arrow " + f + " " + showExpr(p) + ")"; }
+        Expr.IndexExpr(a, i)         => { return "(index " + showExpr(a) + " " + showExpr(i) + ")"; }
+        Expr.ClosureExpr(ps, rt, body, caps) => {
+            return "(closure " + showParams(ps) + " " + showType(rt) + " " + showStmt(body) + ")";
+        }
+    }
+}
+
+string showParams(List<Param*> ps) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = ps.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        Param* p = ps.get(i);
+        if (p->isConst) { sb.append("const "); }
+        sb.append(showType(p->type));
+        sb.appendChar(' ');
+        sb.append(p->name);
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showArgs(List<Expr*> args) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = args.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showExpr(args.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showTypeArgs(List<TypeNode*> ta) {
+    int n = ta.length();
+    if (n == 0) { return ""; }
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('<');
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(','); }
+        sb.append(showType(ta.get(i)));
+    }
+    sb.appendChar('>');
+    return sb.build();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Patterns and Stmt — statements (mirrors the Stmt subclasses in ast_nodes.py).
+//
+// Two deliberate divergences from the Python AST, both forced by Glang's typed
+// unions (Stmt and Expr are separate unions, not one duck-typed hierarchy):
+//   * ExprStmt wraps an expression used as a statement (`foo();`).
+//   * Sub-statements that Python types loosely as Block (then-branch, bodies,
+//     for-init, using-decl) are typed `Stmt*` here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+union Pattern {
+    VariantPattern { string unionName; string variantName; List<string> bindings; }
+    WildcardPattern { }
+}
+
+class CatchClause {
+    TypeNode* catchType;
+    string varName;
+    Stmt* body;
+    CatchClause(TypeNode* ct, string vn, Stmt* b) {
+        this.catchType = ct;
+        this.varName   = vn;
+        this.body      = b;
+    }
+}
+
+class MatchArm {
+    Pattern* pattern;
+    Stmt* body;
+    MatchArm(Pattern* p, Stmt* b) {
+        this.pattern = p;
+        this.body    = b;
+    }
+}
+
+union Stmt {
+    Block { List<Stmt*> stmts; }
+    ExprStmt { Expr* expr; }
+    VarDecl { string name; TypeNode* declType; Expr* initializer; bool isConst; }
+    AssignStmt { Expr* target; string op; Expr* value; }
+    IfStmt { Expr* condition; Stmt* thenBranch; Stmt* elseBranch; }   // elseBranch null if absent
+    WhileStmt { Expr* condition; Stmt* body; }
+    DoWhileStmt { Stmt* body; Expr* condition; }
+    ForStmt { Stmt* init; Expr* condition; Stmt* post; Stmt* body; }
+    ForeachStmt { TypeNode* varType; string varName; Expr* iterable; Stmt* body; bool isConst; }
+    UsingStmt { Stmt* decl; Stmt* body; }
+    BreakStmt { }
+    ContinueStmt { }
+    ReturnStmt { Expr* value; }   // null if no value
+    ThrowStmt { Expr* value; }
+    TryCatchStmt { Stmt* body; List<CatchClause*> catches; }
+    MatchStmt { Expr* scrutinee; List<MatchArm*> arms; }
+}
+
+string showStmtList(List<Stmt*> stmts) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = stmts.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showStmt(stmts.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showOptExpr(Expr* e) {
+    if (e == null) { return "_"; }
+    return showExpr(e);
+}
+
+string showPattern(Pattern* p) {
+    match (*p) {
+        Pattern.WildcardPattern() => { return "(pat _)"; }
+        Pattern.VariantPattern(un, vn, binds) => {
+            StringBuilder sb = StringBuilder();
+            sb.append("(pat ");
+            sb.append(un);
+            sb.appendChar('.');
+            sb.append(vn);
+            sb.append(" [");
+            int n = binds.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(' '); }
+                sb.append(binds.get(i));
+            }
+            sb.append("])");
+            return sb.build();
+        }
+    }
+}
+
+string showStmt(Stmt* s) {
+    match (*s) {
+        Stmt.Block(stmts)            => { return "(block " + showStmtList(stmts) + ")"; }
+        Stmt.ExprStmt(e)             => { return "(expr " + showExpr(e) + ")"; }
+        Stmt.VarDecl(nm, ty, init, c) => {
+            string pfx = "";
+            if (c) { pfx = "const "; }
+            return "(var " + pfx + nm + " " + showType(ty) + " " + showExpr(init) + ")";
+        }
+        Stmt.AssignStmt(t, op, v)    => { return "(assign " + op + " " + showExpr(t) + " " + showExpr(v) + ")"; }
+        Stmt.IfStmt(cond, th, el)    => {
+            string es = "_";
+            if (el != null) { es = showStmt(el); }
+            return "(if " + showExpr(cond) + " " + showStmt(th) + " " + es + ")";
+        }
+        Stmt.WhileStmt(cond, body)   => { return "(while " + showExpr(cond) + " " + showStmt(body) + ")"; }
+        Stmt.DoWhileStmt(body, cond) => { return "(do " + showStmt(body) + " " + showExpr(cond) + ")"; }
+        Stmt.ForStmt(init, cond, post, body) => {
+            return "(for " + showStmt(init) + " " + showExpr(cond) + " " + showStmt(post) + " " + showStmt(body) + ")";
+        }
+        Stmt.ForeachStmt(vt, vn, it, body, c) => {
+            string pfx = "";
+            if (c) { pfx = "const "; }
+            return "(foreach " + pfx + showType(vt) + " " + vn + " " + showExpr(it) + " " + showStmt(body) + ")";
+        }
+        Stmt.UsingStmt(decl, body)   => { return "(using " + showStmt(decl) + " " + showStmt(body) + ")"; }
+        Stmt.BreakStmt()             => { return "(break)"; }
+        Stmt.ContinueStmt()          => { return "(continue)"; }
+        Stmt.ReturnStmt(v)           => { return "(return " + showOptExpr(v) + ")"; }
+        Stmt.ThrowStmt(v)            => { return "(throw " + showExpr(v) + ")"; }
+        Stmt.TryCatchStmt(body, catches) => {
+            StringBuilder sb = StringBuilder();
+            sb.append("(try ");
+            sb.append(showStmt(body));
+            sb.append(" [");
+            int n = catches.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(' '); }
+                CatchClause* cc = catches.get(i);
+                sb.append("(catch " + showType(cc->catchType) + " " + cc->varName + " " + showStmt(cc->body) + ")");
+            }
+            sb.append("])");
+            return sb.build();
+        }
+        Stmt.MatchStmt(scrut, arms)  => {
+            StringBuilder sb = StringBuilder();
+            sb.append("(match ");
+            sb.append(showExpr(scrut));
+            sb.append(" [");
+            int n = arms.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(' '); }
+                MatchArm* arm = arms.get(i);
+                sb.append("(arm " + showPattern(arm->pattern) + " " + showStmt(arm->body) + ")");
+            }
+            sb.append("])");
+            return sb.build();
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Declarations — member records + the Decl union (mirrors ast_nodes.py).
+// Member records (fields/methods/ctor/dtor/variants) are plain classes; the
+// top-level declaration forms are a union.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import "std/map.lang";
+
+class FieldDecl {
+    string name;
+    TypeNode* fieldType;
+    bool isConst;
+    string access;
+    FieldDecl(string n, TypeNode* t, bool c, string a) {
+        this.name = n; this.fieldType = t; this.isConst = c; this.access = a;
+    }
+}
+
+class StaticFieldDecl {
+    string name;
+    TypeNode* fieldType;
+    Expr* initializer;
+    bool isConst;
+    string access;
+    StaticFieldDecl(string n, TypeNode* t, Expr* init, bool c, string a) {
+        this.name = n; this.fieldType = t; this.initializer = init;
+        this.isConst = c; this.access = a;
+    }
+}
+
+class ConstructorDecl {
+    List<Param*> params;
+    Stmt* body;
+    bool hasSuper;
+    List<Expr*> superArgs;   // empty unless hasSuper
+    ConstructorDecl(List<Param*> p, Stmt* b, bool hs, List<Expr*> sa) {
+        this.params = p; this.body = b; this.hasSuper = hs; this.superArgs = sa;
+    }
+}
+
+class DestructorDecl {
+    Stmt* body;
+    DestructorDecl(Stmt* b) { this.body = b; }
+}
+
+class MethodDecl {
+    string name;
+    List<Param*> params;
+    TypeNode* returnType;
+    Stmt* body;            // null for interface methods
+    bool isStatic;
+    string access;
+    MethodDecl(string n, List<Param*> p, TypeNode* rt, Stmt* b, bool st, string a) {
+        this.name = n; this.params = p; this.returnType = rt;
+        this.body = b; this.isStatic = st; this.access = a;
+    }
+}
+
+class EnumVariant {
+    string name;
+    bool hasValue;
+    int value;
+    EnumVariant(string n, bool h, int v) { this.name = n; this.hasValue = h; this.value = v; }
+}
+
+class UnionVariant {
+    string name;
+    List<FieldDecl*> fields;
+    UnionVariant(string n, List<FieldDecl*> f) { this.name = n; this.fields = f; }
+}
+
+union Decl {
+    ImportDecl { string path; }
+    FunctionDecl {
+        string name; List<Param*> params; TypeNode* returnType; Stmt* body;
+        List<string> typeParams; Map<string, TypeNode*> bounds;
+    }
+    ClassDecl {
+        string name; List<FieldDecl*> fields; List<StaticFieldDecl*> staticFields;
+        List<MethodDecl*> methods; string superclass; List<string> interfaces;
+        ConstructorDecl* constructor; DestructorDecl* destructor; string access;
+        List<string> typeParams; Map<string, TypeNode*> bounds;
+    }
+    InterfaceDecl { string name; List<MethodDecl*> methods; }
+    EnumDecl { string name; List<EnumVariant*> variants; }
+    UsingDecl { string name; bool isNamespace; }
+    NamespaceDecl { string name; List<Decl*> declarations; }
+    ModifierDecl { List<string> typeParams; TypeNode* target; List<MethodDecl*> methods; }
+    UnionDecl { string name; List<string> typeParams; List<UnionVariant*> variants; }
+}
+
+class Program {
+    List<Decl*> imports;
+    List<Decl*> declarations;
+    Program(List<Decl*> i, List<Decl*> d) { this.imports = i; this.declarations = d; }
+}
+
+// ── Declaration serialization (canonical form for the differential harness) ──
+
+string showStrList(List<string> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(xs.get(i));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showTypeParams(List<string> tps, Map<string, TypeNode*> bounds) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = tps.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        string tp = tps.get(i);
+        sb.append(tp);
+        if (bounds.has(tp)) {
+            sb.appendChar(':');
+            sb.append(showType(bounds.getOr(tp, null)));
+        }
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showField(FieldDecl* f) {
+    string c = "";
+    if (f->isConst) { c = "const "; }
+    return "(field " + f->access + " " + c + f->name + " " + showType(f->fieldType) + ")";
+}
+
+string showFieldList(List<FieldDecl*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showField(xs.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showStaticField(StaticFieldDecl* f) {
+    string c = "";
+    if (f->isConst) { c = "const "; }
+    return "(sfield " + f->access + " " + c + f->name + " " + showType(f->fieldType) + " " + showExpr(f->initializer) + ")";
+}
+
+string showSFieldList(List<StaticFieldDecl*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showStaticField(xs.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showMethod(MethodDecl* m) {
+    string st = "";
+    if (m->isStatic) { st = " static"; }
+    string body = "_";
+    if (m->body != null) { body = showStmt(m->body); }
+    return "(method " + m->access + st + " " + m->name + " " + showParams(m->params)
+         + " " + showType(m->returnType) + " " + body + ")";
+}
+
+string showMethodList(List<MethodDecl*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showMethod(xs.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showEnumVariantList(List<EnumVariant*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        EnumVariant* v = xs.get(i);
+        sb.append("(evar ");
+        sb.append(v->name);
+        if (v->hasValue) {
+            sb.appendChar('=');
+            sb.append(strings::intToStr(v->value));
+        }
+        sb.appendChar(')');
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showUnionVariantList(List<UnionVariant*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        UnionVariant* v = xs.get(i);
+        sb.append("(uvar ");
+        sb.append(v->name);
+        sb.appendChar(' ');
+        sb.append(showFieldList(v->fields));
+        sb.appendChar(')');
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showDecl(Decl* d) {
+    match (*d) {
+        Decl.ImportDecl(path) => { return "(import " + path + ")"; }
+        Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+            return "(fn " + name + " " + showTypeParams(tps, bounds) + " " + showParams(params)
+                 + " " + showType(ret) + " " + showStmt(body) + ")";
+        }
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            string ext = "_";
+            if (superName != "") { ext = superName; }
+            string ctorS = "_";
+            if (ctor != null) {
+                string sup = "_";
+                if (ctor->hasSuper) { sup = "super" + showArgs(ctor->superArgs); }
+                ctorS = "(ctor " + showParams(ctor->params) + " " + sup + " " + showStmt(ctor->body) + ")";
+            }
+            string dtorS = "_";
+            if (dtor != null) { dtorS = "(dtor " + showStmt(dtor->body) + ")"; }
+            return "(class " + access + " " + name + " " + showTypeParams(tps, bounds)
+                 + " ext:" + ext + " impl:" + showStrList(ifaces)
+                 + " sf:" + showSFieldList(sfields) + " f:" + showFieldList(fields)
+                 + " ctor:" + ctorS + " dtor:" + dtorS + " m:" + showMethodList(methods) + ")";
+        }
+        Decl.InterfaceDecl(name, methods) => { return "(interface " + name + " " + showMethodList(methods) + ")"; }
+        Decl.EnumDecl(name, variants) => { return "(enum " + name + " " + showEnumVariantList(variants) + ")"; }
+        Decl.UsingDecl(name, isNs) => {
+            string pfx = "";
+            if (isNs) { pfx = "namespace "; }
+            return "(using " + pfx + name + ")";
+        }
+        Decl.NamespaceDecl(name, decls) => { return "(namespace " + name + " " + showDeclList(decls) + ")"; }
+        Decl.ModifierDecl(tps, target, methods) => {
+            return "(modifier " + showStrList(tps) + " for " + showType(target) + " " + showMethodList(methods) + ")";
+        }
+        Decl.UnionDecl(name, tps, variants) => {
+            return "(uniondecl " + name + " " + showStrList(tps) + " " + showUnionVariantList(variants) + ")";
+        }
+    }
+}
+
+string showDeclList(List<Decl*> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(' '); }
+        sb.append(showDecl(xs.get(i)));
+    }
+    sb.appendChar(']');
+    return sb.build();
+}
+
+string showProgram(Program* p) {
+    return "(program " + showDeclList(p->imports) + " " + showDeclList(p->declarations) + ")";
+}

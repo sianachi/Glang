@@ -1,0 +1,35 @@
+// compiler/stmt_dump.lang — test driver for the statement parser.
+// Reads one statement from stdin, parses it, prints its canonical S-expr form
+// (showStmt).  Wires the closure-body hook so closures in expression position
+// parse.  On error prints `PARSEERROR <msg>` / `LEXERROR <msg>`.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        TokenStream* s = new TokenStream(tokens);
+        TypeParser* tp = new TypeParser(s);
+        ExprParser* ep = new ExprParser(s, tp);
+        StmtParser* sp = new StmtParser(s, tp, ep);
+        ep->setBlockHook(() -> Stmt* { return sp->parseBlock(); });
+        Stmt* st = sp->parseStatement();
+        print(showStmt(st));
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}
