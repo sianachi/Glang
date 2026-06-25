@@ -149,8 +149,10 @@ def _py_mono_err(path: str):
 
 def _glang_mono(path: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/mono_dump.lang"],
-        input=path.encode("utf-8"), capture_output=True, cwd=_ROOT,
+        [sys.executable, os.path.join(_ROOT, "bootstrap", "main.py"), "run",
+         os.path.join(_ROOT, "Toolchain", "compiler", "mono_dump.lang")],
+        input=path.encode("utf-8"), capture_output=True,
+        cwd=os.path.join(_ROOT, "Toolchain"),  # so the driver's std/... loads resolve
     )
     return proc.stdout.decode("utf-8").strip()
 

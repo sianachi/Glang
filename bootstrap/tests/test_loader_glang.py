@@ -42,8 +42,10 @@ def py_prog(path: str) -> str:
 
 def glang_prog(stdin_path: str) -> tuple[int, str]:
     proc = subprocess.run(
-        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/load_dump.lang"],
-        input=stdin_path.encode("utf-8"), capture_output=True, cwd=_ROOT,
+        [sys.executable, os.path.join(_ROOT, "bootstrap", "main.py"), "run",
+         os.path.join(_ROOT, "Toolchain", "compiler", "load_dump.lang")],
+        input=stdin_path.encode("utf-8"), capture_output=True,
+        cwd=os.path.join(_ROOT, "Toolchain"),  # so the driver's std/... loads resolve
     )
     return proc.returncode, proc.stdout.decode("utf-8").strip()
 
