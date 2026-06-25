@@ -131,7 +131,9 @@ if __name__ == "__main__":
     _result = [2]
     def _run() -> None:
         _result[0] = main()
-    # 64 MB stack — prevents C stack overflow in Cython-compiled recursive modules
+    # 64 MB stack — the recursive-descent parser and tree-walking interpreter
+    # recurse deeply; a roomy C stack keeps deep (but valid) recursion from
+    # overflowing on large inputs.
     threading.stack_size(64 * 1024 * 1024)
     t = threading.Thread(target=_run)
     t.start()
