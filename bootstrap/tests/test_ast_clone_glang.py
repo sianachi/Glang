@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Targeted snippets exercising every union and record shape.
 SNIPPETS = [
@@ -61,25 +61,25 @@ SNIPPETS = [
 ]
 
 REAL_FILES = sorted(
-    glob.glob(os.path.join(_ROOT, "examples", "*.lang"))
-    + glob.glob(os.path.join(_ROOT, "stdlib", "*.lang"))
+    glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "*.lang"))
+    + glob.glob(os.path.join(_ROOT, "Toolchain", "stdlib", "*.lang"))
 )
 
 
 def _run(driver: str, src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", driver],
+        [sys.executable, "bootstrap/main.py", "run", driver],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()
 
 
 def orig_form(src: str) -> str:
-    return _run("compiler/parse_dump.lang", src)
+    return _run("Toolchain/compiler/parse_dump.lang", src)
 
 
 def clone_form(src: str) -> str:
-    return _run("compiler/clone_dump.lang", src)
+    return _run("Toolchain/compiler/clone_dump.lang", src)
 
 
 @pytest.mark.parametrize("src", SNIPPETS)
@@ -95,7 +95,7 @@ def test_clone_faithful_real_files(path):
 
 def test_clone_no_aliasing():
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/clone_alias_check.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/clone_alias_check.lang"],
         capture_output=True, cwd=_ROOT,
     )
     out = proc.stdout.decode("utf-8").strip().splitlines()

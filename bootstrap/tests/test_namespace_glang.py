@@ -27,7 +27,7 @@ from analyser.namespace_resolver import NamespaceResolver
 from errors.errors import TypeError as GTE
 from tests.glang_show import show_program
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ── success snippets (from test_namespaces.py) ──────────────────────────────
@@ -272,8 +272,8 @@ def _uses_namespace(path):
 
 REAL_FILES = sorted(
     p for p in (
-        glob.glob(os.path.join(_ROOT, "examples", "*.lang"))
-        + glob.glob(os.path.join(_ROOT, "stdlib", "*.lang"))
+        glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "*.lang"))
+        + glob.glob(os.path.join(_ROOT, "Toolchain", "stdlib", "*.lang"))
     )
     if _uses_namespace(p)
 )
@@ -291,7 +291,7 @@ def py_resolve(src: str) -> str:
 
 def glang_resolve(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/ns_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/ns_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

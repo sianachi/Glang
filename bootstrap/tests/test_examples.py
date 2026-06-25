@@ -11,7 +11,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "examples"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "Toolchain", "examples"))
 
 from run_examples import discover, expected_path, run_example  # noqa: E402
 

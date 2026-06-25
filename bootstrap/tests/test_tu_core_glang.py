@@ -41,7 +41,7 @@ from errors.errors import ParseError as GlangParseError
 from errors.errors import LexError as GlangLexError
 import analyser.type_utils as tu
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _parse_type(src):
@@ -105,7 +105,7 @@ def py_reference(script):
 
 def glang_output(script):
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/tu_core_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/tu_core_dump.lang"],
         input=script.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     if proc.returncode != 0:

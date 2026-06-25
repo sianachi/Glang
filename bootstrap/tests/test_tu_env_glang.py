@@ -26,7 +26,7 @@ from analyser.type_utils import (
     is_assignable, _class_handle_name, superclass_chain, implements_interface,
 )
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _parse_type(text: str):
@@ -101,7 +101,7 @@ def py_run(script: str) -> str:
 
 def glang_run(script: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/tu_env_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/tu_env_dump.lang"],
         input=script.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

@@ -18,7 +18,7 @@ from lexer.lexer import Lexer
 from parser.parser import Parser
 from tests.glang_show import show_program
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SNIPPETS = [
     'import "std/list.lang";',
@@ -48,8 +48,8 @@ SNIPPETS = [
 
 # A spread of real source files — strong, broad coverage.
 REAL_FILES = sorted(
-    glob.glob(os.path.join(_ROOT, "examples", "*.lang"))
-    + glob.glob(os.path.join(_ROOT, "stdlib", "*.lang"))
+    glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "*.lang"))
+    + glob.glob(os.path.join(_ROOT, "Toolchain", "stdlib", "*.lang"))
 )
 
 
@@ -59,7 +59,7 @@ def py_prog(src: str) -> str:
 
 def glang_prog(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/parse_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/parse_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

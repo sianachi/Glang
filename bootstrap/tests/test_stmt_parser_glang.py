@@ -22,7 +22,7 @@ from parser.stmt_parser import StmtParser
 from parser import ast_nodes as A
 from compiler.ast_serializer import _type_str
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _targs(ta):
@@ -153,7 +153,7 @@ def py_stmt(src: str) -> str:
 
 def glang_stmt(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/stmt_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/stmt_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

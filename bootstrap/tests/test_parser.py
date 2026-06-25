@@ -77,10 +77,10 @@ class TestTopLevel:
         assert prog.declarations == []
 
     def test_import(self):
-        prog = parse('import "stdlib/io.lang";')
+        prog = parse('import "Toolchain/stdlib/io.lang";')
         assert len(prog.imports) == 1
         assert isinstance(prog.imports[0], ImportDecl)
-        assert prog.imports[0].path == "stdlib/io.lang"
+        assert prog.imports[0].path == "Toolchain/stdlib/io.lang"
 
     def test_multiple_imports(self):
         prog = parse('import "a.lang"; import "b.lang";')

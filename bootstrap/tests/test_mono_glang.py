@@ -26,7 +26,7 @@ from analyser.monomorphize import Monomorphizer
 from errors.errors import TypeError as GTypeError
 from tests.glang_show import show_program
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # A generic Box used across several snippets (mirrors tests/test_generics.py).
@@ -128,7 +128,7 @@ STDLIB_WRAPPERS = [
 ]
 
 # Generic example programs.
-EXAMPLE_FILES = sorted(glob.glob(os.path.join(_ROOT, "examples", "generic_*.lang")))
+EXAMPLE_FILES = sorted(glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "generic_*.lang")))
 
 
 def _py_mono(path: str) -> str:
@@ -149,7 +149,7 @@ def _py_mono_err(path: str):
 
 def _glang_mono(path: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/mono_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/mono_dump.lang"],
         input=path.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

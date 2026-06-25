@@ -25,8 +25,10 @@ from parser.parser import Parser
 from parser.ast_nodes import Program, ImportDecl, Decl
 from errors.errors import ImportError
 
-# The standard-library root. Source-tree runs find ``../stdlib`` relative to
-# this file; compiled distributions can ship ``stdlib`` beside the executable.
+# The standard-library root. After the bootstrap/Toolchain split the stdlib lives
+# at ``<repo>/Toolchain/stdlib`` (this file is ``<repo>/bootstrap/glang_loader/``);
+# GLANG_STDLIB overrides, and compiled distributions can ship ``stdlib`` beside the
+# executable.
 def _default_stdlib_dir() -> str:
     override = os.environ.get("GLANG_STDLIB")
     if override:
@@ -36,8 +38,10 @@ def _default_stdlib_dir() -> str:
     if os.path.isdir(exe_adjacent):
         return os.path.normpath(exe_adjacent)
 
+    # <repo>/bootstrap/glang_loader/loader.py -> <repo>/Toolchain/stdlib
     return os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "stdlib")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "..", "..", "Toolchain", "stdlib")
     )
 
 

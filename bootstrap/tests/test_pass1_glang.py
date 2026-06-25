@@ -26,7 +26,7 @@ from analyser.pass1_collector import Pass1Collector
 from analyser.type_utils import type_str
 from errors.errors import TypeError as GTypeError
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # ── Python reference dumper (mirrors compiler/pass1_dump.lang line-for-line) ──
@@ -119,7 +119,7 @@ def py_dump(src: str) -> str:
 
 def glang_dump(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/pass1_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/pass1_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()
@@ -204,7 +204,7 @@ def test_pass1_errors(src):
 # A spread of real non-generic, non-namespace example files for breadth.
 def _eligible_real_files():
     import glob
-    files = sorted(glob.glob(os.path.join(_ROOT, "examples", "*.lang")))
+    files = sorted(glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "*.lang")))
     out = []
     for path in files:
         src = open(path, encoding="utf-8").read()

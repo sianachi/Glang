@@ -21,8 +21,8 @@ import sys
 
 from errors.errors import TypeError as GTE
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DRIVER = "compiler/analyse_dump.lang"
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DRIVER = "Toolchain/compiler/analyse_dump.lang"
 _NATIVE = os.environ.get("GLANG_ANALYSER_BACKEND") == "glang-native"
 _binary: str | None = None
 
@@ -51,9 +51,9 @@ def _native_binary() -> str:
         d = tempfile.mkdtemp(prefix="glang_an_")
         c = os.path.join(d, "an.c")
         b = os.path.join(d, "an")
-        subprocess.run([sys.executable, "main.py", "compile", _DRIVER, "-o", c],
+        subprocess.run([sys.executable, "bootstrap/main.py", "compile", _DRIVER, "-o", c],
                        cwd=_ROOT, check=True, capture_output=True)
-        subprocess.run(["gcc", "-w", c, "runtime/glang_runtime.c", "-o", b],
+        subprocess.run(["gcc", "-w", c, "Toolchain/runtime/glang_runtime.c", "-o", b],
                        cwd=_ROOT, check=True, capture_output=True)
         _binary = b
     return _binary
@@ -67,7 +67,7 @@ def glang_analyse(src: str) -> None:
     which checks `fragment in exc.msg`).  Raises AssertionError on an unexpected
     (parse/lex/load) failure or malformed driver output.
     """
-    cmd = [_native_binary()] if _NATIVE else [sys.executable, "main.py", "run", _DRIVER]
+    cmd = [_native_binary()] if _NATIVE else [sys.executable, "bootstrap/main.py", "run", _DRIVER]
     proc = subprocess.run(cmd, input=src.encode("utf-8"), capture_output=True, cwd=_ROOT)
     out = proc.stdout.decode("utf-8").strip()
     lines = [ln for ln in out.splitlines() if ln]

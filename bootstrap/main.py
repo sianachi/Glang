@@ -33,7 +33,12 @@ USAGE = (
     "  glang compile <file.lang> [-o output.c]"
 )
 
-_ROOT = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.abspath(__file__))          # .../bootstrap
+_REPO = os.path.dirname(_ROOT)                               # repo root
+_TOOLCHAIN = os.path.join(_REPO, 'Toolchain')                # GScript toolchain
+
+# The GScript stdlib/runtime live under Toolchain/; make the loader find them.
+os.environ.setdefault('GLANG_STDLIB', os.path.join(_TOOLCHAIN, 'stdlib'))
 
 
 def run_file(path: str, prog_args: list[str] | None = None) -> int:
@@ -49,26 +54,32 @@ def _ensure_glangc() -> str:
 
     Bootstraps from the committed ``glangc.c`` seed — no Python front-end.
     """
-    glangc = os.path.join(_ROOT, 'glangc')
-    seed = os.path.join(_ROOT, 'glangc.c')
-    runtime = os.path.join(_ROOT, 'runtime', 'glang_runtime.c')
+    glangc = os.path.join(_TOOLCHAIN, 'glangc')
+    seed = os.path.join(_TOOLCHAIN, 'glangc.c')
+    runtime = os.path.join(_TOOLCHAIN, 'runtime', 'glang_runtime.c')
     if not os.path.exists(seed):
         raise FileNotFoundError(
-            "glangc.c seed not found; regenerate it on a branch with the Python "
-            "compile path, or run build.sh"
+            "Toolchain/glangc.c seed not found; run Toolchain/build.sh"
         )
     stale = (not os.path.exists(glangc)
              or os.path.getmtime(glangc) < os.path.getmtime(seed))
     if stale:
         subprocess.run(['gcc', '-O1', '-w', seed, runtime, '-o', glangc],
-                       cwd=_ROOT, check=True)
+                       cwd=_TOOLCHAIN, check=True)
     return glangc
 
 
 def compile_file(path: str, out_c: str) -> int:
-    """Compile ``path`` to C at ``out_c`` using the self-hosted ``glangc``."""
+    """Compile ``path`` to C at ``out_c`` using the self-hosted ``glangc``.
+
+    glangc runs with cwd=Toolchain/ so its ``std/...`` imports resolve against
+    Toolchain/stdlib; input/output are passed as absolute paths.
+    """
     glangc = _ensure_glangc()
-    return subprocess.run([glangc, path, out_c], cwd=_ROOT).returncode
+    return subprocess.run(
+        [glangc, os.path.abspath(path), os.path.abspath(out_c)],
+        cwd=_TOOLCHAIN,
+    ).returncode
 
 
 def main(argv: list[str] | None = None) -> int:

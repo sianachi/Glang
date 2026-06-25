@@ -19,7 +19,7 @@ from parser.token_stream import TokenStream
 from parser.type_parser import TypeParser
 from compiler.ast_serializer import _type_str
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TYPES = [
     "int", "float", "bool", "char", "byte", "string", "void",
@@ -42,7 +42,7 @@ def py_canonical(src: str) -> str:
 
 def glang_canonical(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/type_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/type_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

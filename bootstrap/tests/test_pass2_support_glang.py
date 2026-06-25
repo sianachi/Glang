@@ -28,7 +28,7 @@ from analyser.pass2_checker import Pass2Checker
 from analyser.type_utils import type_str
 from errors.errors import TypeError as GTypeError
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _BINARY = {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="}
 _COMP = {"==", "!=", "<", "<=", ">", ">="}
@@ -168,7 +168,7 @@ def py_run(script: str) -> str:
 
 def glang_run(script: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/pass2_support_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/pass2_support_dump.lang"],
         input=script.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

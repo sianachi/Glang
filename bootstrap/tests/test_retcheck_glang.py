@@ -26,7 +26,7 @@ from parser.parser import Parser
 from parser import ast_nodes as A
 from analyser.return_checker import always_returns
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _body_stmts(body):
@@ -51,7 +51,7 @@ def py_lines(src: str) -> str:
 
 def glang_lines(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/retcheck_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/retcheck_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     if proc.returncode != 0:
@@ -105,8 +105,8 @@ SNIPPETS = [
 
 def _sources():
     cases = list(SNIPPETS)
-    files = sorted(glob.glob(os.path.join(_ROOT, "examples", "*.lang")))
-    files += sorted(glob.glob(os.path.join(_ROOT, "stdlib", "*.lang")))
+    files = sorted(glob.glob(os.path.join(_ROOT, "Toolchain", "examples", "*.lang")))
+    files += sorted(glob.glob(os.path.join(_ROOT, "Toolchain", "stdlib", "*.lang")))
     for fp in files:
         with open(fp, "r", encoding="utf-8") as fh:
             cases.append(fh.read())

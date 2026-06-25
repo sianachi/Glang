@@ -28,7 +28,7 @@ from lexer.token_types import TokenType
 from lexer.lexer import Token
 from errors.errors import LexError
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _binary: str | None = None
 
 
@@ -41,11 +41,11 @@ def _build() -> str:
     c_file = os.path.join(workdir, "lex_dump.c")
     binary = os.path.join(workdir, "lex_dump")
     subprocess.run(
-        [sys.executable, "main.py", "compile", "compiler/lex_dump.lang", "-o", c_file],
+        [sys.executable, "bootstrap/main.py", "compile", "Toolchain/compiler/lex_dump.lang", "-o", c_file],
         cwd=_ROOT, check=True, capture_output=True,
     )
     subprocess.run(
-        ["gcc", "-w", c_file, "runtime/glang_runtime.c", "-o", binary],
+        ["gcc", "-w", c_file, "Toolchain/runtime/glang_runtime.c", "-o", binary],
         cwd=_ROOT, check=True, capture_output=True,
     )
     _binary = binary
@@ -76,7 +76,7 @@ class GlangLexer:
         if os.environ.get("GLANG_LEXER_BACKEND") == "glang-native":
             cmd = [_build()]
         else:
-            cmd = [sys.executable, "main.py", "run", "compiler/lex_dump.lang"]
+            cmd = [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/lex_dump.lang"]
         proc = subprocess.run(
             cmd, input=self._source.encode("utf-8"),
             capture_output=True, cwd=_ROOT,

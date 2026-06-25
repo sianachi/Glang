@@ -21,7 +21,7 @@ from parser.expr_parser import ExprParser
 from parser import ast_nodes as A
 from compiler.ast_serializer import _type_str
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def _targs(ta):
@@ -94,7 +94,7 @@ def py_expr(src: str) -> str:
 
 def glang_expr(src: str) -> str:
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/expr_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/expr_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     return proc.stdout.decode("utf-8").strip()

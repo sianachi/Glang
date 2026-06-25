@@ -25,7 +25,7 @@ from parser.parser import Parser
 from analyser.analyser import Analyser
 from errors.errors import TypeError as GTypeError
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def py_outcome(src: str):
@@ -40,7 +40,7 @@ def py_outcome(src: str):
 
 def glang_outcome(src: str):
     proc = subprocess.run(
-        [sys.executable, "main.py", "run", "compiler/analyse_dump.lang"],
+        [sys.executable, "bootstrap/main.py", "run", "Toolchain/compiler/analyse_dump.lang"],
         input=src.encode("utf-8"), capture_output=True, cwd=_ROOT,
     )
     out = proc.stdout.decode("utf-8").strip()

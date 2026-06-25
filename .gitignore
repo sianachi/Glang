@@ -41,24 +41,27 @@ AGENTS.md
 plan.md
 
 # Compiled C-extension / transpiler-generated artifacts (regenerated from sources).
-# NOTE: glangc.c and runtime/*.c are intentionally NOT ignored — they are the
-# bootstrap seed + runtime needed to build the compiler from scratch.
+# NOTE: Toolchain/glangc.c and Toolchain/runtime/*.c are intentionally NOT ignored —
+# they are the bootstrap seed + runtime needed to build the compiler from scratch.
 *.so
-/analyser/*.c
-/lexer/*.c
-/parser/*.c
-/errors/*.c
-/glang_loader/*.c
-/interpreter/*.c
-/compiler/*.c
+/bootstrap/analyser/*.c
+/bootstrap/lexer/*.c
+/bootstrap/parser/*.c
+/bootstrap/errors/*.c
+/bootstrap/glang_loader/*.c
+/bootstrap/loader/*.c
+/bootstrap/interpreter/*.c
+/bootstrap/compiler/*.c
+/Toolchain/compiler/*.c
 
 # Built program outputs (rebuild from sources)
 /glangc
+/Toolchain/glangc
 /mini_lexer
 /mini_lexer.c
 /console_io
 /console_io.c
 
 # Working / planning notes (not part of the shipped compiler)
-/compiler/notes/
-/compiler/SELFHOST.md
+/Toolchain/compiler/notes/
+/Toolchain/compiler/SELFHOST.md
