@@ -10,17 +10,24 @@
     { "include": "#char-literal" },
     { "include": "#number" },
     { "include": "#constant-language" },
-    { "include": "#storage-modifier" },
-    { "include": "#control-keyword" },
-    { "include": "#storage-type" },
     { "include": "#class-decl" },
     { "include": "#enum-decl" },
+    { "include": "#union-decl" },
     { "include": "#interface-decl" },
+    { "include": "#namespace-decl" },
+    { "include": "#modifier-decl" },
     { "include": "#import-stmt" },
-    { "include": "#inherit-keyword" },
+    { "include": "#storage-modifier" },
+    { "include": "#control-keyword" },
+    { "include": "#memory-keyword" },
+    { "include": "#other-keyword" },
+    { "include": "#operator-overload" },
+    { "include": "#storage-type" },
     { "include": "#language-variable" },
     { "include": "#builtin-function" },
     { "include": "#destructor" },
+    { "include": "#constant-other" },
+    { "include": "#type-name" },
     { "include": "#function-call" },
     { "include": "#operator" },
     { "include": "#punctuation" }
@@ -44,6 +51,8 @@
       "name": "string.quoted.double.glang",
       "begin": "\"",
       "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.glang" } },
+      "endCaptures":   { "0": { "name": "punctuation.definition.string.end.glang" } },
       "patterns": [
         {
           "name": "constant.character.escape.glang",
@@ -95,42 +104,18 @@
 
     "constant-language": {
       "patterns": [
-        {
-          "name": "constant.language.boolean.true.glang",
-          "match": "\\btrue\\b"
-        },
-        {
-          "name": "constant.language.boolean.false.glang",
-          "match": "\\bfalse\\b"
-        },
-        {
-          "name": "constant.language.null.glang",
-          "match": "\\bnull\\b"
-        }
+        { "name": "constant.language.boolean.true.glang",  "match": "\\btrue\\b" },
+        { "name": "constant.language.boolean.false.glang", "match": "\\bfalse\\b" },
+        { "name": "constant.language.null.glang",          "match": "\\bnull\\b" }
       ]
     },
 
-    "storage-modifier": {
-      "name": "storage.modifier.glang",
-      "match": "\\b(const|static|private|protected|public)\\b"
-    },
-
-    "control-keyword": {
-      "name": "keyword.control.glang",
-      "match": "\\b(if|else|while|for|break|continue|return|new|delete)\\b"
-    },
-
-    "storage-type": {
-      "name": "storage.type.glang",
-      "match": "\\b(int|float|bool|char|string|void|fn)\\b"
-    },
-
     "class-decl": {
-      "comment": "class ClassName — names the declaration keyword and the class identifier",
+      "comment": "class ClassName",
       "match": "\\b(class)\\s+([A-Za-z_][A-Za-z0-9_]*)",
       "captures": {
         "1": { "name": "keyword.other.class.glang" },
-        "2": { "name": "entity.name.class.glang" }
+        "2": { "name": "entity.name.type.class.glang" }
       }
     },
 
@@ -143,6 +128,15 @@
       }
     },
 
+    "union-decl": {
+      "comment": "union UnionName (algebraic data type)",
+      "match": "\\b(union)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.other.union.glang" },
+        "2": { "name": "entity.name.type.union.glang" }
+      }
+    },
+
     "interface-decl": {
       "comment": "interface InterfaceName",
       "match": "\\b(interface)\\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -152,26 +146,74 @@
       }
     },
 
+    "namespace-decl": {
+      "comment": "namespace name { ... }  (name may be qualified a::b)",
+      "match": "\\b(namespace)\\s+([A-Za-z_][A-Za-z0-9_:]*)",
+      "captures": {
+        "1": { "name": "keyword.other.namespace.glang" },
+        "2": { "name": "entity.name.namespace.glang" }
+      }
+    },
+
+    "modifier-decl": {
+      "comment": "modifier [<T>] for TypeName { ... } — extension methods",
+      "match": "\\b(modifier)\\b",
+      "name": "keyword.other.modifier.glang"
+    },
+
     "import-stmt": {
       "comment": "import \"path\";",
       "match": "\\b(import)\\b",
-      "name": "keyword.other.import.glang"
+      "name": "keyword.control.import.glang"
     },
 
-    "inherit-keyword": {
+    "storage-modifier": {
+      "name": "storage.modifier.glang",
+      "match": "\\b(const|static|public|private|protected)\\b"
+    },
+
+    "control-keyword": {
+      "comment": "Control flow, exceptions, and pattern matching",
+      "name": "keyword.control.glang",
+      "match": "\\b(if|else|while|for|do|foreach|in|break|continue|return|try|catch|throw|match)\\b"
+    },
+
+    "memory-keyword": {
+      "comment": "Allocation / deallocation operators",
+      "name": "keyword.operator.memory.glang",
+      "match": "\\b(new|delete|alloc|free)\\b"
+    },
+
+    "other-keyword": {
+      "comment": "Inheritance, qualification, and module keywords",
       "name": "keyword.other.glang",
-      "match": "\\b(extends|implements|super)\\b"
+      "match": "\\b(extends|implements|super|using)\\b"
+    },
+
+    "operator-overload": {
+      "comment": "Operator-overload method name: operator+, operator==, operator[]",
+      "match": "\\b(operator)\\s*(\\+\\+|--|<<|>>|==|!=|<=|>=|\\[\\]|[-+*/%<>=!&|^~])",
+      "captures": {
+        "1": { "name": "keyword.other.operator-overload.glang" },
+        "2": { "name": "entity.name.function.operator.glang" }
+      }
+    },
+
+    "storage-type": {
+      "comment": "Primitive types + var (inferred) + fn (function type)",
+      "name": "storage.type.glang",
+      "match": "\\b(int|float|bool|char|byte|string|void|var|fn)\\b"
     },
 
     "language-variable": {
-      "name": "variable.language.glang",
+      "name": "variable.language.this.glang",
       "match": "\\bthis\\b"
     },
 
     "builtin-function": {
-      "comment": "Built-in callables: print, alloc, free",
+      "comment": "Runtime built-ins (called like functions)",
       "name": "support.function.builtin.glang",
-      "match": "\\b(print|alloc|free)\\b(?=\\s*\\()"
+      "match": "\\b(print|printErr|len|substr|toString|parseInt|parseFloat|intToStr|startsWith|endsWith|contains|indexOf|readFile|writeFile|fileExists|readStdin|getArg|getArgCount|exit|bytesFromString|stringFromBytes)\\b(?=\\s*\\()"
     },
 
     "destructor": {
@@ -183,71 +225,52 @@
       }
     },
 
+    "constant-other": {
+      "comment": "SCREAMING_CASE — enum variants and constant-by-convention names",
+      "name": "constant.other.glang",
+      "match": "\\b[A-Z][A-Z0-9_]+\\b"
+    },
+
+    "type-name": {
+      "comment": "PascalCase identifier — user class/enum/union/interface and generic bases",
+      "name": "entity.name.type.glang",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+
     "function-call": {
-      "comment": "Any identifier immediately before '(' that was not already matched",
+      "comment": "Any identifier immediately before '(' not already matched",
       "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?=\\s*\\()",
       "captures": {
-        "1": { "name": "entity.name.function.glang" }
+        "1": { "name": "entity.name.function.call.glang" }
       }
     },
 
     "operator": {
       "patterns": [
-        {
-          "comment": "Arrow operator ->",
-          "name": "keyword.operator.arrow.glang",
-          "match": "->"
-        },
-        {
-          "comment": "Increment / decrement",
-          "name": "keyword.operator.increment.glang",
-          "match": "\\+\\+|--"
-        },
-        {
-          "comment": "Compound assignment operators",
-          "name": "keyword.operator.assignment.compound.glang",
-          "match": "\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>="
-        },
-        {
-          "comment": "Plain assignment",
-          "name": "keyword.operator.assignment.glang",
-          "match": "(?<![=!<>])=(?!=)"
-        },
-        {
-          "comment": "Comparison operators",
-          "name": "keyword.operator.comparison.glang",
-          "match": "==|!=|<=|>=|<|>"
-        },
-        {
-          "comment": "Logical operators",
-          "name": "keyword.operator.logical.glang",
-          "match": "&&|\\|\\||!"
-        },
-        {
-          "comment": "Bitwise shift operators",
-          "name": "keyword.operator.bitwise.shift.glang",
-          "match": "<<|>>"
-        },
-        {
-          "comment": "Bitwise operators",
-          "name": "keyword.operator.bitwise.glang",
-          "match": "&|\\||\\^|~"
-        },
-        {
-          "comment": "Arithmetic operators",
-          "name": "keyword.operator.arithmetic.glang",
-          "match": "\\+|-|\\*|/|%"
-        }
+        { "comment": "Arrow (pointer access / fn return)", "name": "keyword.operator.arrow.glang", "match": "->" },
+        { "comment": "Null-coalescing", "name": "keyword.operator.null-coalescing.glang", "match": "\\?\\?" },
+        { "comment": "Namespace / scope resolution", "name": "keyword.operator.namespace.glang", "match": "::" },
+        { "comment": "Increment / decrement", "name": "keyword.operator.increment.glang", "match": "\\+\\+|--" },
+        { "comment": "Compound assignment", "name": "keyword.operator.assignment.compound.glang", "match": "\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<=|>>=" },
+        { "comment": "Plain assignment", "name": "keyword.operator.assignment.glang", "match": "(?<![=!<>])=(?!=)" },
+        { "comment": "Comparison", "name": "keyword.operator.comparison.glang", "match": "==|!=|<=|>=|<|>" },
+        { "comment": "Logical", "name": "keyword.operator.logical.glang", "match": "&&|\\|\\||!" },
+        { "comment": "Bitwise shift", "name": "keyword.operator.bitwise.shift.glang", "match": "<<|>>" },
+        { "comment": "Bitwise", "name": "keyword.operator.bitwise.glang", "match": "&|\\||\\^|~" },
+        { "comment": "Arithmetic", "name": "keyword.operator.arithmetic.glang", "match": "\\+|-|\\*|/|%" },
+        { "comment": "Nullable type suffix", "name": "keyword.operator.nullable.glang", "match": "\\?" }
       ]
     },
 
     "punctuation": {
       "patterns": [
         { "name": "punctuation.terminator.statement.glang", "match": ";" },
-        { "name": "punctuation.separator.comma.glang",      "match": "," },
-        { "name": "punctuation.accessor.dot.glang",         "match": "\\." },
-        { "name": "punctuation.definition.block.glang",     "match": "[{}]" },
-        { "name": "punctuation.definition.bracket.glang",   "match": "[\\[\\]]" }
+        { "name": "punctuation.separator.comma.glang",       "match": "," },
+        { "name": "punctuation.separator.colon.glang",       "match": ":" },
+        { "name": "punctuation.accessor.dot.glang",          "match": "\\." },
+        { "name": "punctuation.definition.block.glang",      "match": "[{}]" },
+        { "name": "punctuation.definition.bracket.glang",    "match": "[\\[\\]]" },
+        { "name": "punctuation.definition.parameters.glang", "match": "[()]" }
       ]
     }
 

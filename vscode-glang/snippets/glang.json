@@ -144,5 +144,106 @@
     "prefix": "print",
     "body": "print(${1:value});",
     "description": "Print a value"
+  },
+
+  "Union declaration": {
+    "prefix": "union",
+    "body": [
+      "union ${1:Name} {",
+      "\t${2:VariantA}(${3:int x});",
+      "\t${4:VariantB};$0",
+      "}"
+    ],
+    "description": "Union / algebraic data type"
+  },
+
+  "Match statement": {
+    "prefix": "match",
+    "body": [
+      "match (${1:value}) {",
+      "\t${2:Type}.${3:Variant}(${4:x}) => {",
+      "\t\t$0",
+      "\t}",
+      "\t_ => {",
+      "\t}",
+      "}"
+    ],
+    "description": "Pattern match over a union value"
+  },
+
+  "Foreach loop": {
+    "prefix": "foreach",
+    "body": [
+      "foreach (${1:int} ${2:item} in ${3:collection}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate a string / array / List"
+  },
+
+  "Do-while loop": {
+    "prefix": "do",
+    "body": [
+      "do {",
+      "\t$0",
+      "} while (${1:condition});"
+    ],
+    "description": "Do-while loop"
+  },
+
+  "Try / catch": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t$0",
+      "} catch (${1:Exception}* ${2:e}) {",
+      "\tprintErr(${2:e}->message);",
+      "}"
+    ],
+    "description": "Exception handling"
+  },
+
+  "Throw statement": {
+    "prefix": "throw",
+    "body": "throw new ${1:Exception}(${2:\"message\"});",
+    "description": "Throw an exception"
+  },
+
+  "Namespace block": {
+    "prefix": "namespace",
+    "body": [
+      "namespace ${1:name} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Namespace block"
+  },
+
+  "Object modifier": {
+    "prefix": "modifier",
+    "body": [
+      "modifier for ${1:Type} {",
+      "\t${2:void} ${3:method}(${4}) {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Object modifier (extension methods)"
+  },
+
+  "Using declaration": {
+    "prefix": "using",
+    "body": "using ${1:namespace ${2:name}};",
+    "description": "using namespace N;  or  using N::member;"
+  },
+
+  "Using resource block": {
+    "prefix": "usingr",
+    "body": [
+      "using (${1:Type}* ${2:res} = ${3:expr}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Scoped resource with deterministic disposal"
   }
 }
