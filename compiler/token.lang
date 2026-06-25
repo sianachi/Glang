@@ -1,0 +1,322 @@
+// compiler/token.lang — token kinds and the Token record for the self-hosted
+// Glang lexer.  This is a Glang port of lexer/token_types.py; the TokenType
+// member names mirror the Python TokenType enum exactly so that token streams
+// produced by either implementation compare name-for-name.
+
+import "std/map.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TokenType — every lexical token kind (mirrors lexer/token_types.py)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TokenType {
+    // --- Literals ---
+    INT_LIT,
+    FLOAT_LIT,
+    CHAR_LIT,
+    STRING_LIT,
+
+    // --- Identifier ---
+    IDENT,
+
+    // --- Keywords ---
+    KW_INT,
+    KW_FLOAT,
+    KW_BOOL,
+    KW_CHAR,
+    KW_BYTE,
+    KW_STRING,
+    KW_VOID,
+    KW_VAR,
+    KW_TRUE,
+    KW_FALSE,
+    KW_NULL,
+    KW_CLASS,
+    KW_INTERFACE,
+    KW_EXTENDS,
+    KW_IMPLEMENTS,
+    KW_THIS,
+    KW_SUPER,
+    KW_NEW,
+    KW_DELETE,
+    KW_STATIC,
+    KW_ALLOC,
+    KW_FREE,
+    KW_IF,
+    KW_ELSE,
+    KW_WHILE,
+    KW_FOR,
+    KW_DO,
+    KW_FOREACH,
+    KW_IN,
+    KW_BREAK,
+    KW_CONTINUE,
+    KW_RETURN,
+    KW_IMPORT,
+    KW_FN,
+    KW_ENUM,
+    KW_NAMESPACE,
+    KW_USING,
+    KW_CONST,
+    KW_PRIVATE,
+    KW_PROTECTED,
+    KW_PUBLIC,
+    KW_MODIFIER,
+    KW_TRY,
+    KW_CATCH,
+    KW_THROW,
+
+    // --- Arithmetic operators ---
+    PLUS,
+    MINUS,
+    STAR,
+    SLASH,
+    PERCENT,
+
+    // --- Bitwise operators ---
+    AMP,
+    PIPE,
+    CARET,
+    TILDE,
+    LSHIFT,
+    RSHIFT,
+
+    // --- Logical operators ---
+    AND,
+    OR,
+    BANG,
+
+    // --- Comparison operators ---
+    EQ,
+    NEQ,
+    LT,
+    LTE,
+    GT,
+    GTE,
+
+    // --- Assignment operators ---
+    ASSIGN,
+    PLUS_ASSIGN,
+    MINUS_ASSIGN,
+    STAR_ASSIGN,
+    SLASH_ASSIGN,
+    PERCENT_ASSIGN,
+    AMP_ASSIGN,
+    PIPE_ASSIGN,
+    CARET_ASSIGN,
+    LSHIFT_ASSIGN,
+    RSHIFT_ASSIGN,
+
+    // --- Increment / Decrement ---
+    PLUS_PLUS,
+    MINUS_MINUS,
+
+    // --- Nullable / null-coalescing ---
+    QUESTION,
+    QUESTION_QUESTION,
+
+    // --- Punctuation ---
+    LBRACE,
+    RBRACE,
+    LPAREN,
+    RPAREN,
+    LBRACKET,
+    RBRACKET,
+    SEMICOLON,
+    COMMA,
+    DOT,
+    ARROW,
+    COLON,
+    COLONCOLON,
+
+    // --- Special ---
+    EOF
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Token — (type, value, source position)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class Token {
+    TokenType type;
+    string value;
+    int line;
+    int col;
+
+    Token(TokenType t, string v, int ln, int c) {
+        this.type  = t;
+        this.value = v;
+        this.line  = ln;
+        this.col   = c;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// keywords — the reserved-word table (mirrors KEYWORDS in token_types.py)
+// ═══════════════════════════════════════════════════════════════════════════
+
+Map<string, TokenType> keywords() {
+    Map<string, TokenType> kw = Map<string, TokenType>();
+    kw.set("int",        TokenType.KW_INT);
+    kw.set("float",      TokenType.KW_FLOAT);
+    kw.set("bool",       TokenType.KW_BOOL);
+    kw.set("char",       TokenType.KW_CHAR);
+    kw.set("byte",       TokenType.KW_BYTE);
+    kw.set("string",     TokenType.KW_STRING);
+    kw.set("void",       TokenType.KW_VOID);
+    kw.set("var",        TokenType.KW_VAR);
+    kw.set("true",       TokenType.KW_TRUE);
+    kw.set("false",      TokenType.KW_FALSE);
+    kw.set("null",       TokenType.KW_NULL);
+    kw.set("class",      TokenType.KW_CLASS);
+    kw.set("interface",  TokenType.KW_INTERFACE);
+    kw.set("extends",    TokenType.KW_EXTENDS);
+    kw.set("implements", TokenType.KW_IMPLEMENTS);
+    kw.set("this",       TokenType.KW_THIS);
+    kw.set("super",      TokenType.KW_SUPER);
+    kw.set("new",        TokenType.KW_NEW);
+    kw.set("delete",     TokenType.KW_DELETE);
+    kw.set("static",     TokenType.KW_STATIC);
+    kw.set("alloc",      TokenType.KW_ALLOC);
+    kw.set("free",       TokenType.KW_FREE);
+    kw.set("if",         TokenType.KW_IF);
+    kw.set("else",       TokenType.KW_ELSE);
+    kw.set("while",      TokenType.KW_WHILE);
+    kw.set("for",        TokenType.KW_FOR);
+    kw.set("do",         TokenType.KW_DO);
+    kw.set("foreach",    TokenType.KW_FOREACH);
+    kw.set("in",         TokenType.KW_IN);
+    kw.set("break",      TokenType.KW_BREAK);
+    kw.set("continue",   TokenType.KW_CONTINUE);
+    kw.set("return",     TokenType.KW_RETURN);
+    kw.set("import",     TokenType.KW_IMPORT);
+    kw.set("fn",         TokenType.KW_FN);
+    kw.set("enum",       TokenType.KW_ENUM);
+    kw.set("namespace",  TokenType.KW_NAMESPACE);
+    kw.set("using",      TokenType.KW_USING);
+    kw.set("const",      TokenType.KW_CONST);
+    kw.set("private",    TokenType.KW_PRIVATE);
+    kw.set("protected",  TokenType.KW_PROTECTED);
+    kw.set("public",     TokenType.KW_PUBLIC);
+    kw.set("modifier",   TokenType.KW_MODIFIER);
+    kw.set("try",        TokenType.KW_TRY);
+    kw.set("catch",      TokenType.KW_CATCH);
+    kw.set("throw",      TokenType.KW_THROW);
+    return kw;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// tokenName — the member name of a TokenType (matches Python TokenType.name),
+// used for serialising token streams and for diagnostics.
+// ═══════════════════════════════════════════════════════════════════════════
+
+string tokenName(TokenType t) {
+    if (t == TokenType.INT_LIT)    { return "INT_LIT"; }
+    if (t == TokenType.FLOAT_LIT)  { return "FLOAT_LIT"; }
+    if (t == TokenType.CHAR_LIT)   { return "CHAR_LIT"; }
+    if (t == TokenType.STRING_LIT) { return "STRING_LIT"; }
+    if (t == TokenType.IDENT)      { return "IDENT"; }
+
+    if (t == TokenType.KW_INT)        { return "KW_INT"; }
+    if (t == TokenType.KW_FLOAT)      { return "KW_FLOAT"; }
+    if (t == TokenType.KW_BOOL)       { return "KW_BOOL"; }
+    if (t == TokenType.KW_CHAR)       { return "KW_CHAR"; }
+    if (t == TokenType.KW_BYTE)       { return "KW_BYTE"; }
+    if (t == TokenType.KW_STRING)     { return "KW_STRING"; }
+    if (t == TokenType.KW_VOID)       { return "KW_VOID"; }
+    if (t == TokenType.KW_VAR)        { return "KW_VAR"; }
+    if (t == TokenType.KW_TRUE)       { return "KW_TRUE"; }
+    if (t == TokenType.KW_FALSE)      { return "KW_FALSE"; }
+    if (t == TokenType.KW_NULL)       { return "KW_NULL"; }
+    if (t == TokenType.KW_CLASS)      { return "KW_CLASS"; }
+    if (t == TokenType.KW_INTERFACE)  { return "KW_INTERFACE"; }
+    if (t == TokenType.KW_EXTENDS)    { return "KW_EXTENDS"; }
+    if (t == TokenType.KW_IMPLEMENTS) { return "KW_IMPLEMENTS"; }
+    if (t == TokenType.KW_THIS)       { return "KW_THIS"; }
+    if (t == TokenType.KW_SUPER)      { return "KW_SUPER"; }
+    if (t == TokenType.KW_NEW)        { return "KW_NEW"; }
+    if (t == TokenType.KW_DELETE)     { return "KW_DELETE"; }
+    if (t == TokenType.KW_STATIC)     { return "KW_STATIC"; }
+    if (t == TokenType.KW_ALLOC)      { return "KW_ALLOC"; }
+    if (t == TokenType.KW_FREE)       { return "KW_FREE"; }
+    if (t == TokenType.KW_IF)         { return "KW_IF"; }
+    if (t == TokenType.KW_ELSE)       { return "KW_ELSE"; }
+    if (t == TokenType.KW_WHILE)      { return "KW_WHILE"; }
+    if (t == TokenType.KW_FOR)        { return "KW_FOR"; }
+    if (t == TokenType.KW_DO)         { return "KW_DO"; }
+    if (t == TokenType.KW_FOREACH)    { return "KW_FOREACH"; }
+    if (t == TokenType.KW_IN)         { return "KW_IN"; }
+    if (t == TokenType.KW_BREAK)      { return "KW_BREAK"; }
+    if (t == TokenType.KW_CONTINUE)   { return "KW_CONTINUE"; }
+    if (t == TokenType.KW_RETURN)     { return "KW_RETURN"; }
+    if (t == TokenType.KW_IMPORT)     { return "KW_IMPORT"; }
+    if (t == TokenType.KW_FN)         { return "KW_FN"; }
+    if (t == TokenType.KW_ENUM)       { return "KW_ENUM"; }
+    if (t == TokenType.KW_NAMESPACE)  { return "KW_NAMESPACE"; }
+    if (t == TokenType.KW_USING)      { return "KW_USING"; }
+    if (t == TokenType.KW_CONST)      { return "KW_CONST"; }
+    if (t == TokenType.KW_PRIVATE)    { return "KW_PRIVATE"; }
+    if (t == TokenType.KW_PROTECTED)  { return "KW_PROTECTED"; }
+    if (t == TokenType.KW_PUBLIC)     { return "KW_PUBLIC"; }
+    if (t == TokenType.KW_MODIFIER)   { return "KW_MODIFIER"; }
+    if (t == TokenType.KW_TRY)        { return "KW_TRY"; }
+    if (t == TokenType.KW_CATCH)      { return "KW_CATCH"; }
+    if (t == TokenType.KW_THROW)      { return "KW_THROW"; }
+
+    if (t == TokenType.PLUS)    { return "PLUS"; }
+    if (t == TokenType.MINUS)   { return "MINUS"; }
+    if (t == TokenType.STAR)    { return "STAR"; }
+    if (t == TokenType.SLASH)   { return "SLASH"; }
+    if (t == TokenType.PERCENT) { return "PERCENT"; }
+
+    if (t == TokenType.AMP)    { return "AMP"; }
+    if (t == TokenType.PIPE)   { return "PIPE"; }
+    if (t == TokenType.CARET)  { return "CARET"; }
+    if (t == TokenType.TILDE)  { return "TILDE"; }
+    if (t == TokenType.LSHIFT) { return "LSHIFT"; }
+    if (t == TokenType.RSHIFT) { return "RSHIFT"; }
+
+    if (t == TokenType.AND)  { return "AND"; }
+    if (t == TokenType.OR)   { return "OR"; }
+    if (t == TokenType.BANG) { return "BANG"; }
+
+    if (t == TokenType.EQ)  { return "EQ"; }
+    if (t == TokenType.NEQ) { return "NEQ"; }
+    if (t == TokenType.LT)  { return "LT"; }
+    if (t == TokenType.LTE) { return "LTE"; }
+    if (t == TokenType.GT)  { return "GT"; }
+    if (t == TokenType.GTE) { return "GTE"; }
+
+    if (t == TokenType.ASSIGN)         { return "ASSIGN"; }
+    if (t == TokenType.PLUS_ASSIGN)    { return "PLUS_ASSIGN"; }
+    if (t == TokenType.MINUS_ASSIGN)   { return "MINUS_ASSIGN"; }
+    if (t == TokenType.STAR_ASSIGN)    { return "STAR_ASSIGN"; }
+    if (t == TokenType.SLASH_ASSIGN)   { return "SLASH_ASSIGN"; }
+    if (t == TokenType.PERCENT_ASSIGN) { return "PERCENT_ASSIGN"; }
+    if (t == TokenType.AMP_ASSIGN)     { return "AMP_ASSIGN"; }
+    if (t == TokenType.PIPE_ASSIGN)    { return "PIPE_ASSIGN"; }
+    if (t == TokenType.CARET_ASSIGN)   { return "CARET_ASSIGN"; }
+    if (t == TokenType.LSHIFT_ASSIGN)  { return "LSHIFT_ASSIGN"; }
+    if (t == TokenType.RSHIFT_ASSIGN)  { return "RSHIFT_ASSIGN"; }
+
+    if (t == TokenType.PLUS_PLUS)   { return "PLUS_PLUS"; }
+    if (t == TokenType.MINUS_MINUS) { return "MINUS_MINUS"; }
+
+    if (t == TokenType.QUESTION)          { return "QUESTION"; }
+    if (t == TokenType.QUESTION_QUESTION) { return "QUESTION_QUESTION"; }
+
+    if (t == TokenType.LBRACE)     { return "LBRACE"; }
+    if (t == TokenType.RBRACE)     { return "RBRACE"; }
+    if (t == TokenType.LPAREN)     { return "LPAREN"; }
+    if (t == TokenType.RPAREN)     { return "RPAREN"; }
+    if (t == TokenType.LBRACKET)   { return "LBRACKET"; }
+    if (t == TokenType.RBRACKET)   { return "RBRACKET"; }
+    if (t == TokenType.SEMICOLON)  { return "SEMICOLON"; }
+    if (t == TokenType.COMMA)      { return "COMMA"; }
+    if (t == TokenType.DOT)        { return "DOT"; }
+    if (t == TokenType.ARROW)      { return "ARROW"; }
+    if (t == TokenType.COLON)      { return "COLON"; }
+    if (t == TokenType.COLONCOLON) { return "COLONCOLON"; }
+
+    return "EOF";
+}

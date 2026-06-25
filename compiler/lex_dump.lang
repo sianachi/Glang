@@ -1,0 +1,70 @@
+// compiler/lex_dump.lang — test driver for the self-hosted lexer.
+//
+// Reads Glang source from stdin, tokenises it with GLexer, and prints one line
+// per token (the trailing EOF is omitted):
+//
+//     <TYPE_NAME>\t<encoded-value>\t<line>:<col>
+//
+// On a LexError it prints a single line `LEXERROR\t<message>\t<line>:<col>` and
+// exits non-zero.  Values are percent-encoded (%, and any C0 control byte incl.
+// the \t field separator) so each token occupies exactly one line and survives
+// being read back by the Python differential-test harness.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "token.lang";
+import "glexer.lang";
+
+string hex2(int code) {
+    string digits = "0123456789ABCDEF";
+    int hi = code / 16;
+    int lo = code % 16;
+    return "%" + toString(digits[hi]) + toString(digits[lo]);
+}
+
+string encodeVal(string s) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        int code = (int) c;
+        if (c == '%') {
+            sb.append("%25");
+        } else if (code < 32) {
+            sb.append(hex2(code));
+        } else {
+            sb.appendChar(c);
+        }
+    }
+    return sb.build();
+}
+
+string formatToken(string name, string value, int line, int col) {
+    StringBuilder sb = StringBuilder();
+    sb.append(name);
+    sb.appendChar('\t');
+    sb.append(encodeVal(value));
+    sb.appendChar('\t');
+    sb.appendInt(line);
+    sb.appendChar(':');
+    sb.appendInt(col);
+    return sb.build();
+}
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        int n = tokens.length();
+        for (int i = 0; i < n; ++i) {
+            Token* t = tokens.get(i);
+            print(formatToken(tokenName(t->type), t->value, t->line, t->col));
+        }
+    } catch (LexError* e) {
+        print(formatToken("LEXERROR", e->message, e->line, e->col));
+        return 1;
+    }
+    return 0;
+}

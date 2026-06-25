@@ -1,0 +1,473 @@
+// compiler/glexer.lang — the self-hosted Glang lexer (a port of lexer/lexer.py).
+//
+// Named GLexer to avoid clashing with the toy Lexer in examples/mini_lexer.lang.
+// Produces the same token stream as the Python lexer: identical TokenType names
+// (see token.lang) and identical value strings, including decimal-normalised hex
+// and binary literals and decoded string/char escapes.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/char.lang";
+import "token.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LexError — raised on malformed input (mirrors errors.errors.LexError)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class LexError extends Exception {
+    int line;
+    int col;
+    LexError(string msg, int ln, int c) : super(msg) {
+        this.line = ln;
+        this.col  = c;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Hex helpers — Glang's ordering operators take int/float only, so char ranges
+// are tested on the integer code point.
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool isHexDigit(char c) {
+    int code = (int) c;
+    if (chars::isDigit(c))          { return true; }   // 0-9
+    if (code >= 97 && code <= 102)  { return true; }   // a-f
+    if (code >= 65 && code <= 70)   { return true; }   // A-F
+    return false;
+}
+
+int hexDigitValue(char c) {
+    int code = (int) c;
+    if (code >= 48 && code <= 57)   { return code - 48; }       // 0-9
+    if (code >= 97 && code <= 102)  { return code - 97 + 10; }  // a-f
+    return code - 65 + 10;                                      // A-F
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLexer
+// ═══════════════════════════════════════════════════════════════════════════
+
+class GLexer {
+    string src;
+    int pos;
+    int srcLen;
+    int line;
+    int col;
+
+    GLexer(string source) {
+        this.src    = source;
+        this.pos    = 0;
+        this.srcLen = len(source);
+        this.line   = 1;
+        this.col    = 1;
+    }
+
+    // ------------------------------------------------------------------
+    // Low-level character utilities
+    // ------------------------------------------------------------------
+
+    bool atEnd() {
+        return this.pos >= this.srcLen;
+    }
+
+    // Return the char at pos+offset, or '\0' past end of input (the sentinel
+    // that lets character-class checks naturally fail at EOF).
+    char peek(int offset) {
+        int p = this.pos + offset;
+        if (p < this.srcLen) {
+            return this.src[p];
+        }
+        return (char) 0;
+    }
+
+    // Consume and return the current char, tracking line/col.
+    char advance() {
+        char c = this.src[this.pos];
+        this.pos = this.pos + 1;
+        if (c == '\n') {
+            this.line = this.line + 1;
+            this.col  = 1;
+        } else {
+            this.col = this.col + 1;
+        }
+        return c;
+    }
+
+    // Consume the next char iff it equals `expected`.
+    bool match(char expected) {
+        if (this.peek(0) == expected) {
+            this.advance();
+            return true;
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------
+    // Whitespace and comments
+    // ------------------------------------------------------------------
+
+    void skipTrivia() {
+        while (!(this.atEnd())) {
+            char c = this.peek(0);
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                this.advance();
+            } else if (c == '/' && this.peek(1) == '/') {
+                while (!(this.atEnd()) && this.peek(0) != '\n') {
+                    this.advance();
+                }
+            } else if (c == '/' && this.peek(1) == '*') {
+                int startLine = this.line;
+                int startCol  = this.col;
+                this.advance();   // /
+                this.advance();   // *
+                bool closed = false;
+                while (!(this.atEnd())) {
+                    if (this.peek(0) == '*' && this.peek(1) == '/') {
+                        this.advance();
+                        this.advance();
+                        closed = true;
+                        break;
+                    }
+                    this.advance();
+                }
+                if (!closed) {
+                    throw new LexError("unterminated block comment", startLine, startCol);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Identifiers and keywords
+    // ------------------------------------------------------------------
+
+    Token* lexIdent(int line, int col, Map<string, TokenType> kw) {
+        int start = this.pos;
+        while (true) {
+            char c = this.peek(0);
+            if (chars::isAlnum(c) || c == '_') {
+                this.advance();
+            } else {
+                break;
+            }
+        }
+        string word = substr(this.src, start, this.pos);
+        TokenType tt = kw.getOr(word, TokenType.IDENT);
+        return new Token(tt, word, line, col);
+    }
+
+    // ------------------------------------------------------------------
+    // Number literals
+    // ------------------------------------------------------------------
+
+    Token* lexNumber(int line, int col) {
+        // Hex: 0x… → decimal value string
+        if (this.peek(0) == '0' && (this.peek(1) == 'x' || this.peek(1) == 'X')) {
+            this.advance();
+            this.advance();
+            int val = 0;
+            bool any = false;
+            while (true) {
+                char c = this.peek(0);
+                if (isHexDigit(c) || c == '_') {
+                    this.advance();
+                    if (c != '_') {
+                        val = val * 16 + hexDigitValue(c);
+                        any = true;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if (!any) {
+                throw new LexError("empty hex literal", line, col);
+            }
+            return new Token(TokenType.INT_LIT, strings::intToStr(val), line, col);
+        }
+
+        // Binary: 0b… → decimal value string
+        if (this.peek(0) == '0' && (this.peek(1) == 'b' || this.peek(1) == 'B')) {
+            this.advance();
+            this.advance();
+            int val = 0;
+            bool any = false;
+            while (true) {
+                char c = this.peek(0);
+                if (c == '0' || c == '1' || c == '_') {
+                    this.advance();
+                    if (c != '_') {
+                        val = val * 2 + ((int) c - 48);
+                        any = true;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if (!any) {
+                throw new LexError("empty binary literal", line, col);
+            }
+            return new Token(TokenType.INT_LIT, strings::intToStr(val), line, col);
+        }
+
+        // Decimal integer or float — accumulate the cleaned literal text.
+        bool isFloat = false;
+        StringBuilder parts = StringBuilder();
+
+        while (true) {
+            char c = this.peek(0);
+            if (chars::isDigit(c) || c == '_') {
+                this.advance();
+                if (c != '_') { parts.appendChar(c); }
+            } else {
+                break;
+            }
+        }
+
+        if (this.peek(0) == '.' && chars::isDigit(this.peek(1))) {
+            isFloat = true;
+            parts.appendChar(this.advance());   // .
+            while (true) {
+                char c = this.peek(0);
+                if (chars::isDigit(c) || c == '_') {
+                    this.advance();
+                    if (c != '_') { parts.appendChar(c); }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if (this.peek(0) == 'e' || this.peek(0) == 'E') {
+            isFloat = true;
+            parts.appendChar(this.advance());   // e/E
+            if (this.peek(0) == '+' || this.peek(0) == '-') {
+                parts.appendChar(this.advance());
+            }
+            if (!(chars::isDigit(this.peek(0)))) {
+                throw new LexError("expected digits after exponent", line, col);
+            }
+            while (chars::isDigit(this.peek(0))) {
+                parts.appendChar(this.advance());
+            }
+        }
+
+        string value = parts.build();
+        if (isFloat) {
+            return new Token(TokenType.FLOAT_LIT, value, line, col);
+        }
+        return new Token(TokenType.INT_LIT, value, line, col);
+    }
+
+    // ------------------------------------------------------------------
+    // Escape sequences (shared by string and char)
+    // ------------------------------------------------------------------
+
+    char readEscape() {
+        if (this.atEnd()) {
+            throw new LexError("unterminated escape sequence", this.line, this.col);
+        }
+        char c = this.advance();
+        if (c == 'n')  { return '\n'; }
+        if (c == 't')  { return '\t'; }
+        if (c == 'r')  { return '\r'; }
+        if (c == '\\') { return '\\'; }
+        if (c == '"')  { return '"'; }
+        if (c == '\'') { return '\''; }
+        if (c == '0')  { return (char) 0; }
+        if (c == 'x') {
+            char h1 = (char) 0;
+            char h2 = (char) 0;
+            if (!(this.atEnd())) { h1 = this.advance(); }
+            if (!(this.atEnd())) { h2 = this.advance(); }
+            if (!(isHexDigit(h1)) || !(isHexDigit(h2))) {
+                throw new LexError("invalid hex escape \\x" + toString(h1) + toString(h2),
+                                   this.line, this.col);
+            }
+            return (char) (hexDigitValue(h1) * 16 + hexDigitValue(h2));
+        }
+        throw new LexError("unknown escape sequence \\" + toString(c), this.line, this.col);
+    }
+
+    // ------------------------------------------------------------------
+    // String literals
+    // ------------------------------------------------------------------
+
+    Token* lexString(int line, int col) {
+        this.advance();   // opening "
+        StringBuilder parts = StringBuilder();
+        while (true) {
+            if (this.atEnd()) {
+                throw new LexError("unterminated string literal", line, col);
+            }
+            char c = this.peek(0);
+            if (c == '"') {
+                this.advance();
+                break;
+            }
+            if (c == '\n') {
+                throw new LexError("newline inside string literal", this.line, this.col);
+            }
+            if (c == '\\') {
+                this.advance();
+                parts.appendChar(this.readEscape());
+            } else {
+                parts.appendChar(this.advance());
+            }
+        }
+        return new Token(TokenType.STRING_LIT, parts.build(), line, col);
+    }
+
+    // ------------------------------------------------------------------
+    // Char literals
+    // ------------------------------------------------------------------
+
+    Token* lexChar(int line, int col) {
+        this.advance();   // opening '
+        if (this.atEnd()) {
+            throw new LexError("unterminated char literal", line, col);
+        }
+        char c = this.peek(0);
+        if (c == '\'') {
+            throw new LexError("empty char literal", line, col);
+        }
+        string value = "";
+        if (c == '\\') {
+            this.advance();
+            value = toString(this.readEscape());
+        } else {
+            value = toString(this.advance());
+        }
+        if (this.peek(0) != '\'') {
+            throw new LexError("char literal must contain exactly one character", line, col);
+        }
+        this.advance();   // closing '
+        return new Token(TokenType.CHAR_LIT, value, line, col);
+    }
+
+    // ------------------------------------------------------------------
+    // Operators and punctuation (maximal munch)
+    // ------------------------------------------------------------------
+
+    Token* lexOp(int line, int col) {
+        char c = this.advance();
+
+        if (c == '+') {
+            if (this.match('+')) { return new Token(TokenType.PLUS_PLUS,   "++", line, col); }
+            if (this.match('=')) { return new Token(TokenType.PLUS_ASSIGN, "+=", line, col); }
+            return new Token(TokenType.PLUS, "+", line, col);
+        }
+        if (c == '-') {
+            if (this.match('-')) { return new Token(TokenType.MINUS_MINUS,  "--", line, col); }
+            if (this.match('=')) { return new Token(TokenType.MINUS_ASSIGN, "-=", line, col); }
+            if (this.match('>')) { return new Token(TokenType.ARROW,        "->", line, col); }
+            return new Token(TokenType.MINUS, "-", line, col);
+        }
+        if (c == '*') {
+            if (this.match('=')) { return new Token(TokenType.STAR_ASSIGN, "*=", line, col); }
+            return new Token(TokenType.STAR, "*", line, col);
+        }
+        if (c == '/') {
+            if (this.match('=')) { return new Token(TokenType.SLASH_ASSIGN, "/=", line, col); }
+            return new Token(TokenType.SLASH, "/", line, col);
+        }
+        if (c == '%') {
+            if (this.match('=')) { return new Token(TokenType.PERCENT_ASSIGN, "%=", line, col); }
+            return new Token(TokenType.PERCENT, "%", line, col);
+        }
+        if (c == '&') {
+            if (this.match('&')) { return new Token(TokenType.AND,       "&&", line, col); }
+            if (this.match('=')) { return new Token(TokenType.AMP_ASSIGN, "&=", line, col); }
+            return new Token(TokenType.AMP, "&", line, col);
+        }
+        if (c == '|') {
+            if (this.match('|')) { return new Token(TokenType.OR,         "||", line, col); }
+            if (this.match('=')) { return new Token(TokenType.PIPE_ASSIGN, "|=", line, col); }
+            return new Token(TokenType.PIPE, "|", line, col);
+        }
+        if (c == '^') {
+            if (this.match('=')) { return new Token(TokenType.CARET_ASSIGN, "^=", line, col); }
+            return new Token(TokenType.CARET, "^", line, col);
+        }
+        if (c == '<') {
+            if (this.peek(0) == '<') {
+                this.advance();
+                if (this.match('=')) { return new Token(TokenType.LSHIFT_ASSIGN, "<<=", line, col); }
+                return new Token(TokenType.LSHIFT, "<<", line, col);
+            }
+            if (this.match('=')) { return new Token(TokenType.LTE, "<=", line, col); }
+            return new Token(TokenType.LT, "<", line, col);
+        }
+        if (c == '>') {
+            if (this.peek(0) == '>') {
+                this.advance();
+                if (this.match('=')) { return new Token(TokenType.RSHIFT_ASSIGN, ">>=", line, col); }
+                return new Token(TokenType.RSHIFT, ">>", line, col);
+            }
+            if (this.match('=')) { return new Token(TokenType.GTE, ">=", line, col); }
+            return new Token(TokenType.GT, ">", line, col);
+        }
+        if (c == '=') {
+            if (this.match('=')) { return new Token(TokenType.EQ, "==", line, col); }
+            return new Token(TokenType.ASSIGN, "=", line, col);
+        }
+        if (c == '!') {
+            if (this.match('=')) { return new Token(TokenType.NEQ, "!=", line, col); }
+            return new Token(TokenType.BANG, "!", line, col);
+        }
+        if (c == '~') { return new Token(TokenType.TILDE,     "~", line, col); }
+        if (c == '{') { return new Token(TokenType.LBRACE,    "{", line, col); }
+        if (c == '}') { return new Token(TokenType.RBRACE,    "}", line, col); }
+        if (c == '(') { return new Token(TokenType.LPAREN,    "(", line, col); }
+        if (c == ')') { return new Token(TokenType.RPAREN,    ")", line, col); }
+        if (c == '[') { return new Token(TokenType.LBRACKET,  "[", line, col); }
+        if (c == ']') { return new Token(TokenType.RBRACKET,  "]", line, col); }
+        if (c == ';') { return new Token(TokenType.SEMICOLON, ";", line, col); }
+        if (c == ',') { return new Token(TokenType.COMMA,     ",", line, col); }
+        if (c == '.') { return new Token(TokenType.DOT,       ".", line, col); }
+        if (c == ':') {
+            if (this.match(':')) { return new Token(TokenType.COLONCOLON, "::", line, col); }
+            return new Token(TokenType.COLON, ":", line, col);
+        }
+        if (c == '?') {
+            if (this.match('?')) { return new Token(TokenType.QUESTION_QUESTION, "??", line, col); }
+            return new Token(TokenType.QUESTION, "?", line, col);
+        }
+
+        throw new LexError("unexpected character " + toString(c), line, col);
+    }
+
+    // ------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------
+
+    List<Token*> tokenize() {
+        List<Token*> tokens = List<Token*>();
+        Map<string, TokenType> kw = keywords();
+        while (true) {
+            this.skipTrivia();
+            if (this.atEnd()) {
+                tokens.add(new Token(TokenType.EOF, "", this.line, this.col));
+                break;
+            }
+            int line = this.line;
+            int col  = this.col;
+            char c   = this.peek(0);
+            if (chars::isAlpha(c) || c == '_') {
+                tokens.add(this.lexIdent(line, col, kw));
+            } else if (chars::isDigit(c)) {
+                tokens.add(this.lexNumber(line, col));
+            } else if (c == '"') {
+                tokens.add(this.lexString(line, col));
+            } else if (c == '\'') {
+                tokens.add(this.lexChar(line, col));
+            } else {
+                tokens.add(this.lexOp(line, col));
+            }
+        }
+        return tokens;
+    }
+}
