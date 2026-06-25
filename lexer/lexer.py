@@ -2,15 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
-try:
-    from .token_types import TokenType, KEYWORDS
-except ImportError:
-    from token_types import TokenType, KEYWORDS  # type: ignore
-
-try:
-    from ..errors.errors import LexError
-except ImportError:
-    from errors.errors import LexError  # type: ignore
+from .token_types import TokenType, KEYWORDS
+from errors.errors import LexError
 
 
 @dataclass

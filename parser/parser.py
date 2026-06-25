@@ -1,24 +1,14 @@
 from __future__ import annotations
 from typing import List
 
-try:
-    from .token_stream import TokenStream
-    from .type_parser import TypeParser
-    from .expr_parser import ExprParser
-    from .stmt_parser import StmtParser
-    from .decl_parser import DeclParser
-    from ..lexer.lexer import Token
-    from ..lexer.token_types import TokenType
-    from .ast_nodes import Program
-except ImportError:
-    from parser.token_stream import TokenStream  # type: ignore
-    from parser.type_parser import TypeParser  # type: ignore
-    from parser.expr_parser import ExprParser  # type: ignore
-    from parser.stmt_parser import StmtParser  # type: ignore
-    from parser.decl_parser import DeclParser  # type: ignore
-    from lexer.lexer import Token  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from parser.ast_nodes import Program  # type: ignore
+from .token_stream import TokenStream
+from .type_parser import TypeParser
+from .expr_parser import ExprParser
+from .stmt_parser import StmtParser
+from .decl_parser import DeclParser
+from lexer.lexer import Token
+from lexer.token_types import TokenType
+from .ast_nodes import Program
 
 
 class Parser:

@@ -1,21 +1,12 @@
 from __future__ import annotations
 
-try:
-    from .token_stream import TokenStream
-    from ..lexer.token_types import TokenType
-    from ..errors.errors import ParseError
-    from .ast_nodes import (
-        TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
-        GenericType, NullableType,
-    )
-except ImportError:
-    from parser.token_stream import TokenStream  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from errors.errors import ParseError  # type: ignore
-    from parser.ast_nodes import (  # type: ignore
-        TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
-        GenericType, NullableType,
-    )
+from .token_stream import TokenStream
+from lexer.token_types import TokenType
+from errors.errors import ParseError
+from .ast_nodes import (
+    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
+    GenericType, NullableType,
+)
 
 _TYPE_KEYWORDS = {
     TokenType.KW_INT,

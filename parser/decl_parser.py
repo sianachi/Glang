@@ -1,32 +1,18 @@
 from __future__ import annotations
 from typing import List, Optional, Tuple
 
-try:
-    from .token_stream import TokenStream
-    from .type_parser import TypeParser
-    from .expr_parser import ExprParser
-    from .stmt_parser import StmtParser
-    from ..lexer.token_types import TokenType
-    from ..errors.errors import ParseError
-    from .ast_nodes import (
-        Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
-        FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
-        UnionDecl, UnionVariant,
-    )
-except ImportError:
-    from parser.token_stream import TokenStream  # type: ignore
-    from parser.type_parser import TypeParser  # type: ignore
-    from parser.expr_parser import ExprParser  # type: ignore
-    from parser.stmt_parser import StmtParser  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from errors.errors import ParseError  # type: ignore
-    from parser.ast_nodes import (  # type: ignore
-        Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
-        FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
-        EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
-        UnionDecl, UnionVariant,
-    )
+from .token_stream import TokenStream
+from .type_parser import TypeParser
+from .expr_parser import ExprParser
+from .stmt_parser import StmtParser
+from lexer.token_types import TokenType
+from errors.errors import ParseError
+from .ast_nodes import (
+    Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
+    FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
+    EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
+    UnionDecl, UnionVariant,
+)
 
 
 _OVERLOADABLE_OPERATOR_TOKENS = {

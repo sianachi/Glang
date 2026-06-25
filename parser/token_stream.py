@@ -1,14 +1,9 @@
 from __future__ import annotations
 from typing import List
 
-try:
-    from ..lexer.lexer import Token
-    from ..lexer.token_types import TokenType
-    from ..errors.errors import ParseError
-except ImportError:
-    from lexer.lexer import Token  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from errors.errors import ParseError  # type: ignore
+from lexer.lexer import Token
+from lexer.token_types import TokenType
+from errors.errors import ParseError
 
 
 class TokenStream:

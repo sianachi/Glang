@@ -1,29 +1,16 @@
 from __future__ import annotations
 
-try:
-    from .token_stream import TokenStream
-    from .type_parser import TypeParser
-    from .expr_parser import ExprParser, _ASSIGN_OPS
-    from ..lexer.token_types import TokenType
-    from ..errors.errors import ParseError
-    from .ast_nodes import (
-        Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
-        ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
-        MatchStmt, MatchArm, VariantPattern, WildcardPattern,
-    )
-except ImportError:
-    from parser.token_stream import TokenStream  # type: ignore
-    from parser.type_parser import TypeParser  # type: ignore
-    from parser.expr_parser import ExprParser, _ASSIGN_OPS  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from errors.errors import ParseError  # type: ignore
-    from parser.ast_nodes import (  # type: ignore
-        Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
-        DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
-        ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
-        MatchStmt, MatchArm, VariantPattern, WildcardPattern,
-    )
+from .token_stream import TokenStream
+from .type_parser import TypeParser
+from .expr_parser import ExprParser, _ASSIGN_OPS
+from lexer.token_types import TokenType
+from errors.errors import ParseError
+from .ast_nodes import (
+    Stmt, Block, VarDecl, AssignStmt, IfStmt, WhileStmt,
+    DoWhileStmt, ForStmt, ForeachStmt, BreakStmt, ContinueStmt,
+    ReturnStmt, NamedType, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
+    MatchStmt, MatchArm, VariantPattern, WildcardPattern,
+)
 
 _TYPE_KWS = {
     TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL,

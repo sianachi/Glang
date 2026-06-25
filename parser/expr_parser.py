@@ -1,34 +1,19 @@
 from __future__ import annotations
 from typing import List, Optional, Tuple
 
-try:
-    from .token_stream import TokenStream
-    from .type_parser import TypeParser, _TYPE_KEYWORDS, is_type_start
-    from ..lexer.token_types import TokenType
-    from ..errors.errors import ParseError
-    from .ast_nodes import (
-        Param,
-        Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
-        UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
-        NewExpr, DeleteExpr, AllocExpr, FreeExpr,
-        BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
-        MethodCallExpr, FieldAccessExpr,
-        ArrowAccessExpr, IndexExpr,
-    )
-except ImportError:
-    from parser.token_stream import TokenStream  # type: ignore
-    from parser.type_parser import TypeParser, _TYPE_KEYWORDS, is_type_start  # type: ignore
-    from lexer.token_types import TokenType  # type: ignore
-    from errors.errors import ParseError  # type: ignore
-    from parser.ast_nodes import (  # type: ignore
-        Param,
-        Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
-        UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
-        NewExpr, DeleteExpr, AllocExpr, FreeExpr,
-        BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
-        MethodCallExpr, FieldAccessExpr,
-        ArrowAccessExpr, IndexExpr,
-    )
+from .token_stream import TokenStream
+from .type_parser import TypeParser, _TYPE_KEYWORDS, is_type_start
+from lexer.token_types import TokenType
+from errors.errors import ParseError
+from .ast_nodes import (
+    Param,
+    Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
+    UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
+    NewExpr, DeleteExpr, AllocExpr, FreeExpr,
+    BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    MethodCallExpr, FieldAccessExpr,
+    ArrowAccessExpr, IndexExpr,
+)
 
 _ASSIGN_OPS = {
     TokenType.ASSIGN,

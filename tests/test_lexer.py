@@ -4,9 +4,17 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from lexer.lexer import Lexer, Token
+from lexer.lexer import Lexer as PyLexer, Token
 from lexer.token_types import TokenType
 from errors.errors import LexError
+
+# Differential testing: with GLANG_LEXER_BACKEND=glang the entire suite runs
+# against the self-hosted Glang lexer (compiler/glexer.lang) instead of the
+# Python reference implementation.  Default is the Python lexer.
+if os.environ.get("GLANG_LEXER_BACKEND", "").startswith("glang"):
+    from tests.glang_lexer_backend import GlangLexer as Lexer
+else:
+    Lexer = PyLexer
 
 
 # ---------------------------------------------------------------------------
