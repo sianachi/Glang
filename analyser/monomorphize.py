@@ -56,6 +56,7 @@ class Monomorphizer:
         self._class_templates: Dict[str, ClassDecl] = {}
         self._func_templates: Dict[str, FunctionDecl] = {}
         self._class_names: set[str] = set()
+        self._union_names: set[str] = set()
         self._interface_names: set[str] = set()
         self._enum_names: set[str] = set()
         self._class_supers: Dict[str, Optional[str]] = {}
@@ -116,7 +117,10 @@ class Monomorphizer:
                 self._enum_names.add(d.name)
             elif isinstance(d, UnionDecl):
                 # Track union names so type substitution recognises them.
+                # Unions are value types (tagged structs), unlike classes which
+                # are references, so they are tracked separately too.
                 self._class_names.add(d.name)
+                self._union_names.add(d.name)
             elif isinstance(d, FunctionDecl) and not d.type_params:
                 self._function_returns[d.name] = d.return_type
 
@@ -140,6 +144,7 @@ class Monomorphizer:
                 f"argument(s), got {len(args)}",
                 line, col,
             )
+        args = self._canonicalize_args(args)
         self._check_type_arg_bounds(template, args, line, col)
         name = mangle(base, args)
         if name not in self._instances:
@@ -205,6 +210,52 @@ class Monomorphizer:
         self._function_returns[mangled] = self._t_type(
             copy.deepcopy(template.return_type), mapping
         )
+
+    # ------------------------------------------------------------------
+    # Type-argument canonicalization
+    # ------------------------------------------------------------------
+
+    def _is_class_ref(self, name: str) -> bool:
+        """A class (reference) type, represented as a pointer in C.  Excludes
+        unions (value structs), enums, and primitives."""
+        return name in self._class_names and name not in self._union_names
+
+    def _canonicalize_arg(self, t: TypeNode) -> TypeNode:
+        """Normalise a bare class type argument to its pointer form.
+
+        A class instance is a reference (``ClassName*`` in C), so a class value
+        ``C`` and a pointer to it ``C*`` denote the same handle.  Canonicalising
+        bare class arguments to ``C*`` makes ``List<C>`` and ``List<C*>`` the
+        same instantiation and, crucially, makes a template's backing store
+        ``T* data`` become ``C**`` (a pointer to an array of handles) instead of
+        the ill-typed ``C*``.  Primitives, enums, unions, and already-pointer
+        arguments are left untouched."""
+        if isinstance(t, NamedType) and self._is_class_ref(t.name):
+            return PointerType(base=copy.deepcopy(t), line=t.line, col=t.col)
+        return t
+
+    def _canonicalize_args(self, args: List[TypeNode]) -> List[TypeNode]:
+        return [self._canonicalize_arg(a) for a in args]
+
+    def _construct_name(self, mapped: TypeNode, fallback: str) -> str:
+        """The bare class name to construct for `T(...)`/`new T(...)`, given the
+        canonical mapping value for `T` (which is `C*` for class arguments)."""
+        if isinstance(mapped, PointerType) and isinstance(mapped.base, NamedType):
+            return mapped.base.name
+        if isinstance(mapped, NamedType):
+            return mapped.name
+        return fallback
+
+    def _strip_class_ptr(self, t: TypeNode) -> TypeNode:
+        """Undo one level of class-handle pointer, so value/pointer forms of a
+        class compare equal (used for type-argument bound checks)."""
+        if (
+            isinstance(t, PointerType)
+            and isinstance(t.base, NamedType)
+            and self._is_class_ref(t.base.name)
+        ):
+            return t.base
+        return t
 
     # ------------------------------------------------------------------
     # Type substitution
@@ -447,9 +498,11 @@ class Monomorphizer:
         elif e.name in self._class_templates:
             concrete = self._infer_instantiation("class", e.name, e.args, e.line, e.col)
             e.name = self._register("class", e.name, concrete, e.line, e.col)
-        elif e.name in m and isinstance(m[e.name], NamedType):
-            # Stack construction through a type parameter: `T(args)`.
-            e.name = m[e.name].name
+        elif e.name in m:
+            # Stack construction through a type parameter: `T(args)`.  The
+            # mapping holds the canonical (pointer) form for class arguments, so
+            # unwrap it to the bare class name being constructed.
+            e.name = self._construct_name(m[e.name], e.name)
 
     def _t_new(self, e: NewExpr, m: Dict[str, TypeNode]) -> None:
         if e.type_args:
@@ -461,9 +514,10 @@ class Monomorphizer:
             concrete = self._infer_instantiation("class", e.class_name, e.args, e.line, e.col)
             e.class_name = self._register("class", e.class_name, concrete,
                                           e.line, e.col)
-        elif e.class_name in m and isinstance(m[e.class_name], NamedType):
-            # `new T(args)` inside a template body.
-            e.class_name = m[e.class_name].name
+        elif e.class_name in m:
+            # `new T(args)` inside a template body.  Unwrap the canonical
+            # (pointer) mapping form to the bare class name being constructed.
+            e.class_name = self._construct_name(m[e.class_name], e.class_name)
 
     # ------------------------------------------------------------------
     # Generic inference and bounds
@@ -572,6 +626,11 @@ class Monomorphizer:
                 )
 
     def _type_satisfies_bound(self, arg: TypeNode, bound: TypeNode) -> bool:
+        # A class value and a pointer to it are the same handle; compare the
+        # bare class forms so a canonicalised `C*` argument still satisfies a
+        # class/interface bound written as `C`.
+        arg = self._strip_class_ptr(arg)
+        bound = self._strip_class_ptr(bound)
         if types_equal(arg, bound):
             return True
         if isinstance(arg, PointerType) and isinstance(bound, PointerType):

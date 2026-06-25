@@ -72,7 +72,39 @@ def is_assignable(from_type: TypeNode, to_type: TypeNode, env: GlobalEnv) -> boo
                 if implements_interface(fb.name, tb.name, env):
                     return True
 
+    # A class instance is a reference (emitted as ClassName* in C), so a class
+    # value `C` and a pointer to it `C*` denote the same handle and are mutually
+    # assignable.  This applies only across the mixed forms (one value, one
+    # pointer); value/value and pointer/pointer are handled above.  Subclass and
+    # interface widening are permitted across the mixed forms too.
+    f_cls = _class_handle_name(from_type, env)
+    t_cls = _class_handle_name(to_type, env)
+    if (
+        f_cls is not None and t_cls is not None
+        and isinstance(from_type, PointerType) != isinstance(to_type, PointerType)
+    ):
+        if f_cls == t_cls:
+            return True
+        if t_cls in superclass_chain(f_cls, env)[1:]:
+            return True
+        if env.is_interface(t_cls) and implements_interface(f_cls, t_cls, env):
+            return True
+
     return False
+
+
+def _class_handle_name(t: TypeNode, env: GlobalEnv):
+    """The class name behind a class value `C` or a single pointer `C*`, else
+    None.  Used to treat a class value and a pointer to it as the same handle."""
+    if isinstance(t, NamedType) and env.is_class(t.name):
+        return t.name
+    if (
+        isinstance(t, PointerType)
+        and isinstance(t.base, NamedType)
+        and env.is_class(t.base.name)
+    ):
+        return t.base.name
+    return None
 
 
 def is_numeric(t: TypeNode) -> bool:
@@ -193,6 +225,17 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
         if (
             (null_name and is_function_pointer(right))
             or (null_name2 and is_function_pointer(left))
+        ):
+            return NamedType("bool")
+        # A class value `C` and a pointer to the same class `C*` are the same
+        # handle, so comparing them by reference is well-typed.
+        l_base = left.base if isinstance(left, PointerType) else left
+        r_base = right.base if isinstance(right, PointerType) else right
+        if (
+            isinstance(left, PointerType) != isinstance(right, PointerType)
+            and isinstance(l_base, NamedType)
+            and isinstance(r_base, NamedType)
+            and l_base.name == r_base.name
         ):
             return NamedType("bool")
         ls, rs = type_str(left), type_str(right)

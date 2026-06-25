@@ -36,15 +36,27 @@ class Pass1Collector:
                 self._register_class_shell(decl)
 
     def _register_non_class_declarations(self, program: Program) -> None:
+        # Register all type *names* (shells) before resolving any member/field
+        # types, so forward references between unions/interfaces/enums (and to
+        # classes, already shelled) resolve regardless of declaration order.
+        # This is what makes mutually recursive unions legal, e.g. an AST where
+        # Expr has a closure whose body is a Stmt and Stmt embeds Exprs.
         for decl in program.declarations:
             if isinstance(decl, EnumDecl):
                 self._register_enum(decl)
         for decl in program.declarations:
             if isinstance(decl, UnionDecl):
-                self._register_union(decl)
+                self._register_union_shell(decl)
         for decl in program.declarations:
             if isinstance(decl, InterfaceDecl):
-                self._register_interface(decl)
+                self._register_interface_shell(decl)
+        # Bodies: now that every type name exists, resolve field/method types.
+        for decl in program.declarations:
+            if isinstance(decl, UnionDecl):
+                self._resolve_union_fields(decl)
+        for decl in program.declarations:
+            if isinstance(decl, InterfaceDecl):
+                self._resolve_interface_methods(decl)
         for decl in program.declarations:
             if isinstance(decl, FunctionDecl):
                 self._register_function(decl)
@@ -155,23 +167,24 @@ class Pass1Collector:
         info.decl = decl
         info.access = decl.access
 
-    def _register_interface(self, decl: InterfaceDecl) -> None:
+    def _register_interface_shell(self, decl: InterfaceDecl) -> None:
         if self._name_taken(decl.name):
             raise TypeError(
                 f"name '{decl.name}' is already defined", decl.line, decl.col
             )
-        methods: Dict[str, MethodDecl] = {}
+        self._env.interfaces[decl.name] = InterfaceInfo(
+            name=decl.name,
+            methods={},
+            decl=decl,
+        )
+
+    def _resolve_interface_methods(self, decl: InterfaceDecl) -> None:
+        methods = self._env.interfaces[decl.name].methods
         for md in decl.methods:
             self._env.resolve_type(md.return_type)
             for p in md.params:
                 self._env.resolve_type(p.type)
             methods[md.name] = md
-
-        self._env.interfaces[decl.name] = InterfaceInfo(
-            name=decl.name,
-            methods=methods,
-            decl=decl,
-        )
 
     def _register_enum(self, decl: EnumDecl) -> None:
         if self._name_taken(decl.name):
@@ -192,19 +205,22 @@ class Pass1Collector:
             name=decl.name, variants=variants, decl=decl
         )
 
-    def _register_union(self, decl: UnionDecl) -> None:
+    def _register_union_shell(self, decl: UnionDecl) -> None:
         if self._name_taken(decl.name):
             raise TypeError(
                 f"name '{decl.name}' is already defined", decl.line, decl.col
             )
-        # Register the union name first so self-referential field types resolve.
-        placeholder: Dict[str, UnionVariantInfo] = {}
+        # Register the union name (empty variants) so that self-referential and
+        # forward cross-union field types resolve once all shells are present.
         self._env.unions[decl.name] = UnionInfo(
             name=decl.name,
             type_params=decl.type_params,
-            variants=placeholder,
+            variants={},
             decl=decl,
         )
+
+    def _resolve_union_fields(self, decl: UnionDecl) -> None:
+        placeholder = self._env.unions[decl.name].variants
         for v in decl.variants:
             if v.name in placeholder:
                 raise TypeError(
