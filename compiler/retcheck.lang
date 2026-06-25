@@ -1,0 +1,67 @@
+// compiler/retcheck.lang — all-paths-return analysis.
+// 1:1 port of analyser/return_checker.py.  `_stmt_always_returns` becomes the
+// local match-based helper `stmt_always_returns`.
+
+import "ast.lang";
+import "std/list.lang";
+
+bool always_returns(List<Stmt*> stmts) {
+    int n = stmts.length();
+    for (int i = 0; i < n; ++i) {
+        if (stmt_always_returns(stmts.get(i))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool stmt_always_returns(Stmt* stmt) {
+    match (*stmt) {
+        Stmt.ReturnStmt(v) => {
+            return true;
+        }
+        Stmt.ThrowStmt(v) => {
+            return true;
+        }
+        Stmt.TryCatchStmt(body, catches) => {
+            bool body_returns = stmt_always_returns(body);
+            bool handlers_return = true;
+            int n = catches.length();
+            for (int i = 0; i < n; ++i) {
+                if (stmt_always_returns(catches.get(i)->body) == false) {
+                    handlers_return = false;
+                }
+            }
+            return body_returns && handlers_return;
+        }
+        Stmt.IfStmt(cond, th, el) => {
+            if (el == null) {
+                return false;
+            }
+            bool then_returns = stmt_always_returns(th);
+            bool else_returns = stmt_always_returns(el);
+            return then_returns && else_returns;
+        }
+        Stmt.Block(stmts) => {
+            return always_returns(stmts);
+        }
+        Stmt.UsingStmt(decl, body) => {
+            // The resource is disposed before the return propagates, so a body
+            // that always returns makes the using statement always return.
+            return stmt_always_returns(body);
+        }
+        Stmt.MatchStmt(scrut, arms) => {
+            bool all_arms_return = true;
+            int n = arms.length();
+            for (int i = 0; i < n; ++i) {
+                if (stmt_always_returns(arms.get(i)->body) == false) {
+                    all_arms_return = false;
+                }
+            }
+            return all_arms_return;
+        }
+        _ => {
+            return false;
+        }
+    }
+}

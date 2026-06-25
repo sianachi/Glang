@@ -1,0 +1,34 @@
+// compiler/mono_dump.lang — Format-A test driver for the monomorphizer.
+//
+// Reads a single root file PATH from stdin, resolves its transitive imports
+// into one merged Program (via loader.lang), monomorphizes it, and prints the
+// canonical form (showProgram) of the result.
+//
+// On an AnalyzeError (bad instantiation / inference failure / bound violation)
+// prints `ERROR <msg>` and exits 1.  On a load error prints `LOADERROR <msg>`.
+
+import "std/list.lang";
+import "std/string.lang";
+import "ast.lang";
+import "loader.lang";
+import "symtab.lang";
+import "mono.lang";
+
+int main() {
+    string path = strings::trim(readStdin());
+    Program* prog = null;
+    try {
+        prog = load(path);
+    } catch (LoadError* le) {
+        print("LOADERROR " + le->message);
+        return 1;
+    }
+    try {
+        Program* result = monomorphize(prog);
+        print(showProgram(result));
+    } catch (AnalyzeError* ae) {
+        print("ERROR " + ae->message);
+        return 1;
+    }
+    return 0;
+}

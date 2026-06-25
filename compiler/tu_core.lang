@@ -1,0 +1,369 @@
+// compiler/tu_core.lang — pure (env-free) type utilities.
+//
+// Port of the env-free half of analyser/type_utils.py (contract §2).  Only the
+// functions that do NOT need GlobalEnv live here; is_assignable / superclass_chain
+// / implements_interface / class_handle_name go in tu_env.lang.
+//
+// NOTE: type_str MUST use spaces ("fn(int, bool) -> void", "Map<string, int>"),
+// matching type_utils.py:146 — this is distinct from ast.lang::showType (no
+// spaces).  These strings appear in error messages the tests match.
+//
+// binary_result_type / unary_result_type throw on mismatch.  The frozen contract
+// uses AnalyzeError (defined in symtab.lang, not built yet); for this standalone
+// module we throw the base Exception with the IDENTICAL message text so the
+// substrings the tests look for are preserved.  AnalyzeError is swapped in at
+// integration.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "ast.lang";
+
+// ── NULL_TYPE ────────────────────────────────────────────────────────────────
+
+TypeNode* NULL_TYPE() {
+    return new TypeNode.NamedType("null");
+}
+
+// ── Predicates ───────────────────────────────────────────────────────────────
+
+bool is_nullable(TypeNode* t) {
+    match (*t) {
+        TypeNode.NullableType(b) => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool is_numeric(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "int" || n == "float"; }
+        _ => { return false; }
+    }
+}
+
+bool is_integer(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "int"; }
+        _ => { return false; }
+    }
+}
+
+bool is_byte(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "byte"; }
+        _ => { return false; }
+    }
+}
+
+bool is_bool(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "bool"; }
+        _ => { return false; }
+    }
+}
+
+bool is_string(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "string"; }
+        _ => { return false; }
+    }
+}
+
+bool is_pointer(TypeNode* t) {
+    match (*t) {
+        TypeNode.PointerType(b) => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool is_array(TypeNode* t) {
+    match (*t) {
+        TypeNode.ArrayType(b, sz) => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool is_function_pointer(TypeNode* t) {
+    match (*t) {
+        TypeNode.FunctionPointerType(p, r) => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool is_float(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "float"; }
+        _ => { return false; }
+    }
+}
+
+bool is_named(TypeNode* t, string nm) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == nm; }
+        _ => { return false; }
+    }
+}
+
+// ── pointer_base ─────────────────────────────────────────────────────────────
+
+TypeNode* pointer_base(TypeNode* t) {
+    match (*t) {
+        TypeNode.PointerType(b) => { return b; }
+        _ => { throw new Exception("pointer_base: not a pointer type"); }
+    }
+}
+
+// ── types_equal ──────────────────────────────────────────────────────────────
+
+bool types_equal(TypeNode* a, TypeNode* b) {
+    match (*a) {
+        TypeNode.NamedType(an) => {
+            match (*b) {
+                TypeNode.NamedType(bn) => { return an == bn; }
+                _ => { return false; }
+            }
+        }
+        TypeNode.PointerType(ab) => {
+            match (*b) {
+                TypeNode.PointerType(bb) => { return types_equal(ab, bb); }
+                _ => { return false; }
+            }
+        }
+        TypeNode.ArrayType(ab, asz) => {
+            match (*b) {
+                TypeNode.ArrayType(bb, bsz) => {
+                    return asz == bsz && types_equal(ab, bb);
+                }
+                _ => { return false; }
+            }
+        }
+        TypeNode.FunctionPointerType(ap, ar) => {
+            match (*b) {
+                TypeNode.FunctionPointerType(bp, br) => {
+                    if (ap.length() != bp.length()) { return false; }
+                    if (!(types_equal(ar, br))) { return false; }
+                    int n = ap.length();
+                    for (int i = 0; i < n; ++i) {
+                        if (!(types_equal(ap.get(i), bp.get(i)))) { return false; }
+                    }
+                    return true;
+                }
+                _ => { return false; }
+            }
+        }
+        TypeNode.NullableType(ab) => {
+            match (*b) {
+                TypeNode.NullableType(bb) => { return types_equal(ab, bb); }
+                _ => { return false; }
+            }
+        }
+        TypeNode.GenericType(an, aargs) => {
+            // Python: type(a) is type(b) then falls through to `return False`
+            // for GenericType (it has no dedicated branch in types_equal).
+            return false;
+        }
+    }
+}
+
+// ── type_str (WITH spaces — matches type_utils.py) ───────────────────────────
+
+string type_str(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n; }
+        TypeNode.PointerType(b) => { return type_str(b) + "*"; }
+        TypeNode.ArrayType(b, sz) => {
+            return type_str(b) + "[" + strings::intToStr(sz) + "]";
+        }
+        TypeNode.FunctionPointerType(ps, ret) => {
+            StringBuilder sb = StringBuilder();
+            sb.append("fn(");
+            int n = ps.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.append(", "); }
+                sb.append(type_str(ps.get(i)));
+            }
+            sb.append(") -> ");
+            sb.append(type_str(ret));
+            return sb.build();
+        }
+        TypeNode.GenericType(nm, args) => {
+            StringBuilder sb = StringBuilder();
+            sb.append(nm);
+            sb.appendChar('<');
+            int n = args.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.append(", "); }
+                sb.append(type_str(args.get(i)));
+            }
+            sb.appendChar('>');
+            return sb.build();
+        }
+        TypeNode.NullableType(b) => { return type_str(b) + "?"; }
+    }
+}
+
+// ── is_lvalue ────────────────────────────────────────────────────────────────
+
+bool is_lvalue(Expr* e) {
+    match (*e) {
+        Expr.IdentifierExpr(n)        => { return true; }
+        Expr.FieldAccessExpr(o, f)    => { return true; }
+        Expr.ArrowAccessExpr(p, f)    => { return true; }
+        Expr.DerefExpr(o)             => { return true; }
+        Expr.IndexExpr(a, i)          => { return true; }
+        _ => { return false; }
+    }
+}
+
+// ── binary_result_type ───────────────────────────────────────────────────────
+
+TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
+    bool l_int = is_integer(left);
+    bool r_int = is_integer(right);
+    bool l_byte = is_byte(left);
+    bool r_byte = is_byte(right);
+    bool l_float = is_float(left);
+    bool r_float = is_float(right);
+    bool l_str = is_string(left);
+    bool r_str = is_string(right);
+    bool l_bool = is_bool(left);
+    bool r_bool = is_bool(right);
+
+    if (op == "+" || op == "-" || op == "*" || op == "/") {
+        if (l_int && r_int) { return new TypeNode.NamedType("int"); }
+        if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        if (l_float && r_float) { return new TypeNode.NamedType("float"); }
+        if (op == "+" && l_str && r_str) { return new TypeNode.NamedType("string"); }
+        string ls = type_str(left);
+        string rs = type_str(right);
+        if (ls == rs) {
+            throw new Exception("operator '" + op + "' requires int or float operands");
+        }
+        throw new Exception("operator '" + op + "': type mismatch '" + ls + "' and '" + rs + "'");
+    }
+
+    if (op == "%") {
+        if (l_int && r_int) { return new TypeNode.NamedType("int"); }
+        if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        throw new Exception("operator '%' requires int operands");
+    }
+
+    if (op == "<" || op == ">" || op == "<=" || op == ">=") {
+        if ((l_int && r_int) || (l_byte && r_byte) || (l_float && r_float)) {
+            return new TypeNode.NamedType("bool");
+        }
+        string ls = type_str(left);
+        string rs = type_str(right);
+        throw new Exception("operator '" + op + "': type mismatch '" + ls + "' and '" + rs + "'");
+    }
+
+    if (op == "==" || op == "!=") {
+        if (types_equal(left, right)) { return new TypeNode.NamedType("bool"); }
+        // null vs pointer
+        bool null_left = is_named(left, "null");
+        bool null_right = is_named(right, "null");
+        if ((null_left && is_pointer(right)) || (null_right && is_pointer(left))) {
+            return new TypeNode.NamedType("bool");
+        }
+        if ((null_left && is_function_pointer(right)) || (null_right && is_function_pointer(left))) {
+            return new TypeNode.NamedType("bool");
+        }
+        // A class value `C` and a pointer to the same class `C*` are the same
+        // handle, so comparing them by reference is well-typed.
+        TypeNode* l_base = left;
+        match (*left) {
+            TypeNode.PointerType(lb) => { l_base = lb; }
+            _ => { }
+        }
+        TypeNode* r_base = right;
+        match (*right) {
+            TypeNode.PointerType(rb) => { r_base = rb; }
+            _ => { }
+        }
+        bool one_ptr = is_pointer(left) != is_pointer(right);
+        if (one_ptr) {
+            match (*l_base) {
+                TypeNode.NamedType(lbn) => {
+                    match (*r_base) {
+                        TypeNode.NamedType(rbn) => {
+                            if (lbn == rbn) { return new TypeNode.NamedType("bool"); }
+                        }
+                        _ => { }
+                    }
+                }
+                _ => { }
+            }
+        }
+        string ls = type_str(left);
+        string rs = type_str(right);
+        throw new Exception("operator '" + op + "': type mismatch '" + ls + "' and '" + rs + "'");
+    }
+
+    if (op == "&&" || op == "||") {
+        if (l_bool && r_bool) { return new TypeNode.NamedType("bool"); }
+        string bad = type_str(right);
+        if (!l_bool) { bad = type_str(left); }
+        throw new Exception("operator '" + op + "' requires bool, got '" + bad + "'");
+    }
+
+    if (op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>") {
+        if (l_int && r_int) { return new TypeNode.NamedType("int"); }
+        if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        throw new Exception("operator '" + op + "' requires int operands");
+    }
+
+    if (op == "??") {
+        match (*left) {
+            TypeNode.NullableType(lbase) => {
+                if (!(types_equal(lbase, right))) {
+                    throw new Exception("operator '??': right operand must be '"
+                        + type_str(lbase) + "', got '" + type_str(right) + "'");
+                }
+                return lbase;
+            }
+            _ => {
+                throw new Exception("operator '??': left operand must be a nullable type, got '"
+                    + type_str(left) + "'");
+            }
+        }
+    }
+
+    throw new Exception("unknown operator '" + op + "'");
+}
+
+// ── unary_result_type ────────────────────────────────────────────────────────
+
+TypeNode* unary_result_type(string op, TypeNode* operand) {
+    if (op == "!") {
+        if (!(is_bool(operand))) {
+            throw new Exception("operator '!' requires bool, got '" + type_str(operand) + "'");
+        }
+        return new TypeNode.NamedType("bool");
+    }
+    if (op == "~") {
+        if (is_byte(operand)) { return new TypeNode.NamedType("byte"); }
+        if (!(is_integer(operand))) {
+            throw new Exception("operator '~' requires int operands");
+        }
+        return new TypeNode.NamedType("int");
+    }
+    if (op == "++" || op == "--") {
+        if (is_byte(operand)) { return new TypeNode.NamedType("byte"); }
+        if (!(is_integer(operand))) {
+            throw new Exception("operator '" + op + "' requires int operands");
+        }
+        return new TypeNode.NamedType("int");
+    }
+    if (op == "-" || op == "unary-") {
+        if (is_integer(operand)) { return new TypeNode.NamedType("int"); }
+        if (is_byte(operand)) { return new TypeNode.NamedType("byte"); }
+        if (is_float(operand)) { return new TypeNode.NamedType("float"); }
+        throw new Exception("operator '-' requires int or float, got '" + type_str(operand) + "'");
+    }
+    if (op == "unary+") {
+        if (is_integer(operand)) { return new TypeNode.NamedType("int"); }
+        if (is_float(operand)) { return new TypeNode.NamedType("float"); }
+        throw new Exception("operator '+' requires int or float, got '" + type_str(operand) + "'");
+    }
+    throw new Exception("unknown unary operator '" + op + "'");
+}

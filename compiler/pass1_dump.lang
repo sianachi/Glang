@@ -1,0 +1,234 @@
+// compiler/pass1_dump.lang — Format-B driver for pass1_collect.
+//
+// Reads a whole Glang program from stdin, lexes + parses it, runs
+// pass1_collect to populate a fresh GlobalEnv, then dumps the populated env as
+// deterministic, lexicographically sorted lines:
+//
+//   class <name> super=<x|-> fields=[a,b] methods=[m,n] static_fields=[..] \
+//         static_methods=[..] vtable=[..] ifaces=[..] ctor=<yes|no> \
+//         dtor=<yes|no> access=<a>
+//   func <name> ret=<type_str> params=[<type_str>,..]
+//   enum <name> variants=[NAME=val,..]
+//   union <name> type_params=[..] variants=[<vname>{<ftype> <fname>,..},..]
+//   interface <name> methods=[m,n]
+//   modifier <target> methods=[m,n]
+//
+// Each list is sorted; the whole output is sorted line-by-line for
+// determinism.  On AnalyzeError, the single line `ERROR <msg>` is printed.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "symtab.lang";
+import "tu_core.lang";
+import "pass1.lang";
+
+// ── string ordering helpers ─────────────────────────────────────────────────
+bool strLess(string a, string b) {
+    int la = len(a);
+    int lb = len(b);
+    int n = la;
+    if (lb < n) { n = lb; }
+    for (int i = 0; i < n; ++i) {
+        char xa = a[i];
+        char xb = b[i];
+        int ca = (int) xa;
+        int cb = (int) xb;
+        if (ca < cb) { return true; }
+        if (ca > cb) { return false; }
+    }
+    return la < lb;
+}
+
+void sortStrings(List<string> xs) {
+    int n = xs.length();
+    for (int i = 1; i < n; ++i) {
+        string key = xs.get(i);
+        int j = i - 1;
+        while (j >= 0 && strLess(key, xs.get(j))) {
+            xs.set(j + 1, xs.get(j));
+            j = j - 1;
+        }
+        xs.set(j + 1, key);
+    }
+}
+
+string joinSorted(List<string> xs) {
+    sortStrings(xs);
+    return strings::join(xs, ",");
+}
+
+// ── env dumpers ─────────────────────────────────────────────────────────────
+string boolWord(bool b) {
+    if (b) { return "yes"; }
+    return "no";
+}
+
+List<string> mapKeys(Map<string, MethodDecl*>* m) {
+    List<string> out = List<string>();
+    int n = m->size;
+    for (int i = 0; i < n; ++i) {
+        out.add(m->keys[i]);
+    }
+    return out;
+}
+
+List<string> fieldKeys(Map<string, FieldDecl*>* m) {
+    List<string> out = List<string>();
+    int n = m->size;
+    for (int i = 0; i < n; ++i) {
+        out.add(m->keys[i]);
+    }
+    return out;
+}
+
+List<string> sfieldKeys(Map<string, StaticFieldDecl*>* m) {
+    List<string> out = List<string>();
+    int n = m->size;
+    for (int i = 0; i < n; ++i) {
+        out.add(m->keys[i]);
+    }
+    return out;
+}
+
+string dumpClass(ClassInfo* info) {
+    string superw = "-";
+    if (info->superclass != "") { superw = info->superclass; }
+
+    List<string> ifs = List<string>();
+    int ifn = info->interfaces.length();
+    for (int i = 0; i < ifn; ++i) { ifs.add(info->interfaces.get(i)); }
+
+    string s = "class " + info->name;
+    s = s + " super=" + superw;
+    s = s + " fields=[" + joinSorted(fieldKeys(info->fields)) + "]";
+    s = s + " static_fields=[" + joinSorted(sfieldKeys(info->static_fields)) + "]";
+    s = s + " methods=[" + joinSorted(mapKeys(info->instance_methods)) + "]";
+    s = s + " static_methods=[" + joinSorted(mapKeys(info->static_methods)) + "]";
+    s = s + " vtable=[" + joinSorted(mapKeys(info->vtable)) + "]";
+    s = s + " ifaces=[" + joinSorted(ifs) + "]";
+    s = s + " ctor=" + boolWord(info->constructor != null);
+    s = s + " dtor=" + boolWord(info->destructor != null);
+    s = s + " access=" + info->access;
+    return s;
+}
+
+string dumpFunc(FunctionInfo* info) {
+    List<string> ptypes = List<string>();
+    int pn = info->params.length();
+    for (int i = 0; i < pn; ++i) {
+        ptypes.add(type_str(info->params.get(i)->type));
+    }
+    // Parameter order is significant: do NOT sort.
+    string s = "func " + info->name;
+    s = s + " ret=" + type_str(info->return_type);
+    s = s + " params=[" + strings::join(ptypes, ",") + "]";
+    return s;
+}
+
+string dumpEnum(EnumInfo* info) {
+    List<string> entries = List<string>();
+    int n = info->variants.size;
+    for (int i = 0; i < n; ++i) {
+        entries.add(info->variants.keys[i] + "=" + strings::intToStr(info->variants.vals[i]));
+    }
+    return "enum " + info->name + " variants=[" + joinSorted(entries) + "]";
+}
+
+string dumpUnion(UnionInfo* info) {
+    List<string> tps = List<string>();
+    int tn = info->type_params.length();
+    for (int i = 0; i < tn; ++i) { tps.add(info->type_params.get(i)); }
+
+    List<string> vparts = List<string>();
+    int vn = info->variants.size;
+    for (int i = 0; i < vn; ++i) {
+        UnionVariantInfo* uv = info->variants.vals[i];
+        List<string> fparts = List<string>();
+        int fldn = uv->fields.length();
+        for (int j = 0; j < fldn; ++j) {
+            FieldDecl* fd = uv->fields.get(j);
+            fparts.add(type_str(fd->fieldType) + " " + fd->name);
+        }
+        // Field order within a variant is significant: do NOT sort.
+        vparts.add(uv->name + "{" + strings::join(fparts, ",") + "}");
+    }
+    // type_params order significant; variant order not (sort for determinism).
+    return "union " + info->name
+        + " type_params=[" + strings::join(tps, ",") + "]"
+        + " variants=[" + joinSorted(vparts) + "]";
+}
+
+string dumpInterface(InterfaceInfo* info) {
+    return "interface " + info->name + " methods=[" + joinSorted(mapKeys(info->methods)) + "]";
+}
+
+string dumpModifier(string target, Map<string, MethodDecl*>* bucket) {
+    return "modifier " + target + " methods=[" + joinSorted(mapKeys(bucket)) + "]";
+}
+
+void emitEnv(GlobalEnv* env) {
+    List<string> lines = List<string>();
+
+    int cn = env->classes.size;
+    for (int i = 0; i < cn; ++i) {
+        lines.add(dumpClass(env->classes.vals[i]));
+    }
+    int fcnt = env->functions.size;
+    for (int i = 0; i < fcnt; ++i) {
+        lines.add(dumpFunc(env->functions.vals[i]));
+    }
+    int en = env->enums.size;
+    for (int i = 0; i < en; ++i) {
+        lines.add(dumpEnum(env->enums.vals[i]));
+    }
+    int un = env->unions.size;
+    for (int i = 0; i < un; ++i) {
+        lines.add(dumpUnion(env->unions.vals[i]));
+    }
+    int icnt = env->interfaces.size;
+    for (int i = 0; i < icnt; ++i) {
+        lines.add(dumpInterface(env->interfaces.vals[i]));
+    }
+    int mn = env->modifier_methods.size;
+    for (int i = 0; i < mn; ++i) {
+        lines.add(dumpModifier(env->modifier_methods.keys[i], env->modifier_methods.vals[i]));
+    }
+
+    sortStrings(lines);
+    int n = lines.length();
+    for (int i = 0; i < n; ++i) {
+        print(lines.get(i));
+    }
+}
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+        GlobalEnv* env = new GlobalEnv();
+        pass1_collect(env, prog);
+        emitEnv(env);
+    } catch (AnalyzeError* ae) {
+        print("ERROR " + ae->message);
+        return 0;
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

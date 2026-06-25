@@ -1,0 +1,416 @@
+// compiler/ast_clone.lang — recursive deep copy of every AST union/record.
+//
+// Glang has no deepcopy; the monomorphizer needs to instantiate generic decls
+// without aliasing shared sub-nodes.  Every clone_* function `match`es the node
+// and reconstructs it with cloned children, so the result shares NO handles
+// with the original.  Strings/ints/bools are value-copied (passed through);
+// Maps are cloned into fresh Maps with cloned values; Lists are mapped element
+// by element into fresh Lists.
+//
+// Contract: compiler/notes/analyser_contract.md §5.
+
+import "ast.lang";
+import "std/list.lang";
+import "std/map.lang";
+
+// ── List helpers (each produces a fresh List with cloned elements) ──────────
+
+List<TypeNode*> clone_type_list(List<TypeNode*> xs) {
+    List<TypeNode*> out = List<TypeNode*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_type(xs.get(i)));
+    }
+    return out;
+}
+
+List<Expr*> clone_expr_list(List<Expr*> xs) {
+    List<Expr*> out = List<Expr*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_expr(xs.get(i)));
+    }
+    return out;
+}
+
+List<Stmt*> clone_stmt_list(List<Stmt*> xs) {
+    List<Stmt*> out = List<Stmt*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_stmt(xs.get(i)));
+    }
+    return out;
+}
+
+List<Decl*> clone_decl_list(List<Decl*> xs) {
+    List<Decl*> out = List<Decl*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_decl(xs.get(i)));
+    }
+    return out;
+}
+
+List<Param*> clone_param_list(List<Param*> xs) {
+    List<Param*> out = List<Param*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_param(xs.get(i)));
+    }
+    return out;
+}
+
+List<FieldDecl*> clone_field_list(List<FieldDecl*> xs) {
+    List<FieldDecl*> out = List<FieldDecl*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_field(xs.get(i)));
+    }
+    return out;
+}
+
+List<StaticFieldDecl*> clone_static_field_list(List<StaticFieldDecl*> xs) {
+    List<StaticFieldDecl*> out = List<StaticFieldDecl*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_static_field(xs.get(i)));
+    }
+    return out;
+}
+
+List<MethodDecl*> clone_method_list(List<MethodDecl*> xs) {
+    List<MethodDecl*> out = List<MethodDecl*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_method(xs.get(i)));
+    }
+    return out;
+}
+
+List<EnumVariant*> clone_enum_variant_list(List<EnumVariant*> xs) {
+    List<EnumVariant*> out = List<EnumVariant*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_enum_variant(xs.get(i)));
+    }
+    return out;
+}
+
+List<UnionVariant*> clone_union_variant_list(List<UnionVariant*> xs) {
+    List<UnionVariant*> out = List<UnionVariant*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_union_variant(xs.get(i)));
+    }
+    return out;
+}
+
+List<CatchClause*> clone_catch_list(List<CatchClause*> xs) {
+    List<CatchClause*> out = List<CatchClause*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_catch(xs.get(i)));
+    }
+    return out;
+}
+
+List<MatchArm*> clone_arm_list(List<MatchArm*> xs) {
+    List<MatchArm*> out = List<MatchArm*>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(clone_arm(xs.get(i)));
+    }
+    return out;
+}
+
+// String lists are value-copied (each string copied by value into a fresh List).
+List<string> clone_str_list(List<string> xs) {
+    List<string> out = List<string>();
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        out.add(xs.get(i));
+    }
+    return out;
+}
+
+// A Map<string, TypeNode*> cloned into a fresh Map with cloned values.
+Map<string, TypeNode*> clone_bounds(Map<string, TypeNode*> m) {
+    Map<string, TypeNode*> out = Map<string, TypeNode*>();
+    int n = m.size;
+    for (int i = 0; i < n; ++i) {
+        string k = m.keys[i];
+        out.set(k, clone_type(m.vals[i]));
+    }
+    return out;
+}
+
+// ── TypeNode ────────────────────────────────────────────────────────────────
+
+TypeNode* clone_type(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => {
+            return new TypeNode.NamedType(n);
+        }
+        TypeNode.PointerType(b) => {
+            return new TypeNode.PointerType(clone_type(b));
+        }
+        TypeNode.ArrayType(b, sz) => {
+            return new TypeNode.ArrayType(clone_type(b), sz);
+        }
+        TypeNode.GenericType(nm, args) => {
+            return new TypeNode.GenericType(nm, clone_type_list(args));
+        }
+        TypeNode.NullableType(b) => {
+            return new TypeNode.NullableType(clone_type(b));
+        }
+        TypeNode.FunctionPointerType(ps, ret) => {
+            return new TypeNode.FunctionPointerType(clone_type_list(ps), clone_type(ret));
+        }
+    }
+}
+
+// ── Param ─────────────────────────────────────────────────────────────────
+
+Param* clone_param(Param* p) {
+    return new Param(p->name, clone_type(p->type), p->isConst);
+}
+
+// ── Expr ────────────────────────────────────────────────────────────────────
+
+Expr* clone_expr(Expr* e) {
+    match (*e) {
+        Expr.LiteralExpr(k, v) => {
+            return new Expr.LiteralExpr(k, v);
+        }
+        Expr.IdentifierExpr(n) => {
+            return new Expr.IdentifierExpr(n);
+        }
+        Expr.NullExpr() => {
+            return new Expr.NullExpr();
+        }
+        Expr.ThisExpr() => {
+            return new Expr.ThisExpr();
+        }
+        Expr.SuperExpr() => {
+            return new Expr.SuperExpr();
+        }
+        Expr.UnaryExpr(op, o) => {
+            return new Expr.UnaryExpr(op, clone_expr(o));
+        }
+        Expr.BinaryExpr(l, op, r) => {
+            return new Expr.BinaryExpr(clone_expr(l), op, clone_expr(r));
+        }
+        Expr.AddressOfExpr(o) => {
+            return new Expr.AddressOfExpr(clone_expr(o));
+        }
+        Expr.DerefExpr(o) => {
+            return new Expr.DerefExpr(clone_expr(o));
+        }
+        Expr.CastExpr(ty, x) => {
+            return new Expr.CastExpr(clone_type(ty), clone_expr(x));
+        }
+        Expr.CallExpr(nm, args, ta) => {
+            return new Expr.CallExpr(nm, clone_expr_list(args), clone_type_list(ta));
+        }
+        Expr.IndirectCallExpr(c, a) => {
+            return new Expr.IndirectCallExpr(clone_expr(c), clone_expr_list(a));
+        }
+        Expr.MethodCallExpr(obj, m, args, arrow) => {
+            return new Expr.MethodCallExpr(clone_expr(obj), m, clone_expr_list(args), arrow);
+        }
+        Expr.NewExpr(cn, args, ta) => {
+            return new Expr.NewExpr(cn, clone_expr_list(args), clone_type_list(ta));
+        }
+        Expr.DeleteExpr(o) => {
+            return new Expr.DeleteExpr(clone_expr(o));
+        }
+        Expr.AllocExpr(ty, cnt) => {
+            Expr* c = null;
+            if (cnt != null) { c = clone_expr(cnt); }
+            return new Expr.AllocExpr(clone_type(ty), c);
+        }
+        Expr.FreeExpr(o) => {
+            return new Expr.FreeExpr(clone_expr(o));
+        }
+        Expr.FieldAccessExpr(obj, f) => {
+            return new Expr.FieldAccessExpr(clone_expr(obj), f);
+        }
+        Expr.ArrowAccessExpr(p, f) => {
+            return new Expr.ArrowAccessExpr(clone_expr(p), f);
+        }
+        Expr.IndexExpr(a, i) => {
+            return new Expr.IndexExpr(clone_expr(a), clone_expr(i));
+        }
+        Expr.ClosureExpr(ps, rt, body, caps) => {
+            return new Expr.ClosureExpr(clone_param_list(ps), clone_type(rt),
+                                        clone_stmt(body), clone_str_list(caps));
+        }
+    }
+}
+
+// ── Pattern ──────────────────────────────────────────────────────────────
+
+Pattern* clone_pattern(Pattern* p) {
+    match (*p) {
+        Pattern.VariantPattern(un, vn, binds) => {
+            return new Pattern.VariantPattern(un, vn, clone_str_list(binds));
+        }
+        Pattern.WildcardPattern() => {
+            return new Pattern.WildcardPattern();
+        }
+    }
+}
+
+// ── CatchClause / MatchArm (auxiliary records) ──────────────────────────────
+
+CatchClause* clone_catch(CatchClause* cc) {
+    return new CatchClause(clone_type(cc->catchType), cc->varName, clone_stmt(cc->body));
+}
+
+MatchArm* clone_arm(MatchArm* arm) {
+    return new MatchArm(clone_pattern(arm->pattern), clone_stmt(arm->body));
+}
+
+// ── Stmt ────────────────────────────────────────────────────────────────────
+
+Stmt* clone_stmt(Stmt* s) {
+    match (*s) {
+        Stmt.Block(stmts) => {
+            return new Stmt.Block(clone_stmt_list(stmts));
+        }
+        Stmt.ExprStmt(e) => {
+            return new Stmt.ExprStmt(clone_expr(e));
+        }
+        Stmt.VarDecl(nm, ty, init, c) => {
+            return new Stmt.VarDecl(nm, clone_type(ty), clone_expr(init), c);
+        }
+        Stmt.AssignStmt(t, op, v) => {
+            return new Stmt.AssignStmt(clone_expr(t), op, clone_expr(v));
+        }
+        Stmt.IfStmt(cond, th, el) => {
+            Stmt* es = null;
+            if (el != null) { es = clone_stmt(el); }
+            return new Stmt.IfStmt(clone_expr(cond), clone_stmt(th), es);
+        }
+        Stmt.WhileStmt(cond, body) => {
+            return new Stmt.WhileStmt(clone_expr(cond), clone_stmt(body));
+        }
+        Stmt.DoWhileStmt(body, cond) => {
+            return new Stmt.DoWhileStmt(clone_stmt(body), clone_expr(cond));
+        }
+        Stmt.ForStmt(init, cond, post, body) => {
+            return new Stmt.ForStmt(clone_stmt(init), clone_expr(cond),
+                                    clone_stmt(post), clone_stmt(body));
+        }
+        Stmt.ForeachStmt(vt, vn, it, body, c) => {
+            return new Stmt.ForeachStmt(clone_type(vt), vn, clone_expr(it), clone_stmt(body), c);
+        }
+        Stmt.UsingStmt(decl, body) => {
+            return new Stmt.UsingStmt(clone_stmt(decl), clone_stmt(body));
+        }
+        Stmt.BreakStmt() => {
+            return new Stmt.BreakStmt();
+        }
+        Stmt.ContinueStmt() => {
+            return new Stmt.ContinueStmt();
+        }
+        Stmt.ReturnStmt(v) => {
+            Expr* rv = null;
+            if (v != null) { rv = clone_expr(v); }
+            return new Stmt.ReturnStmt(rv);
+        }
+        Stmt.ThrowStmt(v) => {
+            return new Stmt.ThrowStmt(clone_expr(v));
+        }
+        Stmt.TryCatchStmt(body, catches) => {
+            return new Stmt.TryCatchStmt(clone_stmt(body), clone_catch_list(catches));
+        }
+        Stmt.MatchStmt(scrut, arms) => {
+            return new Stmt.MatchStmt(clone_expr(scrut), clone_arm_list(arms));
+        }
+    }
+}
+
+// ── Member records ──────────────────────────────────────────────────────────
+
+FieldDecl* clone_field(FieldDecl* f) {
+    return new FieldDecl(f->name, clone_type(f->fieldType), f->isConst, f->access);
+}
+
+StaticFieldDecl* clone_static_field(StaticFieldDecl* f) {
+    Expr* init = null;
+    if (f->initializer != null) { init = clone_expr(f->initializer); }
+    return new StaticFieldDecl(f->name, clone_type(f->fieldType), init, f->isConst, f->access);
+}
+
+MethodDecl* clone_method(MethodDecl* m) {
+    Stmt* body = null;
+    if (m->body != null) { body = clone_stmt(m->body); }
+    return new MethodDecl(m->name, clone_param_list(m->params), clone_type(m->returnType),
+                          body, m->isStatic, m->access);
+}
+
+ConstructorDecl* clone_constructor(ConstructorDecl* c) {
+    return new ConstructorDecl(clone_param_list(c->params), clone_stmt(c->body),
+                               c->hasSuper, clone_expr_list(c->superArgs));
+}
+
+DestructorDecl* clone_destructor(DestructorDecl* d) {
+    return new DestructorDecl(clone_stmt(d->body));
+}
+
+EnumVariant* clone_enum_variant(EnumVariant* v) {
+    return new EnumVariant(v->name, v->hasValue, v->value);
+}
+
+UnionVariant* clone_union_variant(UnionVariant* v) {
+    return new UnionVariant(v->name, clone_field_list(v->fields));
+}
+
+// ── Decl ────────────────────────────────────────────────────────────────────
+
+Decl* clone_decl(Decl* d) {
+    match (*d) {
+        Decl.ImportDecl(path) => {
+            return new Decl.ImportDecl(path);
+        }
+        Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+            return new Decl.FunctionDecl(name, clone_param_list(params), clone_type(ret),
+                                         clone_stmt(body), clone_str_list(tps), clone_bounds(bounds));
+        }
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            ConstructorDecl* c = null;
+            if (ctor != null) { c = clone_constructor(ctor); }
+            DestructorDecl* dt = null;
+            if (dtor != null) { dt = clone_destructor(dtor); }
+            return new Decl.ClassDecl(name, clone_field_list(fields), clone_static_field_list(sfields),
+                                      clone_method_list(methods), superName, clone_str_list(ifaces),
+                                      c, dt, access, clone_str_list(tps), clone_bounds(bounds));
+        }
+        Decl.InterfaceDecl(name, methods) => {
+            return new Decl.InterfaceDecl(name, clone_method_list(methods));
+        }
+        Decl.EnumDecl(name, variants) => {
+            return new Decl.EnumDecl(name, clone_enum_variant_list(variants));
+        }
+        Decl.UsingDecl(name, isNs) => {
+            return new Decl.UsingDecl(name, isNs);
+        }
+        Decl.NamespaceDecl(name, decls) => {
+            return new Decl.NamespaceDecl(name, clone_decl_list(decls));
+        }
+        Decl.ModifierDecl(tps, target, methods) => {
+            return new Decl.ModifierDecl(clone_str_list(tps), clone_type(target),
+                                         clone_method_list(methods));
+        }
+        Decl.UnionDecl(name, tps, variants) => {
+            return new Decl.UnionDecl(name, clone_str_list(tps), clone_union_variant_list(variants));
+        }
+    }
+}
+
+// ── Program ──────────────────────────────────────────────────────────────
+
+Program* clone_program(Program* p) {
+    return new Program(clone_decl_list(p->imports), clone_decl_list(p->declarations));
+}

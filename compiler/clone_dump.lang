@@ -1,0 +1,34 @@
+// compiler/clone_dump.lang — test driver for ast_clone.
+// Reads a whole Glang program from stdin, parses it, deep-clones the Program,
+// and prints showProgram(clone).  If clone_* is faithful, this output is
+// byte-identical to compiler/parse_dump.lang on the same source.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "ast_clone.lang";
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+        Program* cloned = clone_program(prog);
+        print(showProgram(cloned));
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

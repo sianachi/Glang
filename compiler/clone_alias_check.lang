@@ -1,0 +1,55 @@
+// compiler/clone_alias_check.lang — no-aliasing check for ast_clone.
+// Parses a tiny program with a class field, clones it, mutates a CLASS-record
+// field (FieldDecl.name) in the clone, and prints the original and clone's
+// field name.  If clone is a true deep copy, the original is unchanged.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "ast_clone.lang";
+
+// Pulls the first FieldDecl out of the first ClassDecl in a program.
+FieldDecl* firstField(Program* p) {
+    List<Decl*> decls = p->declarations;
+    int n = decls.length();
+    for (int i = 0; i < n; ++i) {
+        Decl* d = decls.get(i);
+        match (*d) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                return fields.get(0);
+            }
+            _ => { }
+        }
+    }
+    throw new ParseError("no class field found", 0, 0);
+}
+
+int main() {
+    string source = "class Point { int x; int y; }";
+    GLexer lex = GLexer(source);
+    List<Token*> tokens = lex.tokenize();
+    Parser* p = new Parser(tokens);
+    Program* prog = p->parse();
+    Program* cloned = clone_program(prog);
+
+    FieldDecl* origField = firstField(prog);
+    FieldDecl* cloneField = firstField(cloned);
+
+    // Mutate the CLONE's field name (records are mutable classes).
+    cloneField->name = "MUTATED";
+
+    print("orig:" + origField->name);
+    print("clone:" + cloneField->name);
+    if (origField->name == cloneField->name) {
+        print("ALIASED");
+    } else {
+        print("INDEPENDENT");
+    }
+    return 0;
+}

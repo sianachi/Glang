@@ -1,0 +1,296 @@
+// compiler/symtab.lang — analyser records, scope chain, and global registry.
+//
+// Port of analyser/symbol_table.py (contract §4) plus the shared AnalyzeError
+// type (contract §1).  Records are plain classes with mutable fields; the
+// SymbolTable scope chain links to a parent (null at root) and is walked by
+// pointer identity (handle ==) for is_descendant_of.
+
+import "std/list.lang";
+import "std/map.lang";
+import "ast.lang";
+
+// ── §1. Shared error type ──────────────────────────────────────────────────
+// Every Python `raise TypeError(msg, line, col)` becomes
+// `throw new AnalyzeError(msg, line, col)`.
+class AnalyzeError extends Exception {
+    int line;
+    int col;
+    AnalyzeError(string msg, int ln, int c) : super(msg) {
+        this.line = ln;
+        this.col = c;
+    }
+}
+
+// ── §4. *Info records (registry payloads) ──────────────────────────────────
+
+class FunctionInfo {
+    string name;
+    List<Param*> params;
+    TypeNode* return_type;
+    Decl* decl;
+    FunctionInfo(string n, List<Param*> p, TypeNode* rt, Decl* d) {
+        this.name = n;
+        this.params = p;
+        this.return_type = rt;
+        this.decl = d;
+    }
+}
+
+class ClassInfo {
+    string name;
+    Map<string, FieldDecl*> fields;
+    Map<string, StaticFieldDecl*> static_fields;
+    Map<string, MethodDecl*> instance_methods;
+    Map<string, MethodDecl*> static_methods;
+    Map<string, MethodDecl*> vtable;
+    ConstructorDecl* constructor;
+    DestructorDecl* destructor;
+    string superclass;                 // "" if none
+    List<string> interfaces;
+    Decl* decl;
+    string access;
+    ClassInfo(string n, Map<string, FieldDecl*> f, Map<string, StaticFieldDecl*> sf,
+              Map<string, MethodDecl*> im, Map<string, MethodDecl*> sm,
+              Map<string, MethodDecl*> vt, ConstructorDecl* ctor, DestructorDecl* dtor,
+              string superName, List<string> ifaces, Decl* d, string acc) {
+        this.name = n;
+        this.fields = f;
+        this.static_fields = sf;
+        this.instance_methods = im;
+        this.static_methods = sm;
+        this.vtable = vt;
+        this.constructor = ctor;
+        this.destructor = dtor;
+        this.superclass = superName;
+        this.interfaces = ifaces;
+        this.decl = d;
+        this.access = acc;
+    }
+}
+
+class InterfaceInfo {
+    string name;
+    Map<string, MethodDecl*> methods;
+    Decl* decl;
+    InterfaceInfo(string n, Map<string, MethodDecl*> m, Decl* d) {
+        this.name = n;
+        this.methods = m;
+        this.decl = d;
+    }
+}
+
+class EnumInfo {
+    string name;
+    Map<string, int> variants;
+    Decl* decl;
+    EnumInfo(string n, Map<string, int> v, Decl* d) {
+        this.name = n;
+        this.variants = v;
+        this.decl = d;
+    }
+}
+
+class UnionVariantInfo {
+    string name;
+    List<FieldDecl*> fields;
+    UnionVariantInfo(string n, List<FieldDecl*> f) {
+        this.name = n;
+        this.fields = f;
+    }
+}
+
+class UnionInfo {
+    string name;
+    List<string> type_params;
+    Map<string, UnionVariantInfo*> variants;
+    Decl* decl;
+    UnionInfo(string n, List<string> tp, Map<string, UnionVariantInfo*> v, Decl* d) {
+        this.name = n;
+        this.type_params = tp;
+        this.variants = v;
+        this.decl = d;
+    }
+}
+
+// ── SymEntry: a single symbol-table binding ────────────────────────────────
+// Models the Python (TypeNode, line, col, is_const) tuple.
+class SymEntry {
+    TypeNode* type;
+    int line;
+    int col;
+    bool isConst;
+    SymEntry(TypeNode* t, int ln, int c, bool ic) {
+        this.type = t;
+        this.line = ln;
+        this.col = c;
+        this.isConst = ic;
+    }
+}
+
+// ── SymbolTable: lexical scope chain ────────────────────────────────────────
+class SymbolTable {
+    SymbolTable* parent;               // null at root
+    Map<string, SymEntry*> symbols;
+
+    SymbolTable(SymbolTable* parentScope) {
+        this.parent = parentScope;
+        this.symbols = Map<string, SymEntry*>();
+    }
+
+    void define(string name, TypeNode* type, int line, int col, bool isConst) {
+        if (this.symbols.has(name)) {
+            throw new AnalyzeError("name '" + name + "' is already defined", line, col);
+        }
+        SymEntry* outer = this.find_outer(name);
+        if (outer != null) {
+            // shadow warning — to stderr only (tests do not check it)
+            printErr("warning: '" + name + "' shadows variable declared at line "
+                     + strings::intToStr(outer->line));
+        }
+        this.symbols.set(name, new SymEntry(type, line, col, isConst));
+    }
+
+    TypeNode* lookup(string name) {
+        SymEntry* e = this.find(name);
+        if (e == null) {
+            throw new AnalyzeError("undefined variable '" + name + "'", 0, 0);
+        }
+        return e->type;
+    }
+
+    TypeNode* lookup_local(string name) {
+        if (this.symbols.has(name)) {
+            return this.symbols.getOr(name, null)->type;
+        }
+        return null;
+    }
+
+    SymbolTable* find_scope(string name) {
+        if (this.symbols.has(name)) {
+            return this;
+        }
+        if (this.parent != null) {
+            return this.parent->find_scope(name);
+        }
+        return null;
+    }
+
+    SymEntry* entry(string name) {
+        return this.symbols.getOr(name, null);
+    }
+
+    bool is_descendant_of(SymbolTable* ancestor) {
+        SymbolTable* current = this;
+        while (current != null) {
+            if (current == ancestor) {
+                return true;
+            }
+            current = current->parent;
+        }
+        return false;
+    }
+
+    bool is_const_var(string name) {
+        SymEntry* e = this.find(name);
+        if (e == null) { return false; }
+        return e->isConst;
+    }
+
+    SymbolTable* child() {
+        return new SymbolTable(this);
+    }
+
+    SymEntry* find(string name) {
+        if (this.symbols.has(name)) {
+            return this.symbols.getOr(name, null);
+        }
+        if (this.parent != null) {
+            return this.parent->find(name);
+        }
+        return null;
+    }
+
+    SymEntry* find_outer(string name) {
+        if (this.parent != null) {
+            return this.parent->find(name);
+        }
+        return null;
+    }
+}
+
+// ── GlobalEnv: top-level declaration registry ──────────────────────────────
+bool isPrimitiveName(string name) {
+    return name == "int" || name == "float" || name == "bool" || name == "char"
+        || name == "byte" || name == "string" || name == "void";
+}
+
+class GlobalEnv {
+    Map<string, FunctionInfo*> functions;
+    Map<string, ClassInfo*> classes;
+    Map<string, InterfaceInfo*> interfaces;
+    Map<string, EnumInfo*> enums;
+    Map<string, UnionInfo*> unions;
+    Map<string, Map<string, MethodDecl*>*> modifier_methods;
+
+    GlobalEnv() {
+        this.functions = Map<string, FunctionInfo*>();
+        this.classes = Map<string, ClassInfo*>();
+        this.interfaces = Map<string, InterfaceInfo*>();
+        this.enums = Map<string, EnumInfo*>();
+        this.unions = Map<string, UnionInfo*>();
+        this.modifier_methods = Map<string, Map<string, MethodDecl*>*>();
+    }
+
+    void resolve_type(TypeNode* node) {
+        match (*node) {
+            TypeNode.GenericType(nm, args) => {
+                // Monomorphization should have rewritten every GenericType.
+                throw new AnalyzeError("unresolved generic type '" + nm + "'", 0, 0);
+            }
+            TypeNode.NamedType(nm) => {
+                bool known = isPrimitiveName(nm) || this.classes.has(nm)
+                    || this.interfaces.has(nm) || this.enums.has(nm)
+                    || this.unions.has(nm) || nm == "null";
+                if (!known) {
+                    throw new AnalyzeError("unknown type '" + nm + "'", 0, 0);
+                }
+            }
+            TypeNode.PointerType(b) => {
+                this.resolve_type(b);
+            }
+            TypeNode.ArrayType(b, sz) => {
+                this.resolve_type(b);
+            }
+            TypeNode.FunctionPointerType(ps, ret) => {
+                int n = ps.length();
+                for (int i = 0; i < n; ++i) {
+                    this.resolve_type(ps.get(i));
+                }
+                this.resolve_type(ret);
+            }
+            TypeNode.NullableType(b) => {
+                this.resolve_type(b);
+            }
+        }
+    }
+
+    bool is_class(string name) {
+        return this.classes.has(name);
+    }
+
+    bool is_interface(string name) {
+        return this.interfaces.has(name);
+    }
+
+    bool is_enum(string name) {
+        return this.enums.has(name);
+    }
+
+    bool is_union(string name) {
+        return this.unions.has(name);
+    }
+
+    bool is_primitive(string name) {
+        return isPrimitiveName(name);
+    }
+}

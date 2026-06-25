@@ -1,0 +1,188 @@
+// compiler/symtab_dump.lang — Format-B driver for the symbol-table module.
+//
+// Reads a line-oriented command script from stdin and maintains:
+//   * one GlobalEnv (the top-level registry), and
+//   * a "current" SymbolTable that starts at a root scope and can push/pop
+//     child scopes.
+// Each command prints exactly one result line.
+//
+// Command grammar (whitespace-separated tokens, one command per line):
+//   register_class Foo                 -> registers a minimal ClassInfo (no super)
+//   register_class Foo extends Bar     -> registers ClassInfo with superclass Bar
+//   register_enum E                    -> registers a minimal EnumInfo
+//   register_union U                   -> registers a minimal UnionInfo
+//   define x int                       -> define(x, int, 0,0, isConst=false)
+//   define x int const                 -> define(x, int, 0,0, isConst=true)
+//   lookup x                           -> the resolved type str, or ERR:<msg>
+//   lookup_local x                     -> type str, or "null"
+//   is_const_var x                     -> true/false
+//   find_scope x                       -> "found" / "null"
+//   push                               -> enter a child scope -> "ok"
+//   pop                                -> return to parent scope -> "ok" / "ERR:..."
+//   is_class Foo / is_interface ... / is_enum ... / is_union ... / is_primitive ...
+//                                      -> true/false
+//   resolve_type Foo*                  -> "ok" / "ERR:<msg>"  (type parsed via TypeParser)
+//   is_descendant_of                   -> self-contained probe: builds root->A->B,
+//                                         prints "B<root:true B<A:true root<B:false"
+//
+// Each output line is: "<original command> | <result>".
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/map.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "symtab.lang";
+
+// Register a bare ClassInfo with the given name and (possibly empty) superclass.
+void registerClass(GlobalEnv* env, string name, string superName) {
+    ClassInfo* ci = new ClassInfo(
+        name,
+        Map<string, FieldDecl*>(),
+        Map<string, StaticFieldDecl*>(),
+        Map<string, MethodDecl*>(),
+        Map<string, MethodDecl*>(),
+        Map<string, MethodDecl*>(),
+        null, null, superName,
+        List<string>(),
+        null, "public");
+    env->classes.set(name, ci);
+}
+
+void registerEnum(GlobalEnv* env, string name) {
+    EnumInfo* ei = new EnumInfo(name, Map<string, int>(), null);
+    env->enums.set(name, ei);
+}
+
+void registerUnion(GlobalEnv* env, string name) {
+    UnionInfo* ui = new UnionInfo(name, List<string>(), Map<string, UnionVariantInfo*>(), null);
+    env->unions.set(name, ui);
+}
+
+// Parse a type annotation from source text via the real TypeParser.
+TypeNode* parseTypeText(string src) {
+    GLexer lex = GLexer(src);
+    List<Token*> tokens = lex.tokenize();
+    TokenStream* s = new TokenStream(tokens);
+    TypeParser tp = TypeParser(s);
+    return tp.parseType();
+}
+
+string runDescendantProbe() {
+    SymbolTable* root = new SymbolTable(null);
+    SymbolTable* a = root->child();
+    SymbolTable* b = a->child();
+    string r1 = "false";
+    if (b->is_descendant_of(root)) { r1 = "true"; }
+    string r2 = "false";
+    if (b->is_descendant_of(a)) { r2 = "true"; }
+    string r3 = "false";
+    if (root->is_descendant_of(b)) { r3 = "true"; }
+    return "B<root:" + r1 + " B<A:" + r2 + " root<B:" + r3;
+}
+
+string boolStr(bool b) {
+    if (b) { return "true"; }
+    return "false";
+}
+
+int main() {
+    string source = readStdin();
+    List<string> lines = strings::split(source, '\n');
+
+    GlobalEnv* env = new GlobalEnv();
+    SymbolTable* scope = new SymbolTable(null);
+
+    int nlines = lines.length();
+    for (int li = 0; li < nlines; ++li) {
+        string raw = lines.get(li);
+        string line = strings::trim(raw);
+        if (len(line) == 0) { continue; }
+
+        List<string> parts = strings::split(line, ' ');
+        string cmd = parts.get(0);
+        string result = "";
+
+        if (cmd == "register_class") {
+            string name = parts.get(1);
+            string superName = "";
+            if (parts.length() >= 4 && parts.get(2) == "extends") {
+                superName = parts.get(3);
+            }
+            registerClass(env, name, superName);
+            result = "ok";
+        } else if (cmd == "register_enum") {
+            registerEnum(env, parts.get(1));
+            result = "ok";
+        } else if (cmd == "register_union") {
+            registerUnion(env, parts.get(1));
+            result = "ok";
+        } else if (cmd == "define") {
+            string name = parts.get(1);
+            string tyText = parts.get(2);
+            bool isConst = parts.length() >= 4 && parts.get(3) == "const";
+            try {
+                TypeNode* ty = parseTypeText(tyText);
+                scope->define(name, ty, 0, 0, isConst);
+                result = "ok";
+            } catch (AnalyzeError* ae) {
+                result = "ERR:" + ae->message;
+            }
+        } else if (cmd == "lookup") {
+            try {
+                TypeNode* ty = scope->lookup(parts.get(1));
+                result = showType(ty);
+            } catch (AnalyzeError* ae) {
+                result = "ERR:" + ae->message;
+            }
+        } else if (cmd == "lookup_local") {
+            TypeNode* ty = scope->lookup_local(parts.get(1));
+            if (ty == null) { result = "null"; }
+            else { result = showType(ty); }
+        } else if (cmd == "is_const_var") {
+            result = boolStr(scope->is_const_var(parts.get(1)));
+        } else if (cmd == "find_scope") {
+            SymbolTable* found = scope->find_scope(parts.get(1));
+            if (found == null) { result = "null"; }
+            else { result = "found"; }
+        } else if (cmd == "push") {
+            scope = scope->child();
+            result = "ok";
+        } else if (cmd == "pop") {
+            if (scope->parent == null) {
+                result = "ERR:pop at root";
+            } else {
+                scope = scope->parent;
+                result = "ok";
+            }
+        } else if (cmd == "is_class") {
+            result = boolStr(env->is_class(parts.get(1)));
+        } else if (cmd == "is_interface") {
+            result = boolStr(env->is_interface(parts.get(1)));
+        } else if (cmd == "is_enum") {
+            result = boolStr(env->is_enum(parts.get(1)));
+        } else if (cmd == "is_union") {
+            result = boolStr(env->is_union(parts.get(1)));
+        } else if (cmd == "is_primitive") {
+            result = boolStr(env->is_primitive(parts.get(1)));
+        } else if (cmd == "resolve_type") {
+            try {
+                TypeNode* ty = parseTypeText(parts.get(1));
+                env->resolve_type(ty);
+                result = "ok";
+            } catch (AnalyzeError* ae) {
+                result = "ERR:" + ae->message;
+            }
+        } else if (cmd == "is_descendant_of") {
+            result = runDescendantProbe();
+        } else {
+            result = "ERR:unknown command";
+        }
+
+        print(line + " | " + result);
+    }
+    return 0;
+}

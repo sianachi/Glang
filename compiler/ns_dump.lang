@@ -1,0 +1,39 @@
+// compiler/ns_dump.lang — test driver for the namespace resolver (Format A).
+// Reads a whole Glang program from stdin, parses it, runs namespace_resolve,
+// and prints showProgram(result).  On AnalyzeError prints `ERROR <msg>`;
+// parse/lex failures print PARSEERROR/LEXERROR.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "tu_core.lang";
+import "symtab.lang";
+import "namespace.lang";
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+        Program* resolved = namespace_resolve(prog);
+        print(showProgram(resolved));
+    } catch (AnalyzeError* ae) {
+        print("ERROR " + ae->message);
+        return 1;
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

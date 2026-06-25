@@ -1,0 +1,22 @@
+// compiler/load_dump.lang — test driver for the module loader.
+// Reads a single root file PATH from stdin, resolves its transitive imports
+// into one merged Program, and prints its canonical form (showProgram).
+// On a load error (missing import / circular import) prints `LOADERROR <msg>`
+// and exits 1.
+
+import "std/list.lang";
+import "std/string.lang";
+import "ast.lang";
+import "loader.lang";
+
+int main() {
+    string path = strings::trim(readStdin());
+    try {
+        Program* prog = load(path);
+        print(showProgram(prog));
+    } catch (LoadError* le) {
+        print("LOADERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

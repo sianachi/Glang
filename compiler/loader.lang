@@ -1,0 +1,262 @@
+// compiler/loader.lang — module loader (port of glang_loader/loader.py).
+//
+// Resolves a root source file's transitive `import` graph into a single merged
+// Program. Each file is lexed and parsed; its imports are followed (relative to
+// that file's own directory, except `std/...` which resolves against the
+// stdlib dir); files reached more than once are de-duplicated (include-guard
+// semantics); circular imports are detected and reported. Every file's
+// top-level declarations are concatenated in post-order — an imported file's
+// declarations appear before the importing file's — to match Python exactly.
+//
+// LIMITATIONS vs the Python loader:
+//   * No real `realpath`: paths are normalised by collapsing `.`/`..`/`//`
+//     textually (no symlink canonicalisation). Aliasing two paths to the same
+//     file via a symlink would defeat dedup. For the example/stdlib corpus
+//     (no symlinks) this matches Python's realpath behaviour.
+//   * No `GLANG_STDLIB` env override and no exe-adjacent probe: there is no env
+//     builtin, so the stdlib dir defaults to "stdlib" relative to the cwd.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/char.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LoadError — raised on a missing import or circular import (mirrors
+// errors.errors.ImportError). Kept distinct from LexError/ParseError.
+// ═══════════════════════════════════════════════════════════════════════════
+
+class LoadError extends Exception {
+    int line;
+    int col;
+    LoadError(string msg, int ln, int c) : super(msg) {
+        this.line = ln;
+        this.col  = c;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Path helpers — small local string utilities (no os.path equivalent).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Directory portion of `path` (everything up to the last '/'). Returns "" when
+// there is no '/', matching os.path.dirname on a bare filename.
+string dirname(string path) {
+    int n = len(path);
+    int last = -1;
+    for (int i = 0; i < n; ++i) {
+        if (path[i] == '/') { last = i; }
+    }
+    if (last < 0) { return ""; }
+    return substr(path, 0, last);
+}
+
+// Base filename portion of `path` (everything after the last '/').
+string basename(string path) {
+    int n = len(path);
+    int last = -1;
+    for (int i = 0; i < n; ++i) {
+        if (path[i] == '/') { last = i; }
+    }
+    if (last < 0) { return path; }
+    return substr(path, last + 1, n);
+}
+
+// Join a directory and a relative path with a single '/'. An empty `dir`
+// yields `rel` unchanged (relative to cwd, like os.path.join("", rel)).
+string joinPath(string dir, string rel) {
+    if (dir == "") { return rel; }
+    int n = len(dir);
+    if (dir[n - 1] == '/') { return dir + rel; }
+    return dir + "/" + rel;
+}
+
+// Does `s` begin with `prefix`?
+bool startsWithStr(string s, string prefix) {
+    int pn = len(prefix);
+    if (len(s) < pn) { return false; }
+    for (int i = 0; i < pn; ++i) {
+        if (s[i] != prefix[i]) { return false; }
+    }
+    return true;
+}
+
+// Normalise a path textually: split on '/', drop "." and empty segments,
+// resolve ".." against the preceding segment. Preserves a leading '/'
+// (absolute) and a leading ".." run that cannot be popped. This is a string
+// canonicaliser only; it does NOT resolve symlinks (see file header).
+string normPath(string path) {
+    bool absolute = false;
+    if (len(path) > 0 && path[0] == '/') { absolute = true; }
+
+    List<string> parts = strings::split(path, '/');
+    List<string> stack = List<string>();
+    int n = parts.length();
+    for (int i = 0; i < n; ++i) {
+        string seg = parts.get(i);
+        if (seg == "" || seg == ".") {
+            continue;
+        }
+        if (seg == "..") {
+            int sn = stack.length();
+            if (sn > 0 && stack.get(sn - 1) != "..") {
+                stack.removeAt(sn - 1);
+            } else if (!absolute) {
+                stack.add("..");
+            }
+            // For absolute paths, ".." above root is dropped (like normpath).
+            continue;
+        }
+        stack.add(seg);
+    }
+
+    string joined = strings::join(stack, "/");
+    if (absolute) {
+        return "/" + joined;
+    }
+    if (joined == "") {
+        return ".";
+    }
+    return joined;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Loader — DFS over the import graph (mirrors glang_loader/loader.py::Loader).
+// ═══════════════════════════════════════════════════════════════════════════
+
+class Loader {
+    List<string> loaded;       // normalised paths fully merged already (dedup)
+    List<string> visiting;     // normalised paths on the current DFS stack
+    List<Decl*> declarations;  // gathered top-level decls, in load order
+    string stdlibDir;          // root for resolving `std/...` imports
+
+    Loader(string stdlibDir) {
+        this.loaded       = List<string>();
+        this.visiting     = List<string>();
+        this.declarations = List<Decl*>();
+        this.stdlibDir    = stdlibDir;
+    }
+
+    bool listContains(List<string> xs, string v) {
+        int n = xs.length();
+        for (int i = 0; i < n; ++i) {
+            if (xs.get(i) == v) { return true; }
+        }
+        return false;
+    }
+
+    int listIndexOf(List<string> xs, string v) {
+        int n = xs.length();
+        for (int i = 0; i < n; ++i) {
+            if (xs.get(i) == v) { return i; }
+        }
+        return -1;
+    }
+
+    Program* load(string rootPath) {
+        // Python: _load_file(os.path.realpath(root_path), via=None)
+        this.loadFile(normPath(rootPath), false, "", 0, 0);
+        return new Program(List<Decl*>(), this.declarations);
+    }
+
+    // `hasVia` distinguishes the root file (no importer) from an imported file.
+    // viaPath/viaLine/viaCol carry the importing ImportDecl's info for errors.
+    void loadFile(string abspath, bool hasVia, string viaPath, int viaLine, int viaCol) {
+        bool already = this.listContains(this.loaded, abspath);
+        if (already) {
+            // Already merged via another import path: include-guard skip.
+            return;
+        }
+        bool onStack = this.listContains(this.visiting, abspath);
+        if (onStack) {
+            // Still on the current DFS stack: a circular import.
+            int line = 0;
+            int col = 0;
+            if (hasVia) { line = viaLine; col = viaCol; }
+            throw new LoadError("circular import: " + this.cycleStr(abspath), line, col);
+        }
+
+        this.visiting.add(abspath);
+
+        string src = this.readSource(abspath, hasVia, viaPath, viaLine, viaCol);
+        GLexer lex = GLexer(src);
+        List<Token*> tokens = lex.tokenize();
+        Parser* parser = new Parser(tokens);
+        Program* program = parser->parse();
+
+        string baseDir = dirname(abspath);
+        List<Decl*> imports = program->imports;
+        int ni = imports.length();
+        for (int i = 0; i < ni; ++i) {
+            Decl* impDecl = imports.get(i);
+            match (*impDecl) {
+                Decl.ImportDecl(path) => {
+                    string target = normPath(this.resolveImport(path, baseDir));
+                    // Imports carry no positions in this AST; use 0,0.
+                    this.loadFile(target, true, path, 0, 0);
+                }
+                _ => { }
+            }
+        }
+
+        // Post-order: a file's imports are merged before the file itself.
+        List<Decl*> decls = program->declarations;
+        int nd = decls.length();
+        for (int j = 0; j < nd; ++j) {
+            this.declarations.add(decls.get(j));
+        }
+
+        // Pop from the visiting stack (the path is the top of stack).
+        int vn = this.visiting.length();
+        this.visiting.removeAt(vn - 1);
+
+        this.loaded.add(abspath);
+    }
+
+    // `std/...` paths resolve against the stdlib root; everything else relative
+    // to the importing file's directory.
+    string resolveImport(string importPath, string baseDir) {
+        if (startsWithStr(importPath, "std/")) {
+            string rest = substr(importPath, 4, len(importPath));   // strip "std/"
+            return joinPath(this.stdlibDir, rest);
+        }
+        return joinPath(baseDir, importPath);
+    }
+
+    string readSource(string abspath, bool hasVia, string viaPath, int viaLine, int viaCol) {
+        bool exists = fileExists(abspath);
+        if (!exists) {
+            if (hasVia) {
+                throw new LoadError("cannot find imported file '" + viaPath + "'", viaLine, viaCol);
+            }
+            throw new LoadError("cannot find source file '" + abspath + "'", 0, 0);
+        }
+        return readFile(abspath);
+    }
+
+    // Render the cycle as basenames, e.g. `a.lang -> b.lang -> a.lang`.
+    string cycleStr(string abspath) {
+        int start = this.listIndexOf(this.visiting, abspath);
+        if (start < 0) { start = 0; }
+        List<string> names = List<string>();
+        int n = this.visiting.length();
+        for (int i = start; i < n; ++i) {
+            names.add(basename(this.visiting.get(i)));
+        }
+        names.add(basename(abspath));
+        return strings::join(names, " -> ");
+    }
+}
+
+// Convenience wrapper: load `rootPath` into a merged Program.
+Program* load(string rootPath) {
+    Loader ld = Loader("stdlib");
+    return ld.load(rootPath);
+}

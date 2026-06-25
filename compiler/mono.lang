@@ -1,0 +1,1336 @@
+// compiler/mono.lang — generics by monomorphization.
+//
+// Port of analyser/monomorphize.py.  A Program -> Program rewrite that runs
+// before Pass1: generic class/function/modifier *templates* are pulled out and
+// every concrete use (List<int>, Map<string,int>, identity<int>(x)) becomes a
+// distinct concrete declaration whose name is *mangled* from the template name
+// and the concrete type arguments ("List<int>").  After this pass the program
+// contains no GenericType nodes and no templates.
+//
+// KEY ARCHITECTURAL DIFFERENCE FROM THE PYTHON SOURCE.  Python deep-copies a
+// template then mutates the clone in place (every `_t_*` returns None and edits
+// union fields).  Glang cannot mutate union-variant fields in place, so every
+// substitution function instead RETURNS a freshly-built substituted node:
+//   TypeNode* t_type(TypeNode*, mapping)
+//   Decl* t_decl(Decl*, mapping)
+//   Stmt* t_stmt(Stmt*, mapping)
+//   Expr* t_expr(Expr*, mapping)
+//   Param* t_param(Param*, mapping)
+// This rebuild-with-substitution SUBSUMES the deep-copy on the substitution
+// path; ast_clone is only used where Python deep-copies WITHOUT substituting
+// (storing args in metadata, cloning a bound before substituting into it).
+//
+// Contract: compiler/notes/analyser_contract.md §8 (signature), §9 (Format A).
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "ast.lang";
+import "ast_clone.lang";
+import "tu_core.lang";
+import "symtab.lang";
+
+// ── PRIMITIVES (includes "null", unlike type_utils' set) ────────────────────
+
+bool mono_is_primitive(string n) {
+    return n == "int" || n == "float" || n == "bool" || n == "char"
+        || n == "byte" || n == "string" || n == "void" || n == "null";
+}
+
+// ── mangle(name, args) = "Name<arg,arg>" (type_str, no spaces between) ──────
+// Matches monomorphize.py:51 — f"{name}<{','.join(type_str(a) for a in args)}>".
+
+string mangle(string name, List<TypeNode*> args) {
+    StringBuilder sb = StringBuilder();
+    sb.append(name);
+    sb.appendChar('<');
+    int n = args.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar(','); }
+        sb.append(type_str(args.get(i)));
+    }
+    sb.appendChar('>');
+    return sb.build();
+}
+
+// ── Small record types replacing Python tuples ──────────────────────────────
+
+// A pending instantiation: (kind, base_name, concrete_args, mangled_name).
+class WorkItem {
+    string kind;
+    string base;
+    List<TypeNode*> args;
+    string mangled;
+    WorkItem(string k, string b, List<TypeNode*> a, string mg) {
+        this.kind = k; this.base = b; this.args = a; this.mangled = mg;
+    }
+}
+
+// Recovered generic instance metadata: mangled name -> (template base, args).
+class InstanceArgs {
+    string base;
+    List<TypeNode*> args;
+    InstanceArgs(string b, List<TypeNode*> a) { this.base = b; this.args = a; }
+}
+
+// Optional list result (Python `Optional[List[TypeNode]]`): found flag + list.
+class ArgsOpt {
+    bool found;
+    List<TypeNode*> args;
+    ArgsOpt(bool f, List<TypeNode*> a) { this.found = f; this.args = a; }
+}
+
+// Result of var/instantiation inference: a type, or "couldn't infer" (null).
+// We just use TypeNode* with null = unknown.
+
+// ── Mapping helpers (Map<string, TypeNode*> built from params + args) ────────
+
+Map<string, TypeNode*> zip_mapping(List<string> params, List<TypeNode*> args) {
+    Map<string, TypeNode*> m = Map<string, TypeNode*>();
+    int n = params.length();
+    int an = args.length();
+    int lim = n;
+    if (an < lim) { lim = an; }
+    for (int i = 0; i < lim; ++i) {
+        m.set(params.get(i), args.get(i));
+    }
+    return m;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Monomorphizer
+// ════════════════════════════════════════════════════════════════════════════
+
+class Monomorphizer {
+    // Generic templates by name.
+    Map<string, Decl*> class_templates;     // ClassDecl variants
+    Map<string, Decl*> func_templates;      // FunctionDecl variants
+    // Known kinds (unions are added to BOTH class_names and union_names).
+    Map<string, bool> class_names;
+    Map<string, bool> union_names;
+    Map<string, bool> interface_names;
+    Map<string, bool> enum_names;
+    // Hierarchy for bound checks. "" = no superclass.
+    Map<string, string> class_supers;
+    Map<string, List<string>> class_interfaces;
+    // Mangled name -> (template base, concrete args), for inference recovery.
+    Map<string, InstanceArgs*> class_instance_args;
+    // Non-generic function return types, for _infer_expr_type of calls.
+    Map<string, TypeNode*> function_returns;
+    // Lightweight local-var scope stack.
+    List<Map<string, TypeNode*>> scopes;
+    // Mangled name -> built decl; key present with null value marks "enqueued,
+    // not yet built" (the Python `_instances[name] = None` sentinel).
+    Map<string, Decl*> instances;
+    // FIFO worklist of pending instantiations.
+    List<WorkItem*> worklist;
+    // Accumulated concrete decls.
+    List<Decl*> new_decls;
+    // Generic modifier templates: base class name -> list of ModifierDecl.
+    Map<string, List<Decl*>> modifier_templates;
+
+    Monomorphizer() {
+        this.class_templates = Map<string, Decl*>();
+        this.func_templates = Map<string, Decl*>();
+        this.class_names = Map<string, bool>();
+        this.union_names = Map<string, bool>();
+        this.interface_names = Map<string, bool>();
+        this.enum_names = Map<string, bool>();
+        this.class_supers = Map<string, string>();
+        this.class_interfaces = Map<string, List<string>>();
+        this.class_instance_args = Map<string, InstanceArgs*>();
+        this.function_returns = Map<string, TypeNode*>();
+        this.scopes = List<Map<string, TypeNode*>>();
+        this.instances = Map<string, Decl*>();
+        this.worklist = List<WorkItem*>();
+        this.new_decls = List<Decl*>();
+        this.modifier_templates = Map<string, List<Decl*>>();
+    }
+
+    // ── run ─────────────────────────────────────────────────────────────────
+
+    Program* run(Program* program) {
+        this.collect_known_decls(program->declarations);
+        List<Decl*> kept = List<Decl*>();
+        int nd = program->declarations.length();
+        for (int di = 0; di < nd; ++di) {
+            Decl* d = program->declarations.get(di);
+            bool handled = false;
+            match (*d) {
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                    if (tps.length() > 0) {
+                        this.class_templates.set(name, d);
+                        handled = true;
+                    }
+                }
+                Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                    if (tps.length() > 0) {
+                        this.func_templates.set(name, d);
+                        handled = true;
+                    }
+                }
+                Decl.ModifierDecl(tps, target, methods) => {
+                    if (tps.length() > 0) {
+                        // Generic modifier — collect by the base name of its target.
+                        string base = "";
+                        match (*target) {
+                            TypeNode.GenericType(gn, gargs) => { base = gn; }
+                            _ => { base = type_str(target); }
+                        }
+                        if (!(this.modifier_templates.has(base))) {
+                            this.modifier_templates.set(base, List<Decl*>());
+                        }
+                        this.modifier_templates.getOr(base, null).add(d);
+                        handled = true;
+                    }
+                }
+                _ => { }
+            }
+            if (!handled) { kept.add(d); }
+        }
+
+        // Rewrite the non-generic program; this discovers root instantiations.
+        Map<string, TypeNode*> empty = Map<string, TypeNode*>();
+        List<Decl*> kept2 = List<Decl*>();
+        int nk = kept.length();
+        for (int ki = 0; ki < nk; ++ki) {
+            kept2.add(this.t_decl(kept.get(ki), empty));
+        }
+
+        // Build each instantiation; building may discover further ones.
+        while (this.worklist.length() > 0) {
+            WorkItem* w = this.worklist.get(0);
+            this.worklist.removeAt(0);
+            Decl* built = this.build_instance(w->kind, w->base, w->args, w->mangled);
+            this.instances.set(w->mangled, built);
+        }
+
+        // program.declarations = kept + new_decls
+        List<Decl*> result = List<Decl*>();
+        int n2 = kept2.length();
+        for (int i = 0; i < n2; ++i) { result.add(kept2.get(i)); }
+        int n3 = this.new_decls.length();
+        for (int i = 0; i < n3; ++i) { result.add(this.new_decls.get(i)); }
+        return new Program(program->imports, result);
+    }
+
+    void collect_known_decls(List<Decl*> decls) {
+        int n = decls.length();
+        for (int i = 0; i < n; ++i) {
+            Decl* d = decls.get(i);
+            match (*d) {
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                    this.class_names.set(name, true);
+                    this.class_supers.set(name, superName);
+                    List<string> ic = List<string>();
+                    int ni = ifaces.length();
+                    for (int j = 0; j < ni; ++j) { ic.add(ifaces.get(j)); }
+                    this.class_interfaces.set(name, ic);
+                }
+                Decl.InterfaceDecl(name, methods) => {
+                    this.interface_names.set(name, true);
+                }
+                Decl.EnumDecl(name, variants) => {
+                    this.enum_names.set(name, true);
+                }
+                Decl.UnionDecl(name, tps, variants) => {
+                    // Unions are value types; track separately too.
+                    this.class_names.set(name, true);
+                    this.union_names.set(name, true);
+                }
+                Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                    if (tps.length() == 0) {
+                        this.function_returns.set(name, ret);
+                    }
+                }
+                _ => { }
+            }
+        }
+    }
+
+    // ── Instantiation ─────────────────────────────────────────────────────────
+
+    // Validate an instantiation, enqueue it if new, and return its mangled name.
+    string register(string kind, string base, List<TypeNode*> args, int line, int col) {
+        Decl* template = null;
+        if (kind == "class") {
+            if (this.class_templates.has(base)) { template = this.class_templates.getOr(base, null); }
+        } else {
+            if (this.func_templates.has(base)) { template = this.func_templates.getOr(base, null); }
+        }
+        if (template == null) {
+            throw new AnalyzeError("'" + base + "' is not a generic " + kind, line, col);
+        }
+        List<string> tparams = this.decl_type_params(template);
+        if (tparams.length() != args.length()) {
+            throw new AnalyzeError(
+                "'" + base + "' expects " + strings::intToStr(tparams.length())
+                + " type argument(s), got " + strings::intToStr(args.length()),
+                line, col);
+        }
+        args = this.canonicalize_args(args);
+        this.check_type_arg_bounds(template, args, line, col);
+        string name = mangle(base, args);
+        if (!(this.instances.has(name))) {
+            this.instances.set(name, null);
+            this.worklist.add(new WorkItem(kind, base, args, name));
+            if (kind == "class") {
+                this.register_class_instance_metadata(base, args, name);
+            } else {
+                this.register_function_instance_metadata(base, args, name);
+            }
+        }
+        return name;
+    }
+
+    Decl* build_instance(string kind, string base, List<TypeNode*> args, string mangled) {
+        Decl* template = null;
+        if (kind == "class") { template = this.class_templates.getOr(base, null); }
+        else { template = this.func_templates.getOr(base, null); }
+        List<string> tparams = this.decl_type_params(template);
+        Map<string, TypeNode*> mapping = zip_mapping(tparams, args);
+        // Rebuild the template with: mangled name, no type params, substitution.
+        Decl* built = this.t_decl_instantiate(template, mangled, mapping);
+        this.new_decls.add(built);
+        return built;
+    }
+
+    void register_class_instance_metadata(string base, List<TypeNode*> args, string mangled) {
+        Decl* template = this.class_templates.getOr(base, null);
+        match (*template) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                Map<string, TypeNode*> mapping = zip_mapping(tps, args);
+                this.class_names.set(mangled, true);
+                this.class_instance_args.set(mangled, new InstanceArgs(base, clone_type_list(args)));
+                // superclass
+                string sc = superName;
+                if (sc != "" && mapping.has(sc)) {
+                    TypeNode* mv = mapping.getOr(sc, null);
+                    match (*mv) {
+                        TypeNode.NamedType(mn) => { sc = mn; }
+                        _ => { }
+                    }
+                }
+                this.class_supers.set(mangled, sc);
+                // interfaces
+                List<string> ilist = List<string>();
+                int ni = ifaces.length();
+                for (int j = 0; j < ni; ++j) {
+                    string iface = ifaces.get(j);
+                    if (mapping.has(iface)) {
+                        TypeNode* mv = mapping.getOr(iface, null);
+                        match (*mv) {
+                            TypeNode.NamedType(mn) => { ilist.add(mn); }
+                            _ => { ilist.add(iface); }
+                        }
+                    } else {
+                        ilist.add(iface);
+                    }
+                }
+                this.class_interfaces.set(mangled, ilist);
+                // Instantiate any modifier templates that target this base class.
+                if (this.modifier_templates.has(base)) {
+                    List<Decl*> tmpls = this.modifier_templates.getOr(base, null);
+                    int nt = tmpls.length();
+                    for (int k = 0; k < nt; ++k) {
+                        Decl* tmpl = tmpls.get(k);
+                        List<string> mtps = this.decl_type_params(tmpl);
+                        if (mtps.length() == args.length()) {
+                            this.build_modifier_instance(tmpl, args, mangled);
+                        }
+                    }
+                }
+            }
+            _ => { }
+        }
+    }
+
+    void build_modifier_instance(Decl* tmpl, List<TypeNode*> args, string target_mangled) {
+        match (*tmpl) {
+            Decl.ModifierDecl(tps, target, methods) => {
+                Map<string, TypeNode*> mapping = zip_mapping(tps, args);
+                // Rebuild: empty type params, target retargeted to the mangled
+                // class, methods substituted.
+                List<MethodDecl*> nm = List<MethodDecl*>();
+                int n = methods.length();
+                for (int i = 0; i < n; ++i) {
+                    nm.add(this.t_method(methods.get(i), mapping));
+                }
+                Decl* built = new Decl.ModifierDecl(List<string>(),
+                    new TypeNode.NamedType(target_mangled), nm);
+                this.new_decls.add(built);
+            }
+            _ => { }
+        }
+    }
+
+    void register_function_instance_metadata(string base, List<TypeNode*> args, string mangled) {
+        Decl* template = this.func_templates.getOr(base, null);
+        match (*template) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                Map<string, TypeNode*> mapping = zip_mapping(tps, args);
+                this.function_returns.set(mangled, this.t_type(clone_type(ret), mapping));
+            }
+            _ => { }
+        }
+    }
+
+    // Helper: extract type params from a template decl (ClassDecl/FunctionDecl/ModifierDecl).
+    List<string> decl_type_params(Decl* d) {
+        match (*d) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                return tps;
+            }
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                return tps;
+            }
+            Decl.ModifierDecl(tps, target, methods) => {
+                return tps;
+            }
+            _ => { return List<string>(); }
+        }
+    }
+
+    // ── Type-argument canonicalization ──────────────────────────────────────
+
+    // A class (reference) type, represented as a pointer in C.  Excludes unions
+    // (value structs), enums, and primitives.
+    bool is_class_ref(string name) {
+        return this.class_names.has(name) && !(this.union_names.has(name));
+    }
+
+    // Normalise a bare class type argument to its pointer form C*.
+    TypeNode* canonicalize_arg(TypeNode* t) {
+        match (*t) {
+            TypeNode.NamedType(n) => {
+                if (this.is_class_ref(n)) {
+                    return new TypeNode.PointerType(clone_type(t));
+                }
+                return t;
+            }
+            _ => { return t; }
+        }
+    }
+
+    List<TypeNode*> canonicalize_args(List<TypeNode*> args) {
+        List<TypeNode*> out = List<TypeNode*>();
+        int n = args.length();
+        for (int i = 0; i < n; ++i) {
+            out.add(this.canonicalize_arg(args.get(i)));
+        }
+        return out;
+    }
+
+    // The bare class name to construct for T(...)/new T(...), given the canonical
+    // mapping value for T (which is C* for class arguments).
+    string construct_name(TypeNode* mapped, string fallback) {
+        match (*mapped) {
+            TypeNode.PointerType(b) => {
+                match (*b) {
+                    TypeNode.NamedType(bn) => { return bn; }
+                    _ => { return fallback; }
+                }
+            }
+            TypeNode.NamedType(n) => { return n; }
+            _ => { return fallback; }
+        }
+    }
+
+    // Undo one level of class-handle pointer, so value/pointer forms of a class
+    // compare equal (used for type-argument bound checks).
+    TypeNode* strip_class_ptr(TypeNode* t) {
+        match (*t) {
+            TypeNode.PointerType(b) => {
+                match (*b) {
+                    TypeNode.NamedType(bn) => {
+                        if (this.is_class_ref(bn)) { return b; }
+                        return t;
+                    }
+                    _ => { return t; }
+                }
+            }
+            _ => { return t; }
+        }
+    }
+
+    // ── Type substitution (returns fresh nodes) ─────────────────────────────
+
+    TypeNode* t_type(TypeNode* t, Map<string, TypeNode*> m) {
+        match (*t) {
+            TypeNode.NamedType(n) => {
+                if (m.has(n)) { return clone_type(m.getOr(n, null)); }
+                return clone_type(t);
+            }
+            TypeNode.PointerType(b) => {
+                return new TypeNode.PointerType(this.t_type(b, m));
+            }
+            TypeNode.ArrayType(b, sz) => {
+                return new TypeNode.ArrayType(this.t_type(b, m), sz);
+            }
+            TypeNode.FunctionPointerType(ps, ret) => {
+                List<TypeNode*> nps = List<TypeNode*>();
+                int n = ps.length();
+                for (int i = 0; i < n; ++i) { nps.add(this.t_type(ps.get(i), m)); }
+                return new TypeNode.FunctionPointerType(nps, this.t_type(ret, m));
+            }
+            TypeNode.NullableType(b) => {
+                return new TypeNode.NullableType(this.t_type(b, m));
+            }
+            TypeNode.GenericType(gn, gargs) => {
+                List<TypeNode*> concrete = List<TypeNode*>();
+                int n = gargs.length();
+                for (int i = 0; i < n; ++i) { concrete.add(this.t_type(gargs.get(i), m)); }
+                string name = this.register("class", gn, concrete, 0, 0);
+                return new TypeNode.NamedType(name);
+            }
+        }
+    }
+
+    // ── Declarations (return fresh; rewrite path with empty/real mapping) ───
+
+    // Substitute inside a top-level kept decl (Python `_t_decl(d, {})` /
+    // `_t_decl(clone, mapping)`).  Returns a fresh Decl.
+    Decl* t_decl(Decl* d, Map<string, TypeNode*> m) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                TypeNode* nret = this.t_type(ret, m);
+                List<Param*> nparams = this.t_params(params, m);
+                if (tps.length() == 0) {
+                    this.function_returns.set(name, nret);
+                }
+                this.push_scope();
+                int np = nparams.length();
+                for (int i = 0; i < np; ++i) {
+                    Param* p = nparams.get(i);
+                    this.define_var(p->name, p->type);
+                }
+                Stmt* nbody = this.t_stmt(body, m);
+                this.pop_scope();
+                return new Decl.FunctionDecl(name, nparams, nret, nbody,
+                    clone_str_list(tps), clone_bounds(bounds));
+            }
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                List<FieldDecl*> nfields = List<FieldDecl*>();
+                int nf = fields.length();
+                for (int i = 0; i < nf; ++i) {
+                    FieldDecl* fd = fields.get(i);
+                    nfields.add(new FieldDecl(fd->name, this.t_type(fd->fieldType, m), fd->isConst, fd->access));
+                }
+                List<StaticFieldDecl*> nsfields = List<StaticFieldDecl*>();
+                int ns = sfields.length();
+                for (int i = 0; i < ns; ++i) {
+                    StaticFieldDecl* sfd = sfields.get(i);
+                    Expr* ninit = null;
+                    if (sfd->initializer != null) { ninit = this.t_expr(sfd->initializer, m); }
+                    nsfields.add(new StaticFieldDecl(sfd->name, this.t_type(sfd->fieldType, m),
+                        ninit, sfd->isConst, sfd->access));
+                }
+                ConstructorDecl* nctor = null;
+                if (ctor != null) { nctor = this.t_constructor(ctor, m); }
+                DestructorDecl* ndtor = null;
+                if (dtor != null) { ndtor = new DestructorDecl(this.t_stmt(dtor->body, m)); }
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                int nm = methods.length();
+                for (int i = 0; i < nm; ++i) {
+                    nmethods.add(this.t_method(methods.get(i), m));
+                }
+                return new Decl.ClassDecl(name, nfields, nsfields, nmethods, superName,
+                    clone_str_list(ifaces), nctor, ndtor, access,
+                    clone_str_list(tps), clone_bounds(bounds));
+            }
+            Decl.ModifierDecl(tps, target, methods) => {
+                TypeNode* ntarget = this.t_type(target, m);
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                int nm = methods.length();
+                for (int i = 0; i < nm; ++i) {
+                    nmethods.add(this.t_method(methods.get(i), m));
+                }
+                return new Decl.ModifierDecl(clone_str_list(tps), ntarget, nmethods);
+            }
+            Decl.UnionDecl(name, tps, variants) => {
+                List<UnionVariant*> nvars = List<UnionVariant*>();
+                int nv = variants.length();
+                for (int i = 0; i < nv; ++i) {
+                    UnionVariant* v = variants.get(i);
+                    List<FieldDecl*> nfd = List<FieldDecl*>();
+                    int nf = v->fields.length();
+                    for (int j = 0; j < nf; ++j) {
+                        FieldDecl* fd = v->fields.get(j);
+                        nfd.add(new FieldDecl(fd->name, this.t_type(fd->fieldType, m), fd->isConst, fd->access));
+                    }
+                    nvars.add(new UnionVariant(v->name, nfd));
+                }
+                return new Decl.UnionDecl(name, clone_str_list(tps), nvars);
+            }
+            // Decls that carry no substitutable content: clone through unchanged.
+            _ => { return clone_decl(d); }
+        }
+    }
+
+    // Build a fresh instance decl from a template: mangled name, no type params,
+    // bounds cleared, body substituted.  (Python: deepcopy + set name + clear
+    // type_params + _t_decl(clone, mapping).)
+    Decl* t_decl_instantiate(Decl* d, string mangled, Map<string, TypeNode*> m) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                TypeNode* nret = this.t_type(ret, m);
+                List<Param*> nparams = this.t_params(params, m);
+                // Instance is non-generic now: record its return type.
+                this.function_returns.set(mangled, nret);
+                this.push_scope();
+                int np = nparams.length();
+                for (int i = 0; i < np; ++i) {
+                    Param* p = nparams.get(i);
+                    this.define_var(p->name, p->type);
+                }
+                Stmt* nbody = this.t_stmt(body, m);
+                this.pop_scope();
+                return new Decl.FunctionDecl(mangled, nparams, nret, nbody,
+                    List<string>(), Map<string, TypeNode*>());
+            }
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                List<FieldDecl*> nfields = List<FieldDecl*>();
+                int nf = fields.length();
+                for (int i = 0; i < nf; ++i) {
+                    FieldDecl* fd = fields.get(i);
+                    nfields.add(new FieldDecl(fd->name, this.t_type(fd->fieldType, m), fd->isConst, fd->access));
+                }
+                List<StaticFieldDecl*> nsfields = List<StaticFieldDecl*>();
+                int ns = sfields.length();
+                for (int i = 0; i < ns; ++i) {
+                    StaticFieldDecl* sfd = sfields.get(i);
+                    Expr* ninit = null;
+                    if (sfd->initializer != null) { ninit = this.t_expr(sfd->initializer, m); }
+                    nsfields.add(new StaticFieldDecl(sfd->name, this.t_type(sfd->fieldType, m),
+                        ninit, sfd->isConst, sfd->access));
+                }
+                ConstructorDecl* nctor = null;
+                if (ctor != null) { nctor = this.t_constructor(ctor, m); }
+                DestructorDecl* ndtor = null;
+                if (dtor != null) { ndtor = new DestructorDecl(this.t_stmt(dtor->body, m)); }
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                int nm = methods.length();
+                for (int i = 0; i < nm; ++i) {
+                    nmethods.add(this.t_method(methods.get(i), m));
+                }
+                return new Decl.ClassDecl(mangled, nfields, nsfields, nmethods, superName,
+                    clone_str_list(ifaces), nctor, ndtor, access,
+                    List<string>(), Map<string, TypeNode*>());
+            }
+            _ => { return clone_decl(d); }
+        }
+    }
+
+    List<Param*> t_params(List<Param*> params, Map<string, TypeNode*> m) {
+        List<Param*> out = List<Param*>();
+        int n = params.length();
+        for (int i = 0; i < n; ++i) {
+            Param* p = params.get(i);
+            out.add(new Param(p->name, this.t_type(p->type, m), p->isConst));
+        }
+        return out;
+    }
+
+    MethodDecl* t_method(MethodDecl* md, Map<string, TypeNode*> m) {
+        TypeNode* nret = this.t_type(md->returnType, m);
+        List<Param*> nparams = this.t_params(md->params, m);
+        Stmt* nbody = null;
+        if (md->body != null) {
+            this.push_scope();
+            int np = nparams.length();
+            for (int i = 0; i < np; ++i) {
+                Param* p = nparams.get(i);
+                this.define_var(p->name, p->type);
+            }
+            nbody = this.t_stmt(md->body, m);
+            this.pop_scope();
+        }
+        return new MethodDecl(md->name, nparams, nret, nbody, md->isStatic, md->access);
+    }
+
+    ConstructorDecl* t_constructor(ConstructorDecl* ctor, Map<string, TypeNode*> m) {
+        List<Param*> nparams = this.t_params(ctor->params, m);
+        List<Expr*> nsuper = List<Expr*>();
+        if (ctor->hasSuper) {
+            int na = ctor->superArgs.length();
+            for (int i = 0; i < na; ++i) {
+                nsuper.add(this.t_expr(ctor->superArgs.get(i), m));
+            }
+        }
+        this.push_scope();
+        int np = nparams.length();
+        for (int i = 0; i < np; ++i) {
+            Param* p = nparams.get(i);
+            this.define_var(p->name, p->type);
+        }
+        Stmt* nbody = this.t_stmt(ctor->body, m);
+        this.pop_scope();
+        return new ConstructorDecl(nparams, nbody, ctor->hasSuper, nsuper);
+    }
+
+    // ── Statements (return fresh) ───────────────────────────────────────────
+
+    Stmt* t_block(Stmt* block, Map<string, TypeNode*> m) {
+        match (*block) {
+            Stmt.Block(stmts) => {
+                this.push_scope();
+                List<Stmt*> out = List<Stmt*>();
+                int n = stmts.length();
+                for (int i = 0; i < n; ++i) {
+                    out.add(this.t_stmt(stmts.get(i), m));
+                }
+                this.pop_scope();
+                return new Stmt.Block(out);
+            }
+            _ => {
+                // Defensive: a non-block where a block was expected.
+                return this.t_stmt(block, m);
+            }
+        }
+    }
+
+    Stmt* t_stmt(Stmt* s, Map<string, TypeNode*> m) {
+        match (*s) {
+            Stmt.Block(stmts) => {
+                return this.t_block(s, m);
+            }
+            Stmt.ExprStmt(e) => {
+                return new Stmt.ExprStmt(this.t_expr(e, m));
+            }
+            Stmt.VarDecl(nm, ty, init, c) => {
+                Expr* ninit = this.t_expr(init, m);
+                TypeNode* nty = null;
+                if (this.is_var_type(ty)) {
+                    TypeNode* inferred = this.infer_expr_type(ninit);
+                    if (inferred != null && !(this.is_null_type(inferred)) && !(this.is_void_type(inferred))) {
+                        nty = clone_type(inferred);
+                    } else {
+                        nty = clone_type(ty);   // leave `var` for pass2
+                    }
+                } else {
+                    nty = this.t_type(ty, m);
+                }
+                this.define_var(nm, nty);
+                return new Stmt.VarDecl(nm, nty, ninit, c);
+            }
+            Stmt.AssignStmt(t, op, v) => {
+                return new Stmt.AssignStmt(this.t_expr(t, m), op, this.t_expr(v, m));
+            }
+            Stmt.IfStmt(cond, th, el) => {
+                Expr* ncond = this.t_expr(cond, m);
+                Stmt* nth = this.t_stmt(th, m);
+                Stmt* nel = null;
+                if (el != null) { nel = this.t_stmt(el, m); }
+                return new Stmt.IfStmt(ncond, nth, nel);
+            }
+            Stmt.WhileStmt(cond, body) => {
+                return new Stmt.WhileStmt(this.t_expr(cond, m), this.t_block(body, m));
+            }
+            Stmt.DoWhileStmt(body, cond) => {
+                Stmt* nbody = this.t_block(body, m);
+                Expr* ncond = this.t_expr(cond, m);
+                return new Stmt.DoWhileStmt(nbody, ncond);
+            }
+            Stmt.ForStmt(init, cond, post, body) => {
+                this.push_scope();
+                Stmt* ninit = this.t_stmt(init, m);
+                Expr* ncond = this.t_expr(cond, m);
+                Stmt* npost = this.t_post(post, m);
+                Stmt* nbody = this.t_block(body, m);
+                this.pop_scope();
+                return new Stmt.ForStmt(ninit, ncond, npost, nbody);
+            }
+            Stmt.ForeachStmt(vt, vn, it, body, c) => {
+                TypeNode* nvt = this.t_type(vt, m);
+                Expr* nit = this.t_expr(it, m);
+                if (this.is_var_type(vt)) {
+                    TypeNode* iterable_t = this.infer_expr_type(nit);
+                    TypeNode* elem_t = this.infer_foreach_element_type(iterable_t);
+                    if (elem_t != null) { nvt = elem_t; }
+                }
+                this.push_scope();
+                this.define_var(vn, nvt);
+                Stmt* nbody = this.t_block(body, m);
+                this.pop_scope();
+                return new Stmt.ForeachStmt(nvt, vn, nit, nbody, c);
+            }
+            Stmt.UsingStmt(decl, body) => {
+                this.push_scope();
+                Stmt* ndecl = this.t_stmt(decl, m);
+                Stmt* nbody = this.t_block(body, m);
+                this.pop_scope();
+                return new Stmt.UsingStmt(ndecl, nbody);
+            }
+            Stmt.ReturnStmt(v) => {
+                Expr* nv = null;
+                if (v != null) { nv = this.t_expr(v, m); }
+                return new Stmt.ReturnStmt(nv);
+            }
+            Stmt.ThrowStmt(v) => {
+                return new Stmt.ThrowStmt(this.t_expr(v, m));
+            }
+            Stmt.TryCatchStmt(body, catches) => {
+                Stmt* nbody = this.t_block(body, m);
+                List<CatchClause*> ncatches = List<CatchClause*>();
+                int n = catches.length();
+                for (int i = 0; i < n; ++i) {
+                    CatchClause* cc = catches.get(i);
+                    TypeNode* nct = this.t_type(cc->catchType, m);
+                    this.push_scope();
+                    Stmt* ccbody = this.t_block(cc->body, m);
+                    this.pop_scope();
+                    ncatches.add(new CatchClause(nct, cc->varName, ccbody));
+                }
+                return new Stmt.TryCatchStmt(nbody, ncatches);
+            }
+            Stmt.MatchStmt(scrut, arms) => {
+                Expr* nscrut = this.t_expr(scrut, m);
+                List<MatchArm*> narms = List<MatchArm*>();
+                int n = arms.length();
+                for (int i = 0; i < n; ++i) {
+                    MatchArm* arm = arms.get(i);
+                    this.push_scope();
+                    // bindings are just names; no type substitution needed.
+                    Stmt* abody = this.t_block(arm->body, m);
+                    this.pop_scope();
+                    narms.add(new MatchArm(clone_pattern(arm->pattern), abody));
+                }
+                return new Stmt.MatchStmt(nscrut, narms);
+            }
+            Stmt.BreakStmt() => { return new Stmt.BreakStmt(); }
+            Stmt.ContinueStmt() => { return new Stmt.ContinueStmt(); }
+        }
+    }
+
+    Stmt* t_post(Stmt* post, Map<string, TypeNode*> m) {
+        match (*post) {
+            Stmt.AssignStmt(t, op, v) => { return this.t_stmt(post, m); }
+            Stmt.ExprStmt(e) => { return new Stmt.ExprStmt(this.t_expr(e, m)); }
+            _ => { return this.t_stmt(post, m); }
+        }
+    }
+
+    // ── Expressions (return fresh) ──────────────────────────────────────────
+
+    Expr* t_expr(Expr* e, Map<string, TypeNode*> m) {
+        match (*e) {
+            Expr.BinaryExpr(l, op, r) => {
+                return new Expr.BinaryExpr(this.t_expr(l, m), op, this.t_expr(r, m));
+            }
+            Expr.UnaryExpr(op, o) => {
+                return new Expr.UnaryExpr(op, this.t_expr(o, m));
+            }
+            Expr.CastExpr(ty, x) => {
+                return new Expr.CastExpr(this.t_type(ty, m), this.t_expr(x, m));
+            }
+            Expr.CallExpr(nm, args, ta) => {
+                List<Expr*> nargs = List<Expr*>();
+                int n = args.length();
+                for (int i = 0; i < n; ++i) { nargs.add(this.t_expr(args.get(i), m)); }
+                return this.t_call(nm, nargs, ta, m);
+            }
+            Expr.IndirectCallExpr(c, a) => {
+                Expr* nc = this.t_expr(c, m);
+                List<Expr*> nargs = List<Expr*>();
+                int n = a.length();
+                for (int i = 0; i < n; ++i) { nargs.add(this.t_expr(a.get(i), m)); }
+                return new Expr.IndirectCallExpr(nc, nargs);
+            }
+            Expr.ClosureExpr(ps, rt, body, caps) => {
+                List<Param*> nps = this.t_params(ps, m);
+                TypeNode* nrt = this.t_type(rt, m);
+                Stmt* nbody = this.t_block(body, m);
+                return new Expr.ClosureExpr(nps, nrt, nbody, clone_str_list(caps));
+            }
+            Expr.MethodCallExpr(obj, method, args, arrow) => {
+                Expr* nobj = this.t_expr(obj, m);
+                List<Expr*> nargs = List<Expr*>();
+                int n = args.length();
+                for (int i = 0; i < n; ++i) { nargs.add(this.t_expr(args.get(i), m)); }
+                return new Expr.MethodCallExpr(nobj, method, nargs, arrow);
+            }
+            Expr.NewExpr(cn, args, ta) => {
+                List<Expr*> nargs = List<Expr*>();
+                int n = args.length();
+                for (int i = 0; i < n; ++i) { nargs.add(this.t_expr(args.get(i), m)); }
+                return this.t_new(cn, nargs, ta, m);
+            }
+            Expr.DeleteExpr(o) => {
+                return new Expr.DeleteExpr(this.t_expr(o, m));
+            }
+            Expr.AllocExpr(ty, cnt) => {
+                TypeNode* nty = this.t_type(ty, m);
+                Expr* ncnt = null;
+                if (cnt != null) { ncnt = this.t_expr(cnt, m); }
+                return new Expr.AllocExpr(nty, ncnt);
+            }
+            Expr.FreeExpr(o) => {
+                return new Expr.FreeExpr(this.t_expr(o, m));
+            }
+            Expr.FieldAccessExpr(obj, f) => {
+                return new Expr.FieldAccessExpr(this.t_expr(obj, m), f);
+            }
+            Expr.ArrowAccessExpr(p, f) => {
+                return new Expr.ArrowAccessExpr(this.t_expr(p, m), f);
+            }
+            Expr.IndexExpr(a, i) => {
+                return new Expr.IndexExpr(this.t_expr(a, m), this.t_expr(i, m));
+            }
+            Expr.AddressOfExpr(o) => {
+                return new Expr.AddressOfExpr(this.t_expr(o, m));
+            }
+            Expr.DerefExpr(o) => {
+                return new Expr.DerefExpr(this.t_expr(o, m));
+            }
+            // Identifier / Literal / Null / This / Super carry nothing.
+            _ => { return clone_expr(e); }
+        }
+    }
+
+    // CallExpr rewrite (args already substituted, passed in as nargs).
+    Expr* t_call(string name, List<Expr*> nargs, List<TypeNode*> type_args, Map<string, TypeNode*> m) {
+        if (type_args.length() > 0) {
+            List<TypeNode*> concrete = List<TypeNode*>();
+            int n = type_args.length();
+            for (int i = 0; i < n; ++i) { concrete.add(this.t_type(type_args.get(i), m)); }
+            string kind = "class";
+            if (this.func_templates.has(name)) { kind = "func"; }
+            string mn = this.register(kind, name, concrete, 0, 0);
+            return new Expr.CallExpr(mn, nargs, List<TypeNode*>());
+        }
+        if (this.func_templates.has(name)) {
+            List<TypeNode*> concrete = this.infer_instantiation("func", name, nargs, 0, 0);
+            string mn = this.register("func", name, concrete, 0, 0);
+            return new Expr.CallExpr(mn, nargs, List<TypeNode*>());
+        }
+        if (this.class_templates.has(name)) {
+            List<TypeNode*> concrete = this.infer_instantiation("class", name, nargs, 0, 0);
+            string mn = this.register("class", name, concrete, 0, 0);
+            return new Expr.CallExpr(mn, nargs, List<TypeNode*>());
+        }
+        if (m.has(name)) {
+            // Stack construction through a type parameter: T(args).  The mapping
+            // holds the canonical (pointer) form for class arguments, so unwrap
+            // it to the bare class name being constructed.
+            string cn = this.construct_name(m.getOr(name, null), name);
+            return new Expr.CallExpr(cn, nargs, List<TypeNode*>());
+        }
+        return new Expr.CallExpr(name, nargs, clone_type_list(type_args));
+    }
+
+    Expr* t_new(string class_name, List<Expr*> nargs, List<TypeNode*> type_args, Map<string, TypeNode*> m) {
+        if (type_args.length() > 0) {
+            List<TypeNode*> concrete = List<TypeNode*>();
+            int n = type_args.length();
+            for (int i = 0; i < n; ++i) { concrete.add(this.t_type(type_args.get(i), m)); }
+            string mn = this.register("class", class_name, concrete, 0, 0);
+            return new Expr.NewExpr(mn, nargs, List<TypeNode*>());
+        }
+        if (this.class_templates.has(class_name)) {
+            List<TypeNode*> concrete = this.infer_instantiation("class", class_name, nargs, 0, 0);
+            string mn = this.register("class", class_name, concrete, 0, 0);
+            return new Expr.NewExpr(mn, nargs, List<TypeNode*>());
+        }
+        if (m.has(class_name)) {
+            string cn = this.construct_name(m.getOr(class_name, null), class_name);
+            return new Expr.NewExpr(cn, nargs, List<TypeNode*>());
+        }
+        return new Expr.NewExpr(class_name, nargs, clone_type_list(type_args));
+    }
+
+    // ── Generic inference and bounds ────────────────────────────────────────
+
+    // Infer type args from call/ctor argument types.  `args` are already-
+    // substituted Expr nodes.
+    List<TypeNode*> infer_instantiation(string kind, string base, List<Expr*> args, int line, int col) {
+        Decl* template = null;
+        if (kind == "func") { template = this.func_templates.getOr(base, null); }
+        else { template = this.class_templates.getOr(base, null); }
+
+        List<Param*> params = List<Param*>();
+        List<string> tparams = List<string>();
+        match (*template) {
+            Decl.FunctionDecl(name, fps, ret, body, tps, bounds) => {
+                if (kind == "func") { params = fps; }
+                tparams = tps;
+            }
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                tparams = tps;
+                if (ctor != null) { params = ctor->params; }
+            }
+            _ => { }
+        }
+
+        if (params.length() != args.length()) {
+            throw new AnalyzeError(
+                "cannot infer type arguments for '" + base + "': expected "
+                + strings::intToStr(params.length()) + " argument(s), got "
+                + strings::intToStr(args.length()),
+                line, col);
+        }
+
+        Map<string, TypeNode*> mapping = Map<string, TypeNode*>();
+        Map<string, bool> type_param_set = Map<string, bool>();
+        int ntp = tparams.length();
+        for (int i = 0; i < ntp; ++i) { type_param_set.set(tparams.get(i), true); }
+
+        int np = params.length();
+        for (int i = 0; i < np; ++i) {
+            Param* param = params.get(i);
+            Expr* arg = args.get(i);
+            TypeNode* arg_t = this.infer_expr_type(arg);
+            if (arg_t == null) {
+                throw new AnalyzeError("cannot infer type arguments for '" + base + "'", line, col);
+            }
+            this.unify_type_args(param->type, arg_t, type_param_set, mapping, line, col);
+        }
+
+        List<TypeNode*> concrete = List<TypeNode*>();
+        for (int i = 0; i < ntp; ++i) {
+            string tp = tparams.get(i);
+            if (!(mapping.has(tp))) {
+                throw new AnalyzeError(
+                    "cannot infer type argument '" + tp + "' for '" + base + "'",
+                    line, col);
+            }
+            concrete.add(mapping.getOr(tp, null));
+        }
+        return concrete;
+    }
+
+    void unify_type_args(TypeNode* pattern, TypeNode* actual, Map<string, bool> type_params,
+                         Map<string, TypeNode*> mapping, int line, int col) {
+        match (*pattern) {
+            TypeNode.NamedType(pn) => {
+                if (type_params.has(pn)) {
+                    if (mapping.has(pn)) {
+                        TypeNode* previous = mapping.getOr(pn, null);
+                        if (!(types_equal(previous, actual))) {
+                            throw new AnalyzeError(
+                                "cannot infer type argument '" + pn + "' from both '"
+                                + type_str(previous) + "' and '" + type_str(actual) + "'",
+                                line, col);
+                        }
+                    }
+                    mapping.set(pn, clone_type(actual));
+                    return;
+                }
+                return;
+            }
+            TypeNode.PointerType(pb) => {
+                match (*actual) {
+                    TypeNode.PointerType(ab) => {
+                        this.unify_type_args(pb, ab, type_params, mapping, line, col);
+                    }
+                    _ => { }
+                }
+                return;
+            }
+            TypeNode.ArrayType(pb, psz) => {
+                match (*actual) {
+                    TypeNode.ArrayType(ab, asz) => {
+                        this.unify_type_args(pb, ab, type_params, mapping, line, col);
+                    }
+                    _ => { }
+                }
+                return;
+            }
+            TypeNode.FunctionPointerType(pps, pret) => {
+                match (*actual) {
+                    TypeNode.FunctionPointerType(aps, aret) => {
+                        int lim = pps.length();
+                        if (aps.length() < lim) { lim = aps.length(); }
+                        for (int i = 0; i < lim; ++i) {
+                            this.unify_type_args(pps.get(i), aps.get(i), type_params, mapping, line, col);
+                        }
+                        this.unify_type_args(pret, aret, type_params, mapping, line, col);
+                    }
+                    _ => { }
+                }
+                return;
+            }
+            TypeNode.GenericType(gn, gargs) => {
+                ArgsOpt* actual_args = this.generic_actual_args(gn, actual);
+                if (!(actual_args->found) || actual_args->args.length() != gargs.length()) {
+                    return;
+                }
+                int n = gargs.length();
+                for (int i = 0; i < n; ++i) {
+                    this.unify_type_args(gargs.get(i), actual_args->args.get(i), type_params, mapping, line, col);
+                }
+                return;
+            }
+            _ => { return; }
+        }
+    }
+
+    // Recover a generic's actual args from a GenericType or a registered mangled
+    // NamedType.  Returns null when not recoverable.
+    ArgsOpt* generic_actual_args(string base, TypeNode* actual) {
+        match (*actual) {
+            TypeNode.GenericType(gn, gargs) => {
+                if (gn == base) { return new ArgsOpt(true, gargs); }
+                return new ArgsOpt(false, List<TypeNode*>());
+            }
+            TypeNode.NamedType(n) => {
+                if (this.class_instance_args.has(n)) {
+                    InstanceArgs* info = this.class_instance_args.getOr(n, null);
+                    if (info->base == base) { return new ArgsOpt(true, info->args); }
+                }
+                return new ArgsOpt(false, List<TypeNode*>());
+            }
+            _ => { return new ArgsOpt(false, List<TypeNode*>()); }
+        }
+    }
+
+    void check_type_arg_bounds(Decl* template, List<TypeNode*> args, int line, int col) {
+        List<string> tparams = List<string>();
+        Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+        match (*template) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+                tparams = tps; bounds = bnds;
+            }
+            Decl.FunctionDecl(name, params, ret, body, tps, bnds) => {
+                tparams = tps; bounds = bnds;
+            }
+            _ => { return; }
+        }
+        Map<string, TypeNode*> mapping = zip_mapping(tparams, args);
+        int n = tparams.length();
+        int an = args.length();
+        int lim = n;
+        if (an < lim) { lim = an; }
+        for (int i = 0; i < lim; ++i) {
+            string tp = tparams.get(i);
+            TypeNode* arg = args.get(i);
+            if (!(bounds.has(tp))) { continue; }
+            TypeNode* bound = bounds.getOr(tp, null);
+            TypeNode* concrete_bound = this.t_type(clone_type(bound), mapping);
+            if (!(this.type_satisfies_bound(arg, concrete_bound))) {
+                throw new AnalyzeError(
+                    "type argument '" + type_str(arg) + "' does not satisfy bound '"
+                    + type_str(concrete_bound) + "' for '" + tp + "'",
+                    line, col);
+            }
+        }
+    }
+
+    bool type_satisfies_bound(TypeNode* arg0, TypeNode* bound0) {
+        TypeNode* arg = this.strip_class_ptr(arg0);
+        TypeNode* bound = this.strip_class_ptr(bound0);
+        if (types_equal(arg, bound)) { return true; }
+        match (*arg) {
+            TypeNode.PointerType(ab) => {
+                match (*bound) {
+                    TypeNode.PointerType(bb) => {
+                        return this.type_satisfies_bound(ab, bb);
+                    }
+                    _ => { }
+                }
+            }
+            TypeNode.NamedType(an) => {
+                match (*bound) {
+                    TypeNode.NamedType(bn) => {
+                        if (mono_is_primitive(bn) || this.enum_names.has(bn)) {
+                            return an == bn;
+                        }
+                        if (this.interface_names.has(bn)) {
+                            return this.class_implements(an, bn);
+                        }
+                        if (this.class_names.has(bn)) {
+                            return this.class_extends(an, bn);
+                        }
+                        throw new AnalyzeError("unknown bound type '" + bn + "'", 0, 0);
+                    }
+                    _ => { }
+                }
+            }
+            _ => { }
+        }
+        return false;
+    }
+
+    bool class_extends(string class_name, string bound_name) {
+        string current = class_name;
+        bool have = true;
+        while (have) {
+            if (current == bound_name) { return true; }
+            if (this.class_supers.has(current)) {
+                string nxt = this.class_supers.getOr(current, "");
+                if (nxt == "") { have = false; }
+                else { current = nxt; }
+            } else {
+                have = false;
+            }
+        }
+        return false;
+    }
+
+    bool class_implements(string class_name, string iface) {
+        string current = class_name;
+        bool have = true;
+        while (have) {
+            if (this.class_interfaces.has(current)) {
+                List<string> ifs = this.class_interfaces.getOr(current, null);
+                int n = ifs.length();
+                for (int i = 0; i < n; ++i) {
+                    if (ifs.get(i) == iface) { return true; }
+                }
+            }
+            if (this.class_supers.has(current)) {
+                string nxt = this.class_supers.getOr(current, "");
+                if (nxt == "") { have = false; }
+                else { current = nxt; }
+            } else {
+                have = false;
+            }
+        }
+        return false;
+    }
+
+    // ── Lightweight scope + inference ───────────────────────────────────────
+
+    void push_scope() {
+        this.scopes.add(Map<string, TypeNode*>());
+    }
+
+    void pop_scope() {
+        int n = this.scopes.length();
+        if (n > 0) { this.scopes.removeAt(n - 1); }
+    }
+
+    void define_var(string name, TypeNode* t) {
+        int n = this.scopes.length();
+        if (n > 0) { this.scopes.get(n - 1).set(name, t); }
+    }
+
+    TypeNode* lookup_var(string name) {
+        int n = this.scopes.length();
+        for (int i = n - 1; i >= 0; --i) {
+            Map<string, TypeNode*> sc = this.scopes.get(i);
+            if (sc.has(name)) { return sc.getOr(name, null); }
+        }
+        return null;
+    }
+
+    bool is_var_type(TypeNode* t) {
+        match (*t) {
+            TypeNode.NamedType(n) => { return n == "var"; }
+            _ => { return false; }
+        }
+    }
+
+    bool is_null_type(TypeNode* t) {
+        match (*t) {
+            TypeNode.NamedType(n) => { return n == "null"; }
+            _ => { return false; }
+        }
+    }
+
+    bool is_void_type(TypeNode* t) {
+        match (*t) {
+            TypeNode.NamedType(n) => { return n == "void"; }
+            _ => { return false; }
+        }
+    }
+
+    // Lightweight type inference; returns null when unknown.
+    TypeNode* infer_expr_type(Expr* e) {
+        match (*e) {
+            Expr.LiteralExpr(k, v) => {
+                return new TypeNode.NamedType(k);
+            }
+            Expr.NullExpr() => {
+                return new TypeNode.NamedType("null");
+            }
+            Expr.IdentifierExpr(n) => {
+                return this.lookup_var(n);
+            }
+            Expr.CallExpr(nm, args, ta) => {
+                if (this.function_returns.has(nm)) {
+                    return this.function_returns.getOr(nm, null);
+                }
+                if (this.class_names.has(nm)) {
+                    return new TypeNode.NamedType(nm);
+                }
+                return null;
+            }
+            Expr.NewExpr(cn, args, ta) => {
+                return new TypeNode.PointerType(new TypeNode.NamedType(cn));
+            }
+            Expr.CastExpr(ty, x) => {
+                return ty;
+            }
+            Expr.IndexExpr(a, i) => {
+                TypeNode* container_t = this.infer_expr_type(a);
+                if (container_t == null) { return null; }
+                match (*container_t) {
+                    TypeNode.ArrayType(b, sz) => { return b; }
+                    TypeNode.PointerType(b) => { return b; }
+                    TypeNode.NamedType(n) => {
+                        if (n == "string") { return new TypeNode.NamedType("char"); }
+                        return null;
+                    }
+                    _ => { return null; }
+                }
+            }
+            Expr.BinaryExpr(l, op, r) => {
+                TypeNode* left_t = this.infer_expr_type(l);
+                TypeNode* right_t = this.infer_expr_type(r);
+                if (left_t == null || right_t == null) { return null; }
+                try {
+                    return binary_result_type(op, left_t, right_t);
+                } catch (AnalyzeError* err) {
+                    return null;
+                } catch (Exception* ex) {
+                    return null;
+                }
+            }
+            Expr.UnaryExpr(op, o) => {
+                TypeNode* operand_t = this.infer_expr_type(o);
+                if (operand_t == null) { return null; }
+                try {
+                    return unary_result_type(op, operand_t);
+                } catch (AnalyzeError* err) {
+                    return null;
+                } catch (Exception* ex) {
+                    return null;
+                }
+            }
+            Expr.AddressOfExpr(o) => {
+                TypeNode* operand_t = this.infer_expr_type(o);
+                if (operand_t == null) { return null; }
+                return new TypeNode.PointerType(operand_t);
+            }
+            Expr.DerefExpr(o) => {
+                TypeNode* operand_t = this.infer_expr_type(o);
+                if (operand_t == null) { return null; }
+                match (*operand_t) {
+                    TypeNode.PointerType(b) => { return b; }
+                    _ => { return null; }
+                }
+            }
+            _ => { return null; }
+        }
+    }
+
+    TypeNode* infer_foreach_element_type(TypeNode* iterable_t) {
+        if (iterable_t == null) { return null; }
+        match (*iterable_t) {
+            TypeNode.ArrayType(b, sz) => { return b; }
+            TypeNode.NamedType(n) => {
+                if (n == "string") { return new TypeNode.NamedType("char"); }
+                return null;
+            }
+            _ => { return null; }
+        }
+    }
+}
+
+// ── Module entry point (contract §8) ────────────────────────────────────────
+
+Program* monomorphize(Program* program) {
+    Monomorphizer* mono = new Monomorphizer();
+    return mono->run(program);
+}

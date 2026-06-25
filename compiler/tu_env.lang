@@ -1,0 +1,146 @@
+// compiler/tu_env.lang — env-coupled type utilities.
+//
+// Port of the env-coupled half of analyser/type_utils.py (contract §3):
+// is_assignable, _class_handle_name (→ class_handle_name, returns "" not None),
+// superclass_chain, implements_interface.  These need GlobalEnv (subclass /
+// interface info) so they live here, separate from tu_core.lang.
+
+import "ast.lang";
+import "tu_core.lang";
+import "symtab.lang";
+import "std/list.lang";
+import "std/map.lang";
+
+// ── class_handle_name ──────────────────────────────────────────────────────
+// The class name behind a class value `C` or a single pointer `C*`, else "".
+// Used to treat a class value and a pointer to it as the same handle.
+string class_handle_name(TypeNode* t, GlobalEnv* env) {
+    match (*t) {
+        TypeNode.NamedType(n) => {
+            if (env->is_class(n)) { return n; }
+            return "";
+        }
+        TypeNode.PointerType(b) => {
+            match (*b) {
+                TypeNode.NamedType(bn) => {
+                    if (env->is_class(bn)) { return bn; }
+                    return "";
+                }
+                _ => { return ""; }
+            }
+        }
+        _ => { return ""; }
+    }
+}
+
+// ── superclass_chain ────────────────────────────────────────────────────────
+// [class_name, super, super-of-super, ...]; stops at "" (no super) or a cycle.
+List<string> superclass_chain(string class_name, GlobalEnv* env) {
+    List<string> chain = List<string>();
+    string current = class_name;
+    while (true) {
+        // cycle guard: stop if already seen
+        bool seen = false;
+        int n = chain.length();
+        for (int i = 0; i < n; ++i) {
+            if (chain.get(i) == current) { seen = true; }
+        }
+        if (seen) { break; }
+        chain.add(current);
+        if (!(env->classes.has(current))) { break; }
+        ClassInfo* info = env->classes.getOr(current, null);
+        current = info->superclass;
+        if (current == "") { break; }
+    }
+    return chain;
+}
+
+// ── implements_interface ────────────────────────────────────────────────────
+bool implements_interface(string class_name, string iface_name, GlobalEnv* env) {
+    List<string> chain = superclass_chain(class_name, env);
+    int n = chain.length();
+    for (int i = 0; i < n; ++i) {
+        string cls = chain.get(i);
+        if (!(env->classes.has(cls))) { break; }
+        ClassInfo* info = env->classes.getOr(cls, null);
+        List<string> ifaces = info->interfaces;
+        int m = ifaces.length();
+        for (int j = 0; j < m; ++j) {
+            if (ifaces.get(j) == iface_name) { return true; }
+        }
+    }
+    return false;
+}
+
+// ── is_assignable ────────────────────────────────────────────────────────────
+bool is_assignable(TypeNode* from_t, TypeNode* to_t, GlobalEnv* env) {
+    if (types_equal(from_t, to_t)) { return true; }
+
+    // null → any pointer / function pointer / nullable
+    bool from_null = is_named(from_t, "null");
+    if (from_null) {
+        if (is_pointer(to_t)) { return true; }
+        if (is_function_pointer(to_t)) { return true; }
+        if (is_nullable(to_t)) { return true; }
+    }
+
+    // T → T?  (implicit promotion to nullable)
+    match (*to_t) {
+        TypeNode.NullableType(tb) => {
+            if (types_equal(from_t, tb)) { return true; }
+        }
+        _ => { }
+    }
+
+    // Subclass pointer covariance
+    match (*from_t) {
+        TypeNode.PointerType(fb) => {
+            match (*to_t) {
+                TypeNode.PointerType(tb) => {
+                    match (*fb) {
+                        TypeNode.NamedType(fbn) => {
+                            match (*tb) {
+                                TypeNode.NamedType(tbn) => {
+                                    if (env->is_class(fbn) && env->is_class(tbn)) {
+                                        List<string> chain = superclass_chain(fbn, env);
+                                        // tbn in chain[1:]
+                                        int n = chain.length();
+                                        for (int i = 1; i < n; ++i) {
+                                            if (chain.get(i) == tbn) { return true; }
+                                        }
+                                    }
+                                    if (env->is_class(fbn) && env->is_interface(tbn)) {
+                                        if (implements_interface(fbn, tbn, env)) { return true; }
+                                    }
+                                }
+                                _ => { }
+                            }
+                        }
+                        _ => { }
+                    }
+                }
+                _ => { }
+            }
+        }
+        _ => { }
+    }
+
+    // Class value `C` and pointer `C*` denote the same handle; mutually
+    // assignable across the mixed forms (one value, one pointer).
+    string f_cls = class_handle_name(from_t, env);
+    string t_cls = class_handle_name(to_t, env);
+    bool mixed = is_pointer(from_t) != is_pointer(to_t);
+    if (f_cls != "" && t_cls != "" && mixed) {
+        if (f_cls == t_cls) { return true; }
+        List<string> chain = superclass_chain(f_cls, env);
+        int n = chain.length();
+        for (int i = 1; i < n; ++i) {
+            if (chain.get(i) == t_cls) { return true; }
+        }
+        if (env->is_interface(t_cls) && implements_interface(f_cls, t_cls, env)) {
+            return true;
+        }
+    }
+
+    return false;
+}

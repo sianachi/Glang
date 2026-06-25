@@ -1,0 +1,627 @@
+// compiler/pass1.lang — Pass 1 collector (port of analyser/pass1_collector.py).
+//
+// Registers every top-level name into a GlobalEnv: class shells first, then
+// enum/union/interface names, then their bodies, then functions/modifiers,
+// then populates classes; finally validates direct field cycles, the
+// inheritance graph, and builds vtables.  Mirrors Pass1Collector 1:1.
+//
+// pass1 POPULATES the (mutable) GlobalEnv and only reads the AST (resolve_type).
+// Union-variant fields are never mutated.
+
+import "ast.lang";
+import "symtab.lang";
+import "tu_core.lang";
+import "std/list.lang";
+import "std/map.lang";
+
+// ── entry point ─────────────────────────────────────────────────────────────
+void pass1_collect(GlobalEnv* env, Program* program) {
+    _register_class_names(env, program);
+    _register_non_class_declarations(env, program);
+    _populate_classes(env, program);
+    _validate_direct_class_field_cycles(env);
+    _validate_inheritance(env);
+    _build_vtables(env);
+}
+
+// ── Phase 1: register all top-level names ───────────────────────────────────
+
+void _register_class_names(GlobalEnv* env, Program* program) {
+    int n = program->declarations.length();
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds) => {
+                _register_class_shell(env, decl);
+            }
+            _ => { }
+        }
+    }
+}
+
+void _register_non_class_declarations(GlobalEnv* env, Program* program) {
+    int n = program->declarations.length();
+    // Type *names* (shells) before resolving member/field types so forward
+    // references between unions/interfaces/enums (and to classes, already
+    // shelled) resolve regardless of declaration order.
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.EnumDecl(nm, vs) => { _register_enum(env, decl); }
+            _ => { }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.UnionDecl(nm, tps, vs) => { _register_union_shell(env, decl); }
+            _ => { }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.InterfaceDecl(nm, ms) => { _register_interface_shell(env, decl); }
+            _ => { }
+        }
+    }
+    // Bodies: every type name now exists, so resolve field/method types.
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.UnionDecl(nm, tps, vs) => { _resolve_union_fields(env, decl); }
+            _ => { }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.InterfaceDecl(nm, ms) => { _resolve_interface_methods(env, decl); }
+            _ => { }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.FunctionDecl(nm, ps, rt, body, tps, bnds) => { _register_function(env, decl); }
+            _ => { }
+        }
+    }
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.ModifierDecl(tps, target, ms) => { _register_modifier(env, decl); }
+            _ => { }
+        }
+    }
+}
+
+bool _name_taken(GlobalEnv* env, string name) {
+    return env->functions.has(name)
+        || env->classes.has(name)
+        || env->interfaces.has(name)
+        || env->enums.has(name)
+        || env->unions.has(name);
+}
+
+void _register_modifier(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.ModifierDecl(tps, target, methods) => {
+            string target_name = type_str(target);
+            if (!(env->modifier_methods.has(target_name))) {
+                env->modifier_methods.set(target_name, new Map<string, MethodDecl*>());
+            }
+            Map<string, MethodDecl*>* bucket = env->modifier_methods.getOr(target_name, null);
+            int n = methods.length();
+            for (int i = 0; i < n; ++i) {
+                MethodDecl* md = methods.get(i);
+                if (bucket->has(md->name)) {
+                    throw new AnalyzeError(
+                        "duplicate modifier method '" + md->name + "' for type '" + target_name + "'",
+                        0, 0);
+                }
+                env->resolve_type(md->returnType);
+                int pn = md->params.length();
+                for (int j = 0; j < pn; ++j) {
+                    env->resolve_type(md->params.get(j)->type);
+                }
+                bucket->set(md->name, md);
+            }
+        }
+        _ => { }
+    }
+}
+
+void _register_function(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.FunctionDecl(name, params, ret, body, tps, bnds) => {
+            if (_name_taken(env, name)) {
+                throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
+            }
+            env->resolve_type(ret);
+            int pn = params.length();
+            for (int i = 0; i < pn; ++i) {
+                env->resolve_type(params.get(i)->type);
+            }
+            env->functions.set(name, new FunctionInfo(name, params, ret, decl));
+        }
+        _ => { }
+    }
+}
+
+void _register_class_shell(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+            if (_name_taken(env, name)) {
+                throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
+            }
+            List<string> ifaceCopy = List<string>();
+            int icount = ifaces.length();
+            for (int i = 0; i < icount; ++i) {
+                ifaceCopy.add(ifaces.get(i));
+            }
+            env->classes.set(name, new ClassInfo(
+                name,
+                new Map<string, FieldDecl*>(),
+                new Map<string, StaticFieldDecl*>(),
+                new Map<string, MethodDecl*>(),
+                new Map<string, MethodDecl*>(),
+                new Map<string, MethodDecl*>(),
+                ctor,
+                dtor,
+                superName,
+                ifaceCopy,
+                decl,
+                access));
+        }
+        _ => { }
+    }
+}
+
+void _populate_classes(GlobalEnv* env, Program* program) {
+    int n = program->declarations.length();
+    for (int i = 0; i < n; ++i) {
+        Decl* decl = program->declarations.get(i);
+        match (*decl) {
+            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds) => {
+                _populate_class(env, decl);
+            }
+            _ => { }
+        }
+    }
+}
+
+void _populate_class(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+            Map<string, FieldDecl*>* fmap = new Map<string, FieldDecl*>();
+            int fcount = fields.length();
+            for (int i = 0; i < fcount; ++i) {
+                FieldDecl* fd = fields.get(i);
+                env->resolve_type(fd->fieldType);
+                fmap->set(fd->name, fd);
+            }
+
+            Map<string, StaticFieldDecl*>* sfmap = new Map<string, StaticFieldDecl*>();
+            int sfn = sfields.length();
+            for (int i = 0; i < sfn; ++i) {
+                StaticFieldDecl* sfd = sfields.get(i);
+                env->resolve_type(sfd->fieldType);
+                sfmap->set(sfd->name, sfd);
+            }
+
+            Map<string, MethodDecl*>* imap = new Map<string, MethodDecl*>();
+            Map<string, MethodDecl*>* smap = new Map<string, MethodDecl*>();
+            int mn = methods.length();
+            for (int i = 0; i < mn; ++i) {
+                MethodDecl* md = methods.get(i);
+                env->resolve_type(md->returnType);
+                int pn = md->params.length();
+                for (int j = 0; j < pn; ++j) {
+                    env->resolve_type(md->params.get(j)->type);
+                }
+                if (md->isStatic) {
+                    smap->set(md->name, md);
+                } else {
+                    imap->set(md->name, md);
+                }
+            }
+
+            if (ctor != null) {
+                int cpn = ctor->params.length();
+                for (int j = 0; j < cpn; ++j) {
+                    env->resolve_type(ctor->params.get(j)->type);
+                }
+            }
+
+            List<string> ifaceCopy = List<string>();
+            int icount = ifaces.length();
+            for (int i = 0; i < icount; ++i) {
+                ifaceCopy.add(ifaces.get(i));
+            }
+
+            ClassInfo* info = env->classes.getOr(name, null);
+            info->fields = fmap;
+            info->static_fields = sfmap;
+            info->instance_methods = imap;
+            info->static_methods = smap;
+            info->constructor = ctor;
+            info->destructor = dtor;
+            info->superclass = superName;
+            info->interfaces = ifaceCopy;
+            info->decl = decl;
+            info->access = access;
+        }
+        _ => { }
+    }
+}
+
+void _register_interface_shell(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.InterfaceDecl(name, methods) => {
+            if (_name_taken(env, name)) {
+                throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
+            }
+            env->interfaces.set(name, new InterfaceInfo(name, new Map<string, MethodDecl*>(), decl));
+        }
+        _ => { }
+    }
+}
+
+void _resolve_interface_methods(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.InterfaceDecl(name, methods) => {
+            Map<string, MethodDecl*>* mmap = env->interfaces.getOr(name, null)->methods;
+            int mn = methods.length();
+            for (int i = 0; i < mn; ++i) {
+                MethodDecl* md = methods.get(i);
+                env->resolve_type(md->returnType);
+                int pn = md->params.length();
+                for (int j = 0; j < pn; ++j) {
+                    env->resolve_type(md->params.get(j)->type);
+                }
+                mmap->set(md->name, md);
+            }
+        }
+        _ => { }
+    }
+}
+
+void _register_enum(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.EnumDecl(name, variants) => {
+            if (_name_taken(env, name)) {
+                throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
+            }
+            Map<string, int>* vmap = new Map<string, int>();
+            int next_val = 0;
+            int vn = variants.length();
+            for (int i = 0; i < vn; ++i) {
+                EnumVariant* v = variants.get(i);
+                if (vmap->has(v->name)) {
+                    throw new AnalyzeError("duplicate enum variant '" + v->name + "'", 0, 0);
+                }
+                int val = next_val;
+                if (v->hasValue) {
+                    val = v->value;
+                }
+                vmap->set(v->name, val);
+                next_val = val + 1;
+            }
+            env->enums.set(name, new EnumInfo(name, vmap, decl));
+        }
+        _ => { }
+    }
+}
+
+void _register_union_shell(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.UnionDecl(name, typeParams, variants) => {
+            if (_name_taken(env, name)) {
+                throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
+            }
+            // Register the union name (empty variants) so self-referential and
+            // forward cross-union field types resolve once all shells exist.
+            env->unions.set(name, new UnionInfo(name, typeParams, new Map<string, UnionVariantInfo*>(), decl));
+        }
+        _ => { }
+    }
+}
+
+void _resolve_union_fields(GlobalEnv* env, Decl* decl) {
+    match (*decl) {
+        Decl.UnionDecl(name, typeParams, variants) => {
+            Map<string, UnionVariantInfo*>* placeholder = env->unions.getOr(name, null)->variants;
+            int vn = variants.length();
+            for (int i = 0; i < vn; ++i) {
+                UnionVariant* v = variants.get(i);
+                if (placeholder->has(v->name)) {
+                    throw new AnalyzeError("duplicate union variant '" + v->name + "'", 0, 0);
+                }
+                int fcount = v->fields.length();
+                for (int j = 0; j < fcount; ++j) {
+                    env->resolve_type(v->fields.get(j)->fieldType);
+                }
+                placeholder->set(v->name, new UnionVariantInfo(v->name, v->fields));
+            }
+        }
+        _ => { }
+    }
+}
+
+// ── Phase 2: validate the inheritance graph ─────────────────────────────────
+
+void _validate_inheritance(GlobalEnv* env) {
+    int cn = env->classes.size;
+    for (int i = 0; i < cn; ++i) {
+        ClassInfo* info = env->classes.vals[i];
+
+        // "" means no superclass (Python's None).
+        if (info->superclass != "") {
+            if (env->interfaces.has(info->superclass)) {
+                throw new AnalyzeError(
+                    "cannot extend interface '" + info->superclass + "'; use implements", 0, 0);
+            }
+            if (!(env->classes.has(info->superclass))) {
+                throw new AnalyzeError(
+                    "unknown class '" + info->superclass + "' in extends clause", 0, 0);
+            }
+        }
+
+        int ifn = info->interfaces.length();
+        for (int j = 0; j < ifn; ++j) {
+            string iface = info->interfaces.get(j);
+            if (env->classes.has(iface)) {
+                throw new AnalyzeError(
+                    "cannot implement class '" + iface + "'; use extends", 0, 0);
+            }
+            if (!(env->interfaces.has(iface))) {
+                throw new AnalyzeError(
+                    "unknown interface '" + iface + "' in implements clause", 0, 0);
+            }
+        }
+    }
+
+    // Circular inheritance detection.
+    for (int i = 0; i < cn; ++i) {
+        _detect_cycle(env, env->classes.keys[i]);
+    }
+}
+
+void _detect_cycle(GlobalEnv* env, string start) {
+    List<string> visited = List<string>();
+    string current = start;
+    bool hasCurrent = true;
+    while (hasCurrent) {
+        if (visited.contains(current)) {
+            throw new AnalyzeError(
+                "circular inheritance involving class '" + current + "'", 0, 0);
+        }
+        visited.add(current);
+        if (!(env->classes.has(current))) {
+            hasCurrent = false;
+        } else {
+            ClassInfo* info = env->classes.getOr(current, null);
+            if (info->superclass == "") {
+                hasCurrent = false;
+            } else {
+                current = info->superclass;
+            }
+        }
+    }
+}
+
+void _validate_direct_class_field_cycles(GlobalEnv* env) {
+    // Build edge graph: class -> list of (target class name) from direct fields.
+    // visiting/visited sets emulated with string lists.
+    List<string> visiting = List<string>();
+    List<string> visited = List<string>();
+    int cn = env->classes.size;
+    for (int i = 0; i < cn; ++i) {
+        _field_cycle_visit(env, env->classes.keys[i], visiting, visited);
+    }
+}
+
+void _field_cycle_visit(GlobalEnv* env, string class_name, List<string> visiting, List<string> visited) {
+    if (visited.contains(class_name)) {
+        return;
+    }
+    visiting.add(class_name);
+    ClassInfo* info = env->classes.getOr(class_name, null);
+    List<FieldDecl*> declFields = _class_decl_fields(info->decl);
+    int fcount = declFields.length();
+    for (int i = 0; i < fcount; ++i) {
+        FieldDecl* fd = declFields.get(i);
+        string target = _direct_class_field_target(env, fd->fieldType);
+        if (target != "") {
+            if (visiting.contains(target)) {
+                throw new AnalyzeError(
+                    "direct class field cycle involving '" + target + "'", 0, 0);
+            }
+            if (env->classes.has(target)) {
+                _field_cycle_visit(env, target, visiting, visited);
+            }
+        }
+    }
+    // visiting.discard(class_name)
+    _list_remove(visiting, class_name);
+    visited.add(class_name);
+}
+
+// Returns the class name a field type points *directly* at (not through a
+// pointer), or "" when none.
+string _direct_class_field_target(GlobalEnv* env, TypeNode* type_node) {
+    match (*type_node) {
+        TypeNode.PointerType(b) => { return ""; }
+        TypeNode.ArrayType(b, sz) => { return _direct_class_field_target(env, b); }
+        TypeNode.NamedType(nm) => {
+            if (env->classes.has(nm)) {
+                return nm;
+            }
+            return "";
+        }
+        _ => { return ""; }
+    }
+}
+
+// ── Phase 3: build vtables in topological order ─────────────────────────────
+
+void _build_vtables(GlobalEnv* env) {
+    List<string> order = _topological_order(env);
+    int on = order.length();
+    for (int i = 0; i < on; ++i) {
+        _build_vtable_for(env, order.get(i));
+    }
+
+    // Interface completeness check.
+    int cn = env->classes.size;
+    for (int i = 0; i < cn; ++i) {
+        ClassInfo* info = env->classes.vals[i];
+        int ifn = info->interfaces.length();
+        for (int j = 0; j < ifn; ++j) {
+            string iface_name = info->interfaces.get(j);
+            InterfaceInfo* iface = env->interfaces.getOr(iface_name, null);
+            int mn = iface->methods.size;
+            for (int k = 0; k < mn; ++k) {
+                string method_name = iface->methods.keys[k];
+                MethodDecl* iface_method = iface->methods.vals[k];
+                if (!(info->instance_methods.has(method_name))) {
+                    throw new AnalyzeError(
+                        "class '" + info->name + "' does not implement '"
+                        + iface_name + "." + method_name + "'", 0, 0);
+                }
+                MethodDecl* impl = info->instance_methods.getOr(method_name, null);
+                if (!(_signatures_match(impl, iface_method))) {
+                    throw new AnalyzeError(
+                        "class '" + info->name + "' method '" + method_name
+                        + "' does not match interface signature", 0, 0);
+                }
+            }
+        }
+    }
+}
+
+List<string> _topological_order(GlobalEnv* env) {
+    List<string> result = List<string>();
+    List<string> visited = List<string>();
+    int cn = env->classes.size;
+    for (int i = 0; i < cn; ++i) {
+        _topo_visit(env, env->classes.keys[i], visited, result);
+    }
+    return result;
+}
+
+void _topo_visit(GlobalEnv* env, string name, List<string> visited, List<string> result) {
+    if (visited.contains(name)) {
+        return;
+    }
+    // visiting set in Python is unused for cycle reporting here (cycles already
+    // caught), so we just recurse on the superclass first for topo order.
+    if (env->classes.has(name)) {
+        ClassInfo* info = env->classes.getOr(name, null);
+        if (info->superclass != "" && env->classes.has(info->superclass)) {
+            _topo_visit(env, info->superclass, visited, result);
+        }
+    }
+    if (!(visited.contains(name))) {
+        visited.add(name);
+        result.add(name);
+    }
+}
+
+void _build_vtable_for(GlobalEnv* env, string class_name) {
+    ClassInfo* info = env->classes.getOr(class_name, null);
+    Map<string, MethodDecl*>* vtable = new Map<string, MethodDecl*>();
+
+    if (info->superclass != "") {
+        ClassInfo* parent = env->classes.getOr(info->superclass, null);
+        // Merge parent fields and instance methods into child (child overrides).
+        Map<string, FieldDecl*>* merged_fields = new Map<string, FieldDecl*>();
+        int pfn = parent->fields.size;
+        for (int i = 0; i < pfn; ++i) {
+            merged_fields->set(parent->fields.keys[i], parent->fields.vals[i]);
+        }
+        int cfn = info->fields.size;
+        for (int i = 0; i < cfn; ++i) {
+            merged_fields->set(info->fields.keys[i], info->fields.vals[i]);
+        }
+
+        Map<string, MethodDecl*>* merged_methods = new Map<string, MethodDecl*>();
+        int pmn = parent->instance_methods.size;
+        for (int i = 0; i < pmn; ++i) {
+            merged_methods->set(parent->instance_methods.keys[i], parent->instance_methods.vals[i]);
+        }
+        int cmn = info->instance_methods.size;
+        for (int i = 0; i < cmn; ++i) {
+            merged_methods->set(info->instance_methods.keys[i], info->instance_methods.vals[i]);
+        }
+
+        info->fields = merged_fields;
+        info->instance_methods = merged_methods;
+
+        int pvn = parent->vtable.size;
+        for (int i = 0; i < pvn; ++i) {
+            vtable->set(parent->vtable.keys[i], parent->vtable.vals[i]);
+        }
+    }
+
+    int imn = info->instance_methods.size;
+    for (int i = 0; i < imn; ++i) {
+        vtable->set(info->instance_methods.keys[i], info->instance_methods.vals[i]);
+    }
+
+    if (info->destructor != null) {
+        vtable->set("~destructor", _dtor_method_marker());
+    }
+    // Python's setdefault("~destructor", None) is a no-op for the dump
+    // (vtable keys are what we expose); when there is no destructor we leave
+    // the key absent rather than store a null marker.
+
+    info->vtable = vtable;
+}
+
+// A sentinel MethodDecl marking a present destructor slot in the vtable.  The
+// vtable value type is MethodDecl*, and Python stores the DestructorDecl there;
+// downstream only checks for presence of the "~destructor" key, so a non-null
+// marker preserves that semantics for pass1's own dump/consumers.
+MethodDecl* _dtor_method_marker() {
+    return new MethodDecl("~destructor", List<Param*>(), NULL_TYPE(), null, false, "public");
+}
+
+bool _signatures_match(MethodDecl* a, MethodDecl* b) {
+    if (!(types_equal(a->returnType, b->returnType))) {
+        return false;
+    }
+    if (a->params.length() != b->params.length()) {
+        return false;
+    }
+    int n = a->params.length();
+    for (int i = 0; i < n; ++i) {
+        if (!(types_equal(a->params.get(i)->type, b->params.get(i)->type))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+// Re-read the *declared* (non-merged) fields of a ClassDecl held in a Decl*.
+List<FieldDecl*> _class_decl_fields(Decl* decl) {
+    match (*decl) {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+            return fields;
+        }
+        _ => { return List<FieldDecl*>(); }
+    }
+}
+
+void _list_remove(List<string> xs, string item) {
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (xs.get(i) == item) {
+            xs.removeAt(i);
+            return;
+        }
+    }
+}

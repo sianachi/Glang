@@ -1,0 +1,124 @@
+// compiler/tu_core_dump.lang — Format-B test driver for tu_core.lang.
+//
+// Reads a script from stdin via readStdin.  Each non-empty line is a query whose
+// fields are separated by '|' (surrounding whitespace is trimmed).  TYPE fields
+// are lexed+parsed into a TypeNode using GLexer + TokenStream + TypeParser (same
+// as compiler/type_dump.lang).  One result line is printed per query: the
+// boolean ("true"/"false"), the string result, or "ERR" if the called function
+// throws (or a TYPE field fails to lex/parse).
+//
+// Query grammar (op | args...):
+//   types_equal        | <TYPE> | <TYPE>            -> true|false
+//   type_str           | <TYPE>                     -> <string>
+//   is_nullable        | <TYPE>                     -> true|false
+//   is_numeric         | <TYPE>                     -> true|false
+//   is_integer         | <TYPE>                     -> true|false
+//   is_byte            | <TYPE>                     -> true|false
+//   is_bool            | <TYPE>                     -> true|false
+//   is_string          | <TYPE>                     -> true|false
+//   is_pointer         | <TYPE>                     -> true|false
+//   is_array           | <TYPE>                     -> true|false
+//   is_function_pointer| <TYPE>                     -> true|false
+//   binary_result_type | <OP> | <TYPE> | <TYPE>     -> <string>|ERR
+//   unary_result_type  | <OP> | <TYPE>              -> <string>|ERR
+//
+// where <TYPE> is any type annotation the parser accepts (e.g. "int", "Foo*",
+// "fn(int, bool)->void", "Map<string, int>", "Foo?"), and <OP> is an operator
+// token string (e.g. "+", "==", "??", "unary-").
+
+import "std/list.lang";
+import "std/string.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "tu_core.lang";
+
+// Parse a TYPE field into a TypeNode.  Throws (LexError/ParseError) on failure.
+TypeNode* parseTypeField(string src) {
+    GLexer lex = GLexer(src);
+    List<Token*> tokens = lex.tokenize();
+    TokenStream* s = new TokenStream(tokens);
+    TypeParser tp = TypeParser(s);
+    return tp.parseType();
+}
+
+string boolStr(bool b) {
+    if (b) { return "true"; }
+    return "false";
+}
+
+string runQuery(List<string> f) {
+    string op = f.get(0);
+
+    if (op == "types_equal") {
+        TypeNode* a = parseTypeField(f.get(1));
+        TypeNode* b = parseTypeField(f.get(2));
+        return boolStr(types_equal(a, b));
+    }
+    if (op == "type_str") {
+        return type_str(parseTypeField(f.get(1)));
+    }
+    if (op == "is_nullable") {
+        return boolStr(is_nullable(parseTypeField(f.get(1))));
+    }
+    if (op == "is_numeric") {
+        return boolStr(is_numeric(parseTypeField(f.get(1))));
+    }
+    if (op == "is_integer") {
+        return boolStr(is_integer(parseTypeField(f.get(1))));
+    }
+    if (op == "is_byte") {
+        return boolStr(is_byte(parseTypeField(f.get(1))));
+    }
+    if (op == "is_bool") {
+        return boolStr(is_bool(parseTypeField(f.get(1))));
+    }
+    if (op == "is_string") {
+        return boolStr(is_string(parseTypeField(f.get(1))));
+    }
+    if (op == "is_pointer") {
+        return boolStr(is_pointer(parseTypeField(f.get(1))));
+    }
+    if (op == "is_array") {
+        return boolStr(is_array(parseTypeField(f.get(1))));
+    }
+    if (op == "is_function_pointer") {
+        return boolStr(is_function_pointer(parseTypeField(f.get(1))));
+    }
+    if (op == "binary_result_type") {
+        TypeNode* l = parseTypeField(f.get(2));
+        TypeNode* r = parseTypeField(f.get(3));
+        return type_str(binary_result_type(f.get(1), l, r));
+    }
+    if (op == "unary_result_type") {
+        TypeNode* o = parseTypeField(f.get(2));
+        return type_str(unary_result_type(f.get(1), o));
+    }
+    return "ERR";
+}
+
+int main() {
+    string source = readStdin();
+    List<string> lines = strings::split(source, '\n');
+    int n = lines.length();
+    for (int i = 0; i < n; ++i) {
+        string line = strings::trim(lines.get(i));
+        if (len(line) == 0) { continue; }
+
+        List<string> raw = strings::split(line, '|');
+        List<string> f = List<string>();
+        int m = raw.length();
+        for (int j = 0; j < m; ++j) {
+            f.add(strings::trim(raw.get(j)));
+        }
+
+        try {
+            print(runQuery(f));
+        } catch (Exception* e) {
+            print("ERR");
+        }
+    }
+    return 0;
+}

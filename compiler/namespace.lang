@@ -1,0 +1,746 @@
+// compiler/namespace.lang — namespace resolution (port of
+// analyser/namespace_resolver.py).  A Program -> Program rewrite that flattens
+// `namespace` blocks into qualified top-level names (a::b::name), processes
+// `using` directives, and resolves unqualified name references.
+//
+// KEY DIVERGENCE FROM THE PYTHON SOURCE: the Python resolver mutates AST nodes
+// in place (t.name = ..., e.name = ..., returns None).  Glang cannot mutate
+// union-variant fields in place (contract §0 gotcha #2), so every rewriter here
+// RETURNS a freshly-built node:
+//   TypeNode* r_type(...), Expr* r_expr(...), Stmt* r_stmt(...), Decl* r_decl(...)
+// Plain records (FieldDecl, Param, MethodDecl, ...) are mutable, but for
+// consistency we rebuild them too where convenient.  The two-pass design (pass 1
+// flatten + collect _declared/_namespaces/_globals + register `using`; pass 2
+// rewrite) is unchanged.
+//
+// NOTE on `using` file-scope: the Python resolver groups `using` contexts by
+// each decl's `origin` (set by the loader).  The Glang AST carries no origin, and
+// the dump driver parses a single source from stdin (every decl shares one
+// origin), so we use one shared _UsingContext — identical behaviour to the
+// Python reference run on a single parsed Program.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "ast.lang";
+import "tu_core.lang";
+import "symtab.lang";
+
+// ── small string helpers for the "::" separator ────────────────────────────
+
+// Split `name` on every "::" occurrence ("a::b::c" -> [a, b, c]).
+List<string> ns_split(string name) {
+    List<string> out = List<string>();
+    string current = "";
+    int n = len(name);
+    int i = 0;
+    while (i < n) {
+        if (i + 1 < n && name[i] == ':' && name[i + 1] == ':') {
+            out.add(current);
+            current = "";
+            i = i + 2;
+        } else {
+            current = current + toString(name[i]);
+            i = i + 1;
+        }
+    }
+    out.add(current);
+    return out;
+}
+
+// Join the first `count` segments with "::".
+string ns_join(List<string> segs, int count) {
+    string out = "";
+    for (int i = 0; i < count; ++i) {
+        if (i > 0) { out = out + "::"; }
+        out = out + segs.get(i);
+    }
+    return out;
+}
+
+// Last segment after the final "::"  ("math::abs" -> "abs"; "abs" -> "abs").
+string ns_last(string name) {
+    List<string> segs = ns_split(name);
+    return segs.get(segs.length() - 1);
+}
+
+bool ns_contains(string name) {
+    int n = len(name);
+    for (int i = 0; i + 1 < n; ++i) {
+        if (name[i] == ':' && name[i + 1] == ':') { return true; }
+    }
+    return false;
+}
+
+// ── _UsingContext: the `using` imports active for one source file ───────────
+
+class UsingContext {
+    Map<string, string> aliases;   // last segment -> qualified name
+    List<string> opened;           // namespaces opened by directives
+    UsingContext() {
+        this.aliases = Map<string, string>();
+        this.opened = List<string>();
+    }
+    bool is_empty() {
+        return this.aliases.length() == 0 && this.opened.length() == 0;
+    }
+}
+
+// A (decl, prefixes) pair produced by flattening.  prefixes is the
+// enclosing-namespace search list, innermost first.
+class FlatDecl {
+    Decl* decl;
+    List<string> prefixes;
+    FlatDecl(Decl* d, List<string> p) { this.decl = d; this.prefixes = p; }
+}
+
+// ── NamespaceResolver ───────────────────────────────────────────────────────
+
+class NamespaceResolver {
+    Map<string, bool> declared;     // every namespaced top-level name ("math::abs")
+    Map<string, bool> namespaces;   // every namespace path with >=1 member ("a", "a::b")
+    Map<string, bool> globals;      // every non-namespaced top-level name
+    List<List<string>> scopes;      // local-variable scope stack (sets)
+    Map<string, bool> type_params;  // generic type params of the decl being rewritten
+    UsingContext* ctx;              // the file `using` context
+
+    NamespaceResolver() {
+        this.declared = Map<string, bool>();
+        this.namespaces = Map<string, bool>();
+        this.globals = Map<string, bool>();
+        this.scopes = List<List<string>>();
+        this.type_params = Map<string, bool>();
+        this.ctx = new UsingContext();
+    }
+
+    Program* run(Program* program) {
+        // Flatten every top-level declaration, collecting (decl, prefixes).
+        List<FlatDecl*> flattened = List<FlatDecl*>();
+        List<Decl*> decls = program->declarations;
+        int nd = decls.length();
+        for (int i = 0; i < nd; ++i) {
+            this.flatten(decls.get(i), List<string>(), flattened);
+        }
+
+        // Single shared `using` context (single-origin program; see header note).
+        UsingContext* sharedCtx = new UsingContext();
+
+        // Pass A: register every `using` directive.
+        int nf = flattened.length();
+        for (int i = 0; i < nf; ++i) {
+            FlatDecl* fd = flattened.get(i);
+            Decl* dd = fd->decl;
+            match (*dd) {
+                Decl.UsingDecl(name, isNs) => {
+                    this.register_using(fd->decl, sharedCtx);
+                }
+                _ => { }
+            }
+        }
+
+        // Pass B: keep the non-using decls, rewriting names.
+        List<Decl*> kept = List<Decl*>();
+        for (int i = 0; i < nf; ++i) {
+            FlatDecl* fd = flattened.get(i);
+            bool isUsing = false;
+            Decl* dd = fd->decl;
+            match (*dd) {
+                Decl.UsingDecl(name, isNs) => { isUsing = true; }
+                _ => { }
+            }
+            if (isUsing) { continue; }
+            this.ctx = sharedCtx;
+            Decl* rewritten = fd->decl;
+            if (fd->prefixes.length() > 0 || !(sharedCtx->is_empty())) {
+                rewritten = this.r_decl(fd->decl, fd->prefixes);
+            }
+            kept.add(rewritten);
+        }
+        return new Program(program->imports, kept);
+    }
+
+    // ── Flattening ──────────────────────────────────────────────────────────
+
+    void flatten(Decl* d, List<string> chain, List<FlatDecl*> out) {
+        match (*d) {
+            Decl.NamespaceDecl(name, members) => {
+                List<string> newChain = List<string>();
+                int nc = chain.length();
+                for (int i = 0; i < nc; ++i) { newChain.add(chain.get(i)); }
+                List<string> parts = ns_split(name);
+                int np = parts.length();
+                for (int i = 0; i < np; ++i) { newChain.add(parts.get(i)); }
+                int total = newChain.length();
+                for (int i = 1; i <= total; ++i) {
+                    this.namespaces.set(ns_join(newChain, i), true);
+                }
+                int nm = members.length();
+                for (int i = 0; i < nm; ++i) {
+                    this.flatten(members.get(i), newChain, out);
+                }
+                return;
+            }
+            _ => { }
+        }
+
+        // A non-namespace declaration: qualify it (unless a modifier / using) and
+        // record it, then emit it with its enclosing-namespace prefix list.
+        Decl* emitted = d;
+        if (chain.length() > 0) {
+            bool isModifier = false;
+            match (*d) {
+                Decl.ModifierDecl(tps, target, methods) => { isModifier = true; }
+                _ => { }
+            }
+            string prefix = ns_join(chain, chain.length());
+            if (!isModifier) {
+                emitted = this.qualify_decl_name(d, prefix);
+            }
+            this.declared.set(this.decl_name(emitted), true);
+        } else {
+            bool skip = false;
+            match (*d) {
+                Decl.UsingDecl(name, isNs) => { skip = true; }
+                Decl.ModifierDecl(tps, target, methods) => { skip = true; }
+                _ => { }
+            }
+            if (!skip) { this.globals.set(this.decl_name(d), true); }
+        }
+
+        // prefixes = enclosing namespaces, innermost first.
+        List<string> prefixes = List<string>();
+        for (int i = chain.length(); i > 0; --i) {
+            prefixes.add(ns_join(chain, i));
+        }
+        out.add(new FlatDecl(emitted, prefixes));
+    }
+
+    // Name of a declaration (""=for forms without a name, e.g. ModifierDecl).
+    string decl_name(Decl* d) {
+        match (*d) {
+            Decl.ImportDecl(path) => { return ""; }
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => { return name; }
+            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd) => { return name; }
+            Decl.InterfaceDecl(name, methods) => { return name; }
+            Decl.EnumDecl(name, variants) => { return name; }
+            Decl.UsingDecl(name, isNs) => { return name; }
+            Decl.NamespaceDecl(name, decls) => { return name; }
+            Decl.ModifierDecl(tps, target, methods) => { return ""; }
+            Decl.UnionDecl(name, tps, variants) => { return name; }
+        }
+    }
+
+    // Rebuild `d` with its name prefixed by `prefix::`.
+    Decl* qualify_decl_name(Decl* d, string prefix) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                return new Decl.FunctionDecl(prefix + "::" + name, params, ret, body, tps, bounds);
+            }
+            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd) => {
+                return new Decl.ClassDecl(prefix + "::" + name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd);
+            }
+            Decl.InterfaceDecl(name, methods) => {
+                return new Decl.InterfaceDecl(prefix + "::" + name, methods);
+            }
+            Decl.EnumDecl(name, variants) => {
+                return new Decl.EnumDecl(prefix + "::" + name, variants);
+            }
+            Decl.UnionDecl(name, tps, variants) => {
+                return new Decl.UnionDecl(prefix + "::" + name, tps, variants);
+            }
+            _ => { return d; }
+        }
+    }
+
+    // ── `using` registration ─────────────────────────────────────────────────
+
+    void register_using(Decl* d, UsingContext* ctx) {
+        match (*d) {
+            Decl.UsingDecl(name, isNamespace) => {
+                if (isNamespace) {
+                    if (!(this.namespaces.has(name))) {
+                        throw new AnalyzeError("unknown namespace '" + name + "'", 0, 0);
+                    }
+                    if (!(ctx->opened.contains(name))) {
+                        ctx->opened.add(name);
+                    }
+                    return;
+                }
+                if (this.namespaces.has(name)) {
+                    throw new AnalyzeError("'" + name + "' is a namespace; write 'using namespace " + name + ";'", 0, 0);
+                }
+                if (!(this.declared.has(name))) {
+                    throw new AnalyzeError("'" + name + "' is not a namespace member", 0, 0);
+                }
+                string last = ns_last(name);
+                if (this.globals.has(last)) {
+                    throw new AnalyzeError("using declaration '" + last + "' conflicts with a global declaration of the same name", 0, 0);
+                }
+                if (ctx->aliases.has(last)) {
+                    string previous = ctx->aliases.getOr(last, "");
+                    if (previous != name) {
+                        throw new AnalyzeError("using declaration '" + last + "' conflicts with previous 'using " + previous + ";'", 0, 0);
+                    }
+                }
+                ctx->aliases.set(last, name);
+            }
+            _ => { }
+        }
+    }
+
+    // ── Name resolution ───────────────────────────────────────────────────────
+
+    string resolve_type_name(string name, List<string> prefixes) {
+        if (this.type_params.has(name)) { return name; }
+        int np = prefixes.length();
+        for (int i = 0; i < np; ++i) {
+            string candidate = prefixes.get(i) + "::" + name;
+            if (this.declared.has(candidate)) { return candidate; }
+        }
+        if (this.declared.has(name) || this.globals.has(name)) { return name; }
+        if (!(ns_contains(name))) {
+            if (this.ctx->aliases.has(name)) {
+                return this.ctx->aliases.getOr(name, name);
+            }
+        }
+        List<string> matches = List<string>();
+        int no = this.ctx->opened.length();
+        for (int i = 0; i < no; ++i) {
+            string candidate = this.ctx->opened.get(i) + "::" + name;
+            if (this.declared.has(candidate) && !(matches.contains(candidate))) {
+                matches.add(candidate);
+            }
+        }
+        if (matches.length() > 1) {
+            string msg = "'" + name + "' is ambiguous: could be ";
+            for (int i = 0; i < matches.length(); ++i) {
+                if (i > 0) { msg = msg + " or "; }
+                msg = msg + "'" + matches.get(i) + "'";
+            }
+            throw new AnalyzeError(msg, 0, 0);
+        }
+        if (matches.length() > 0) { return matches.get(0); }
+        return name;
+    }
+
+    string resolve_value_name(string name, List<string> prefixes) {
+        if (!(ns_contains(name)) && this.is_local(name)) { return name; }
+        return this.resolve_type_name(name, prefixes);
+    }
+
+    bool is_local(string name) {
+        int n = this.scopes.length();
+        for (int i = 0; i < n; ++i) {
+            if (this.scopes.get(i).contains(name)) { return true; }
+        }
+        return false;
+    }
+
+    void scope_add(string name) {
+        int n = this.scopes.length();
+        if (n > 0) { this.scopes.get(n - 1).add(name); }
+    }
+
+    // ── Declarations ──────────────────────────────────────────────────────────
+
+    Decl* r_decl(Decl* d, List<string> p) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                this.type_params = this.params_set(tps);
+                this.r_bounds(tps, bounds, p);
+                TypeNode* nret = this.r_type(ret, p);
+                this.r_params(params, p);
+                this.scopes = List<List<string>>();
+                this.scopes.add(this.param_names(params));
+                Stmt* nbody = this.r_stmt(body, p);
+                this.scopes = List<List<string>>();
+                this.type_params = Map<string, bool>();
+                return new Decl.FunctionDecl(name, params, nret, nbody, tps, bounds);
+            }
+            Decl.ClassDecl(name, fields, sfields, methods, sup, ifaces, ctor, dtor, access, tps, bounds) => {
+                this.type_params = this.params_set(tps);
+                this.r_bounds(tps, bounds, p);
+                string nsup = sup;
+                if (sup != "") { nsup = this.resolve_type_name(sup, p); }
+                List<string> nifaces = List<string>();
+                for (int i = 0; i < ifaces.length(); ++i) {
+                    nifaces.add(this.resolve_type_name(ifaces.get(i), p));
+                }
+                for (int i = 0; i < fields.length(); ++i) {
+                    FieldDecl* fd = fields.get(i);
+                    fd->fieldType = this.r_type(fd->fieldType, p);
+                }
+                for (int i = 0; i < sfields.length(); ++i) {
+                    StaticFieldDecl* sfd = sfields.get(i);
+                    sfd->fieldType = this.r_type(sfd->fieldType, p);
+                    this.scopes = List<List<string>>();
+                    this.scopes.add(List<string>());
+                    sfd->initializer = this.r_expr(sfd->initializer, p);
+                    this.scopes = List<List<string>>();
+                }
+                ConstructorDecl* nctor = ctor;
+                if (ctor != null) { nctor = this.r_ctor(ctor, p); }
+                DestructorDecl* ndtor = dtor;
+                if (dtor != null) {
+                    this.scopes = List<List<string>>();
+                    this.scopes.add(List<string>());
+                    Stmt* db = this.r_stmt(dtor->body, p);
+                    this.scopes = List<List<string>>();
+                    ndtor = new DestructorDecl(db);
+                }
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                for (int i = 0; i < methods.length(); ++i) {
+                    nmethods.add(this.r_method(methods.get(i), p));
+                }
+                this.type_params = Map<string, bool>();
+                return new Decl.ClassDecl(name, fields, sfields, nmethods, nsup, nifaces,
+                                          nctor, ndtor, access, tps, bounds);
+            }
+            Decl.InterfaceDecl(name, methods) => {
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                for (int i = 0; i < methods.length(); ++i) {
+                    nmethods.add(this.r_method_sig(methods.get(i), p));
+                }
+                return new Decl.InterfaceDecl(name, nmethods);
+            }
+            Decl.ModifierDecl(tps, target, methods) => {
+                this.type_params = this.params_set(tps);
+                TypeNode* ntarget = this.r_type(target, p);
+                List<MethodDecl*> nmethods = List<MethodDecl*>();
+                for (int i = 0; i < methods.length(); ++i) {
+                    nmethods.add(this.r_method(methods.get(i), p));
+                }
+                this.type_params = Map<string, bool>();
+                return new Decl.ModifierDecl(tps, ntarget, nmethods);
+            }
+            Decl.UnionDecl(name, tps, variants) => {
+                for (int i = 0; i < variants.length(); ++i) {
+                    UnionVariant* v = variants.get(i);
+                    for (int j = 0; j < v->fields.length(); ++j) {
+                        FieldDecl* fd = v->fields.get(j);
+                        fd->fieldType = this.r_type(fd->fieldType, p);
+                    }
+                }
+                return new Decl.UnionDecl(name, tps, variants);
+            }
+            _ => { return d; }
+        }
+    }
+
+    // A method with a body (rebuilds return type, params, body).
+    MethodDecl* r_method(MethodDecl* md, List<string> p) {
+        TypeNode* nret = this.r_type(md->returnType, p);
+        this.r_params(md->params, p);
+        Stmt* nbody = md->body;
+        if (md->body != null) {
+            this.scopes = List<List<string>>();
+            this.scopes.add(this.param_names(md->params));
+            nbody = this.r_stmt(md->body, p);
+            this.scopes = List<List<string>>();
+        }
+        return new MethodDecl(md->name, md->params, nret, nbody, md->isStatic, md->access);
+    }
+
+    // An interface method signature (no body, no scope handling).
+    MethodDecl* r_method_sig(MethodDecl* md, List<string> p) {
+        TypeNode* nret = this.r_type(md->returnType, p);
+        this.r_params(md->params, p);
+        return new MethodDecl(md->name, md->params, nret, md->body, md->isStatic, md->access);
+    }
+
+    ConstructorDecl* r_ctor(ConstructorDecl* ctor, List<string> p) {
+        this.r_params(ctor->params, p);
+        this.scopes = List<List<string>>();
+        this.scopes.add(this.param_names(ctor->params));
+        List<Expr*> nsuper = ctor->superArgs;
+        if (ctor->hasSuper) {
+            nsuper = List<Expr*>();
+            for (int i = 0; i < ctor->superArgs.length(); ++i) {
+                nsuper.add(this.r_expr(ctor->superArgs.get(i), p));
+            }
+        }
+        Stmt* nbody = this.r_stmt(ctor->body, p);
+        this.scopes = List<List<string>>();
+        return new ConstructorDecl(ctor->params, nbody, ctor->hasSuper, nsuper);
+    }
+
+    void r_params(List<Param*> params, List<string> p) {
+        for (int i = 0; i < params.length(); ++i) {
+            Param* prm = params.get(i);
+            prm->type = this.r_type(prm->type, p);
+        }
+    }
+
+    // Resolve each type-parameter bound in place.  Bound keys are exactly the
+    // type-parameter names, so we iterate `tps` rather than the map's keys
+    // (Map exposes no key iteration).
+    void r_bounds(List<string> tps, Map<string, TypeNode*> bounds, List<string> p) {
+        for (int i = 0; i < tps.length(); ++i) {
+            string k = tps.get(i);
+            if (bounds.has(k)) {
+                bounds.set(k, this.r_type(bounds.getOr(k, null), p));
+            }
+        }
+    }
+
+    Map<string, bool> params_set(List<string> tps) {
+        Map<string, bool> s = Map<string, bool>();
+        for (int i = 0; i < tps.length(); ++i) { s.set(tps.get(i), true); }
+        return s;
+    }
+
+    List<string> param_names(List<Param*> params) {
+        List<string> names = List<string>();
+        for (int i = 0; i < params.length(); ++i) { names.add(params.get(i)->name); }
+        return names;
+    }
+
+    // ── Types ────────────────────────────────────────────────────────────────
+
+    TypeNode* r_type(TypeNode* t, List<string> p) {
+        match (*t) {
+            TypeNode.NamedType(name) => {
+                if (name == "var") { return t; }
+                return new TypeNode.NamedType(this.resolve_type_name(name, p));
+            }
+            TypeNode.PointerType(b) => {
+                return new TypeNode.PointerType(this.r_type(b, p));
+            }
+            TypeNode.ArrayType(b, sz) => {
+                return new TypeNode.ArrayType(this.r_type(b, p), sz);
+            }
+            TypeNode.FunctionPointerType(ps, ret) => {
+                List<TypeNode*> nps = List<TypeNode*>();
+                for (int i = 0; i < ps.length(); ++i) { nps.add(this.r_type(ps.get(i), p)); }
+                return new TypeNode.FunctionPointerType(nps, this.r_type(ret, p));
+            }
+            TypeNode.GenericType(name, args) => {
+                string nm = this.resolve_type_name(name, p);
+                List<TypeNode*> nargs = List<TypeNode*>();
+                for (int i = 0; i < args.length(); ++i) { nargs.add(this.r_type(args.get(i), p)); }
+                return new TypeNode.GenericType(nm, nargs);
+            }
+            TypeNode.NullableType(b) => {
+                return new TypeNode.NullableType(this.r_type(b, p));
+            }
+        }
+    }
+
+    // ── Statements ─────────────────────────────────────────────────────────────
+
+    Stmt* r_block(Stmt* block, List<string> p) {
+        // block is a Stmt.Block; rewrite in a fresh scope.
+        this.scopes.add(List<string>());
+        Stmt* result = this.r_block_stmts(block, p);
+        this.scopes.removeAt(this.scopes.length() - 1);
+        return result;
+    }
+
+    // Rewrite a Block's statements without pushing a new scope.
+    Stmt* r_block_stmts(Stmt* block, List<string> p) {
+        match (*block) {
+            Stmt.Block(stmts) => {
+                List<Stmt*> out = List<Stmt*>();
+                for (int i = 0; i < stmts.length(); ++i) {
+                    out.add(this.r_stmt(stmts.get(i), p));
+                }
+                return new Stmt.Block(out);
+            }
+            _ => { return this.r_stmt(block, p); }
+        }
+    }
+
+    Stmt* r_stmt(Stmt* s, List<string> p) {
+        match (*s) {
+            Stmt.Block(stmts) => {
+                return this.r_block(s, p);
+            }
+            Stmt.ExprStmt(e) => {
+                return new Stmt.ExprStmt(this.r_expr(e, p));
+            }
+            Stmt.VarDecl(name, ty, init, c) => {
+                TypeNode* nty = this.r_type(ty, p);
+                Expr* ninit = this.r_expr(init, p);
+                this.scope_add(name);
+                return new Stmt.VarDecl(name, nty, ninit, c);
+            }
+            Stmt.AssignStmt(target, op, value) => {
+                Expr* nt = this.r_expr(target, p);
+                Expr* nv = this.r_expr(value, p);
+                return new Stmt.AssignStmt(nt, op, nv);
+            }
+            Stmt.IfStmt(cond, th, el) => {
+                Expr* ncond = this.r_expr(cond, p);
+                Stmt* nth = this.r_stmt(th, p);
+                Stmt* nel = el;
+                if (el != null) { nel = this.r_stmt(el, p); }
+                return new Stmt.IfStmt(ncond, nth, nel);
+            }
+            Stmt.WhileStmt(cond, body) => {
+                Expr* ncond = this.r_expr(cond, p);
+                Stmt* nbody = this.r_block(body, p);
+                return new Stmt.WhileStmt(ncond, nbody);
+            }
+            Stmt.DoWhileStmt(body, cond) => {
+                Stmt* nbody = this.r_block(body, p);
+                Expr* ncond = this.r_expr(cond, p);
+                return new Stmt.DoWhileStmt(nbody, ncond);
+            }
+            Stmt.ForStmt(init, cond, post, body) => {
+                this.scopes.add(List<string>());
+                Stmt* ninit = this.r_stmt(init, p);
+                Expr* ncond = this.r_expr(cond, p);
+                Stmt* npost = this.r_stmt(post, p);
+                Stmt* nbody = this.r_block(body, p);
+                this.scopes.removeAt(this.scopes.length() - 1);
+                return new Stmt.ForStmt(ninit, ncond, npost, nbody);
+            }
+            Stmt.ForeachStmt(vt, vn, it, body, c) => {
+                TypeNode* nvt = this.r_type(vt, p);
+                Expr* nit = this.r_expr(it, p);
+                List<string> scope = List<string>();
+                scope.add(vn);
+                this.scopes.add(scope);
+                Stmt* nbody = this.r_block(body, p);
+                this.scopes.removeAt(this.scopes.length() - 1);
+                return new Stmt.ForeachStmt(nvt, vn, nit, nbody, c);
+            }
+            Stmt.UsingStmt(decl, body) => {
+                this.scopes.add(List<string>());
+                Stmt* ndecl = this.r_stmt(decl, p);
+                Stmt* nbody = this.r_block(body, p);
+                this.scopes.removeAt(this.scopes.length() - 1);
+                return new Stmt.UsingStmt(ndecl, nbody);
+            }
+            Stmt.ReturnStmt(value) => {
+                Expr* nv = value;
+                if (value != null) { nv = this.r_expr(value, p); }
+                return new Stmt.ReturnStmt(nv);
+            }
+            Stmt.ThrowStmt(value) => {
+                return new Stmt.ThrowStmt(this.r_expr(value, p));
+            }
+            Stmt.TryCatchStmt(body, catches) => {
+                Stmt* nbody = this.r_block(body, p);
+                List<CatchClause*> ncatches = List<CatchClause*>();
+                for (int i = 0; i < catches.length(); ++i) {
+                    CatchClause* cc = catches.get(i);
+                    TypeNode* nct = this.r_type(cc->catchType, p);
+                    Stmt* ccb = this.r_block(cc->body, p);
+                    ncatches.add(new CatchClause(nct, cc->varName, ccb));
+                }
+                return new Stmt.TryCatchStmt(nbody, ncatches);
+            }
+            Stmt.MatchStmt(scrut, arms) => {
+                Expr* nscrut = this.r_expr(scrut, p);
+                List<MatchArm*> narms = List<MatchArm*>();
+                for (int i = 0; i < arms.length(); ++i) {
+                    MatchArm* arm = arms.get(i);
+                    List<string> binds = List<string>();
+                    Pattern* pat = arm->pattern;
+                    match (*pat) {
+                        Pattern.VariantPattern(un, vn, b) => {
+                            for (int j = 0; j < b.length(); ++j) { binds.add(b.get(j)); }
+                        }
+                        _ => { }
+                    }
+                    this.scopes.add(binds);
+                    Stmt* nb = this.r_block(arm->body, p);
+                    this.scopes.removeAt(this.scopes.length() - 1);
+                    narms.add(new MatchArm(arm->pattern, nb));
+                }
+                return new Stmt.MatchStmt(nscrut, narms);
+            }
+            _ => { return s; }
+        }
+    }
+
+    // ── Expressions ────────────────────────────────────────────────────────────
+
+    Expr* r_expr(Expr* e, List<string> p) {
+        match (*e) {
+            Expr.IdentifierExpr(name) => {
+                return new Expr.IdentifierExpr(this.resolve_value_name(name, p));
+            }
+            Expr.BinaryExpr(left, op, right) => {
+                return new Expr.BinaryExpr(this.r_expr(left, p), op, this.r_expr(right, p));
+            }
+            Expr.UnaryExpr(op, operand) => {
+                return new Expr.UnaryExpr(op, this.r_expr(operand, p));
+            }
+            Expr.CastExpr(targetType, expr) => {
+                TypeNode* nt = this.r_type(targetType, p);
+                return new Expr.CastExpr(nt, this.r_expr(expr, p));
+            }
+            Expr.CallExpr(name, args, typeArgs) => {
+                string nname = this.resolve_value_name(name, p);
+                List<TypeNode*> nta = List<TypeNode*>();
+                for (int i = 0; i < typeArgs.length(); ++i) { nta.add(this.r_type(typeArgs.get(i), p)); }
+                List<Expr*> nargs = List<Expr*>();
+                for (int i = 0; i < args.length(); ++i) { nargs.add(this.r_expr(args.get(i), p)); }
+                return new Expr.CallExpr(nname, nargs, nta);
+            }
+            Expr.IndirectCallExpr(callee, args) => {
+                Expr* nc = this.r_expr(callee, p);
+                List<Expr*> nargs = List<Expr*>();
+                for (int i = 0; i < args.length(); ++i) { nargs.add(this.r_expr(args.get(i), p)); }
+                return new Expr.IndirectCallExpr(nc, nargs);
+            }
+            Expr.ClosureExpr(params, returnType, body, captures) => {
+                this.r_params(params, p);
+                TypeNode* nret = this.r_type(returnType, p);
+                this.scopes.add(this.param_names(params));
+                Stmt* nbody = this.r_block_stmts(body, p);
+                this.scopes.removeAt(this.scopes.length() - 1);
+                return new Expr.ClosureExpr(params, nret, nbody, captures);
+            }
+            Expr.MethodCallExpr(object, method, args, isArrow) => {
+                Expr* nobj = this.r_expr(object, p);
+                List<Expr*> nargs = List<Expr*>();
+                for (int i = 0; i < args.length(); ++i) { nargs.add(this.r_expr(args.get(i), p)); }
+                return new Expr.MethodCallExpr(nobj, method, nargs, isArrow);
+            }
+            Expr.NewExpr(className, args, typeArgs) => {
+                string ncn = this.resolve_type_name(className, p);
+                List<TypeNode*> nta = List<TypeNode*>();
+                for (int i = 0; i < typeArgs.length(); ++i) { nta.add(this.r_type(typeArgs.get(i), p)); }
+                List<Expr*> nargs = List<Expr*>();
+                for (int i = 0; i < args.length(); ++i) { nargs.add(this.r_expr(args.get(i), p)); }
+                return new Expr.NewExpr(ncn, nargs, nta);
+            }
+            Expr.DeleteExpr(operand) => {
+                return new Expr.DeleteExpr(this.r_expr(operand, p));
+            }
+            Expr.AllocExpr(allocType, count) => {
+                TypeNode* nt = this.r_type(allocType, p);
+                Expr* ncount = count;
+                if (count != null) { ncount = this.r_expr(count, p); }
+                return new Expr.AllocExpr(nt, ncount);
+            }
+            Expr.FreeExpr(operand) => {
+                return new Expr.FreeExpr(this.r_expr(operand, p));
+            }
+            Expr.FieldAccessExpr(object, fieldName) => {
+                return new Expr.FieldAccessExpr(this.r_expr(object, p), fieldName);
+            }
+            Expr.ArrowAccessExpr(pointer, fieldName) => {
+                return new Expr.ArrowAccessExpr(this.r_expr(pointer, p), fieldName);
+            }
+            Expr.IndexExpr(array, index) => {
+                return new Expr.IndexExpr(this.r_expr(array, p), this.r_expr(index, p));
+            }
+            Expr.AddressOfExpr(operand) => {
+                return new Expr.AddressOfExpr(this.r_expr(operand, p));
+            }
+            Expr.DerefExpr(operand) => {
+                return new Expr.DerefExpr(this.r_expr(operand, p));
+            }
+            _ => { return e; }
+        }
+    }
+}
+
+Program* namespace_resolve(Program* program) {
+    NamespaceResolver* r = new NamespaceResolver();
+    return r->run(program);
+}

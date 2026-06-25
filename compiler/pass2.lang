@@ -1,0 +1,1900 @@
+// compiler/pass2.lang — the stateful Pass2 type checker.
+//
+// Port of analyser/pass2_checker.py (the Pass2Checker class).  Dispatch on the
+// Decl/Stmt/Expr/TypeNode/Pattern unions via exhaustive `match`.  Every Python
+// `raise TypeError(msg, line, col)` becomes `throw new AnalyzeError(msg, ln, c)`
+// with identical message text (the end-to-end tests match these substrings).
+//
+// AST nodes carry no line/col in ast.lang, so positions are passed as 0,0.
+//
+// State is saved/restored manually (no try/finally outside the closure body):
+// copy the field to a local, set, recurse, restore.
+
+import "ast.lang";
+import "tu_core.lang";
+import "tu_env.lang";
+import "symtab.lang";
+import "pass2_support.lang";
+import "retcheck.lang";
+import "std/list.lang";
+import "std/map.lang";
+
+// ── ClosureContext: one entry per active closure ────────────────────────────
+class ClosureContext {
+    SymbolTable* root;
+    Map<string, TypeNode*> captures;
+    List<string> captureOrder;
+    ClosureContext(SymbolTable* r) {
+        this.root = r;
+        this.captures = Map<string, TypeNode*>();
+        this.captureOrder = List<string>();
+    }
+}
+
+// ── helper: return type name or "" (Python: NamedType.name if NamedType) ─────
+string returnTypeName(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n; }
+        _ => { return ""; }
+    }
+}
+
+class Pass2Checker {
+    GlobalEnv* env;
+    SymbolTable* scope;
+    TypeNode* return_type;          // null = no enclosing fn
+    ClassInfo* current_class;       // null when not in a class
+    TypeNode* modifier_target_type; // non-null inside a primitive modifier
+    bool in_loop;
+    bool in_static_method;
+    bool in_constructor;
+    List<ClosureContext*> closure_stack;
+
+    Pass2Checker(GlobalEnv* e) {
+        this.env = e;
+        this.scope = new SymbolTable(null);
+        this.return_type = null;
+        this.current_class = null;
+        this.modifier_target_type = null;
+        this.in_loop = false;
+        this.in_static_method = false;
+        this.in_constructor = false;
+        this.closure_stack = List<ClosureContext*>();
+    }
+
+    void check_program(Program* program) {
+        List<Decl*> decls = program->declarations;
+        int n = decls.length();
+        for (int i = 0; i < n; ++i) {
+            Decl* d = decls.get(i);
+            match (*d) {
+                Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                    this.check_function(d);
+                }
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                    ClassInfo* info = this.env->classes.getOr(name, null);
+                    this.check_class(d, info);
+                }
+                Decl.InterfaceDecl(name, methods) => { }
+                Decl.EnumDecl(name, variants) => { }
+                Decl.UnionDecl(name, tps, variants) => { }
+                Decl.ModifierDecl(tps, target, methods) => {
+                    this.check_modifier(d);
+                }
+                _ => { }
+            }
+        }
+    }
+
+    // ── Declarations ─────────────────────────────────────────────────────────
+
+    void check_function(Decl* d) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                SymbolTable* saved_scope = this.scope;
+                TypeNode* saved_return = this.return_type;
+
+                this.scope = this.scope->child();
+                int pn = params.length();
+                for (int i = 0; i < pn; ++i) {
+                    Param* p = params.get(i);
+                    this.scope->define(p->name, p->type, 0, 0, p->isConst);
+                }
+                this.return_type = ret;
+
+                this.check_block(body);
+
+                if (returnTypeName(ret) != "void") {
+                    if (!(this.always_returns_body(body))) {
+                        throw new AnalyzeError("not all code paths return a value", 0, 0);
+                    }
+                }
+
+                this.scope = saved_scope;
+                this.return_type = saved_return;
+            }
+            _ => { }
+        }
+    }
+
+    // body of fn/method is a Stmt.Block; pull stmts and call always_returns.
+    bool always_returns_body(Stmt* body) {
+        match (*body) {
+            Stmt.Block(stmts) => { return always_returns(stmts); }
+            _ => {
+                List<Stmt*> one = List<Stmt*>();
+                one.add(body);
+                return always_returns(one);
+            }
+        }
+    }
+
+    void check_class(Decl* d, ClassInfo* info) {
+        match (*d) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                ClassInfo* saved_class = this.current_class;
+                bool saved_static = this.in_static_method;
+                this.current_class = info;
+
+                // Static field initializers
+                int sn = sfields.length();
+                for (int i = 0; i < sn; ++i) {
+                    StaticFieldDecl* sfd = sfields.get(i);
+                    TypeNode* init_t = this.check_expr(sfd->initializer);
+                    if (!(this.assignable(init_t, sfd->fieldType, sfd->initializer))) {
+                        throw new AnalyzeError(
+                            "cannot initialise '" + type_str(sfd->fieldType)
+                            + "' with '" + type_str(init_t) + "'", 0, 0);
+                    }
+                }
+
+                // Constructor
+                if (ctor != null) {
+                    SymbolTable* saved_scope = this.scope;
+                    TypeNode* saved_return = this.return_type;
+                    bool saved_ctor = this.in_constructor;
+                    this.scope = this.scope->child();
+                    int cpn = ctor->params.length();
+                    for (int i = 0; i < cpn; ++i) {
+                        Param* p = ctor->params.get(i);
+                        this.scope->define(p->name, p->type, 0, 0, p->isConst);
+                    }
+                    this.return_type = new TypeNode.NamedType("void");
+                    this.in_static_method = false;
+                    this.in_constructor = true;
+
+                    if (info->superclass != "") {
+                        if (!(ctor->hasSuper)) {
+                            throw new AnalyzeError(
+                                "subclass constructor must call super(...)", 0, 0);
+                        }
+                        ClassInfo* parent_info = this.env->classes.getOr(info->superclass, null);
+                        if (parent_info->constructor != null) {
+                            int expected = parent_info->constructor->params.length();
+                            int got = ctor->superArgs.length();
+                            if (expected != got) {
+                                throw new AnalyzeError(
+                                    "super(...) expects " + strings::intToStr(expected)
+                                    + " arguments, got " + strings::intToStr(got), 0, 0);
+                            }
+                            for (int i = 0; i < got; ++i) {
+                                Expr* arg = ctor->superArgs.get(i);
+                                Param* param = parent_info->constructor->params.get(i);
+                                TypeNode* arg_t = this.check_expr(arg);
+                                if (!(this.assignable(arg_t, param->type, arg))) {
+                                    throw new AnalyzeError(
+                                        "cannot assign '" + type_str(arg_t) + "' to '"
+                                        + type_str(param->type) + "'", 0, 0);
+                                }
+                            }
+                        } else {
+                            if (ctor->superArgs.length() > 0) {
+                                throw new AnalyzeError(
+                                    "super(...) expects 0 arguments, got "
+                                    + strings::intToStr(ctor->superArgs.length()), 0, 0);
+                            }
+                        }
+                    } else {
+                        if (ctor->hasSuper) {
+                            throw new AnalyzeError(
+                                "super() used in a class with no superclass", 0, 0);
+                        }
+                    }
+
+                    this.check_block(ctor->body);
+                    this.scope = saved_scope;
+                    this.return_type = saved_return;
+                    this.in_constructor = saved_ctor;
+                }
+
+                // Destructor
+                if (dtor != null) {
+                    SymbolTable* saved_scope = this.scope;
+                    TypeNode* saved_return = this.return_type;
+                    this.scope = this.scope->child();
+                    this.return_type = new TypeNode.NamedType("void");
+                    this.in_static_method = false;
+                    this.check_block(dtor->body);
+                    this.scope = saved_scope;
+                    this.return_type = saved_return;
+                }
+
+                // Methods
+                int mn = methods.length();
+                for (int i = 0; i < mn; ++i) {
+                    MethodDecl* md = methods.get(i);
+                    SymbolTable* saved_scope = this.scope;
+                    TypeNode* saved_return = this.return_type;
+                    this.scope = this.scope->child();
+                    int mpn = md->params.length();
+                    for (int j = 0; j < mpn; ++j) {
+                        Param* p = md->params.get(j);
+                        this.scope->define(p->name, p->type, 0, 0, p->isConst);
+                    }
+                    this.return_type = md->returnType;
+                    this.in_static_method = md->isStatic;
+
+                    check_operator_method_decl(md, this.ownerClassName());
+                    this.check_block(md->body);
+
+                    if (returnTypeName(md->returnType) != "void") {
+                        if (!(this.always_returns_body(md->body))) {
+                            throw new AnalyzeError("not all code paths return a value", 0, 0);
+                        }
+                    }
+
+                    this.scope = saved_scope;
+                    this.return_type = saved_return;
+                }
+
+                this.current_class = saved_class;
+                this.in_static_method = saved_static;
+            }
+            _ => { }
+        }
+    }
+
+    // operator-method param-type check uses current_class name, "" when none.
+    string ownerClassName() {
+        if (this.current_class != null) { return this.current_class->name; }
+        return "";
+    }
+
+    void check_modifier(Decl* d) {
+        match (*d) {
+            Decl.ModifierDecl(tps, target, methods) => {
+                string target_name = type_str(target);
+                ClassInfo* saved_class = this.current_class;
+                TypeNode* saved_modifier_target = this.modifier_target_type;
+                bool saved_static = this.in_static_method;
+                this.in_static_method = false;
+
+                if (this.env->classes.has(target_name)) {
+                    this.current_class = this.env->classes.getOr(target_name, null);
+                    this.modifier_target_type = null;
+                } else {
+                    this.current_class = null;
+                    this.modifier_target_type = target;
+                }
+
+                int mn = methods.length();
+                for (int i = 0; i < mn; ++i) {
+                    MethodDecl* md = methods.get(i);
+                    SymbolTable* saved_scope = this.scope;
+                    TypeNode* saved_return = this.return_type;
+                    this.scope = this.scope->child();
+                    int mpn = md->params.length();
+                    for (int j = 0; j < mpn; ++j) {
+                        Param* p = md->params.get(j);
+                        this.scope->define(p->name, p->type, 0, 0, p->isConst);
+                    }
+                    this.return_type = md->returnType;
+                    this.check_block(md->body);
+                    if (returnTypeName(md->returnType) != "void") {
+                        if (!(this.always_returns_body(md->body))) {
+                            throw new AnalyzeError("not all code paths return a value", 0, 0);
+                        }
+                    }
+                    this.scope = saved_scope;
+                    this.return_type = saved_return;
+                }
+
+                this.current_class = saved_class;
+                this.modifier_target_type = saved_modifier_target;
+                this.in_static_method = saved_static;
+            }
+            _ => { }
+        }
+    }
+
+    // ── Statements ─────────────────────────────────────────────────────────────
+
+    void check_block(Stmt* block) {
+        match (*block) {
+            Stmt.Block(stmts) => {
+                SymbolTable* saved = this.scope;
+                this.scope = this.scope->child();
+                int n = stmts.length();
+                for (int i = 0; i < n; ++i) {
+                    this.check_stmt(stmts.get(i));
+                }
+                this.scope = saved;
+            }
+            _ => {
+                // A non-Block body (rare): treat as a single statement.
+                this.check_stmt(block);
+            }
+        }
+    }
+
+    void check_stmt(Stmt* stmt) {
+        match (*stmt) {
+            Stmt.Block(stmts) => {
+                this.check_block(stmt);
+            }
+            Stmt.ExprStmt(e) => {
+                this.check_expr(e);
+            }
+            Stmt.VarDecl(nm, declType, init, isConst) => {
+                TypeNode* init_t = this.check_expr(init);
+                TypeNode* varType = declType;
+                if (is_var_type(declType)) {
+                    if (is_null_type(init_t)) {
+                        throw new AnalyzeError("cannot infer type of 'var' from null", 0, 0);
+                    }
+                    if (is_named(init_t, "void")) {
+                        throw new AnalyzeError("cannot infer type of 'var' from void", 0, 0);
+                    }
+                    varType = init_t;
+                } else {
+                    this.env->resolve_type(declType);
+                    this.check_class_access(declType);
+                }
+                if (!(this.assignable(init_t, varType, init))) {
+                    throw new AnalyzeError(
+                        "cannot initialise '" + type_str(varType) + "' with '"
+                        + type_str(init_t) + "'", 0, 0);
+                }
+                this.scope->define(nm, varType, 0, 0, isConst);
+            }
+            Stmt.AssignStmt(target, op, value) => {
+                this.check_assign(target, op, value);
+            }
+            Stmt.IfStmt(condition, thenBranch, elseBranch) => {
+                TypeNode* cond_t = this.check_expr(condition);
+                if (!(is_bool(cond_t))) {
+                    throw new AnalyzeError(
+                        "condition must be bool, got '" + type_str(cond_t) + "'", 0, 0);
+                }
+                this.check_block(thenBranch);
+                if (elseBranch != null) {
+                    match (*elseBranch) {
+                        Stmt.IfStmt(c2, t2, e2) => { this.check_stmt(elseBranch); }
+                        _ => { this.check_block(elseBranch); }
+                    }
+                }
+            }
+            Stmt.WhileStmt(condition, body) => {
+                TypeNode* cond_t = this.check_expr(condition);
+                if (!(is_bool(cond_t))) {
+                    throw new AnalyzeError(
+                        "condition must be bool, got '" + type_str(cond_t) + "'", 0, 0);
+                }
+                bool saved_loop = this.in_loop;
+                this.in_loop = true;
+                this.check_block(body);
+                this.in_loop = saved_loop;
+            }
+            Stmt.DoWhileStmt(body, condition) => {
+                bool saved_loop = this.in_loop;
+                this.in_loop = true;
+                this.check_block(body);
+                this.in_loop = saved_loop;
+                TypeNode* cond_t = this.check_expr(condition);
+                if (!(is_bool(cond_t))) {
+                    throw new AnalyzeError(
+                        "condition must be bool, got '" + type_str(cond_t) + "'", 0, 0);
+                }
+            }
+            Stmt.ForStmt(initStmt, condition, post, body) => {
+                SymbolTable* saved_scope = this.scope;
+                this.scope = this.scope->child();
+                this.check_stmt(initStmt);
+                TypeNode* cond_t = this.check_expr(condition);
+                if (!(is_bool(cond_t))) {
+                    throw new AnalyzeError(
+                        "condition must be bool, got '" + type_str(cond_t) + "'", 0, 0);
+                }
+                this.check_stmt(post);
+                bool saved_loop = this.in_loop;
+                this.in_loop = true;
+                this.check_block(body);
+                this.in_loop = saved_loop;
+                this.scope = saved_scope;
+            }
+            Stmt.ForeachStmt(varType, varName, iterable, body, isConst) => {
+                TypeNode* iterable_t = this.check_expr(iterable);
+                TypeNode* elem_t = this.foreach_element_type(iterable_t);
+                TypeNode* useType = varType;
+                if (is_var_type(varType)) {
+                    useType = elem_t;
+                } else {
+                    this.env->resolve_type(varType);
+                    this.check_class_access(varType);
+                }
+                if (!(is_assignable(elem_t, useType, this.env))) {
+                    throw new AnalyzeError(
+                        "cannot iterate '" + type_str(iterable_t) + "' as '"
+                        + type_str(useType) + "'", 0, 0);
+                }
+                SymbolTable* saved_scope = this.scope;
+                this.scope = this.scope->child();
+                this.scope->define(varName, useType, 0, 0, isConst);
+                bool saved_loop = this.in_loop;
+                this.in_loop = true;
+                this.check_block(body);
+                this.in_loop = saved_loop;
+                this.scope = saved_scope;
+            }
+            Stmt.UsingStmt(declStmt, body) => {
+                SymbolTable* saved_scope = this.scope;
+                this.scope = this.scope->child();
+                this.check_stmt(declStmt);
+                TypeNode* dt = this.usingDeclType(declStmt);
+                this.validate_disposable(dt);
+                this.check_block(body);
+                this.scope = saved_scope;
+            }
+            Stmt.ReturnStmt(value) => {
+                TypeNode* rt = this.return_type;
+                string rt_name = "";
+                if (rt != null) { rt_name = returnTypeName(rt); }
+                if (rt_name == "void") {
+                    if (value != null) {
+                        throw new AnalyzeError("void function must not return a value", 0, 0);
+                    }
+                } else {
+                    if (value == null) {
+                        throw new AnalyzeError("non-void function must return a value", 0, 0);
+                    }
+                    TypeNode* val_t = this.check_expr(value);
+                    if (!(this.assignable(val_t, rt, value))) {
+                        throw new AnalyzeError(
+                            "cannot assign '" + type_str(val_t) + "' to '"
+                            + type_str(rt) + "'", 0, 0);
+                    }
+                }
+            }
+            Stmt.BreakStmt() => {
+                if (!(this.in_loop)) {
+                    throw new AnalyzeError("'break' outside a loop", 0, 0);
+                }
+            }
+            Stmt.ContinueStmt() => {
+                if (!(this.in_loop)) {
+                    throw new AnalyzeError("'continue' outside a loop", 0, 0);
+                }
+            }
+            Stmt.ThrowStmt(value) => {
+                TypeNode* val_t = this.check_expr(value);
+                this.checkExceptionPtr(val_t, "'throw' requires a pointer to an Exception subclass, got '",
+                                       "'throw' requires a pointer to a class, got '");
+            }
+            Stmt.TryCatchStmt(body, catches) => {
+                this.check_block(body);
+                int cn = catches.length();
+                for (int i = 0; i < cn; ++i) {
+                    CatchClause* clause = catches.get(i);
+                    TypeNode* ct = clause->catchType;
+                    this.checkCatchPtr(ct);
+                    SymbolTable* saved_scope = this.scope;
+                    this.scope = this.scope->child();
+                    this.scope->define(clause->varName, ct, 0, 0, false);
+                    this.check_block(clause->body);
+                    this.scope = saved_scope;
+                }
+            }
+            Stmt.MatchStmt(scrutinee, arms) => {
+                this.check_match(stmt);
+            }
+        }
+    }
+
+    // throw-clause exception-pointer validation (shared message shape).
+    void checkExceptionPtr(TypeNode* val_t, string notPtrMsg, string notClassMsg) {
+        match (*val_t) {
+            TypeNode.PointerType(base) => {
+                match (*base) {
+                    TypeNode.NamedType(bn) => {
+                        if (!(this.env->is_class(bn))) {
+                            throw new AnalyzeError(notClassMsg + type_str(val_t) + "'", 0, 0);
+                        }
+                        List<string> chain = superclass_chain(bn, this.env);
+                        if (!(listHas(chain, "Exception"))) {
+                            throw new AnalyzeError("'" + bn + "' does not extend Exception", 0, 0);
+                        }
+                    }
+                    _ => {
+                        throw new AnalyzeError(notClassMsg + type_str(val_t) + "'", 0, 0);
+                    }
+                }
+            }
+            _ => {
+                throw new AnalyzeError(notPtrMsg + type_str(val_t) + "'", 0, 0);
+            }
+        }
+    }
+
+    void checkCatchPtr(TypeNode* ct) {
+        match (*ct) {
+            TypeNode.PointerType(base) => {
+                match (*base) {
+                    TypeNode.NamedType(bn) => {
+                        if (!(this.env->is_class(bn))) {
+                            throw new AnalyzeError(
+                                "catch type must be a pointer to a class, got '"
+                                + type_str(ct) + "'", 0, 0);
+                        }
+                        List<string> chain = superclass_chain(bn, this.env);
+                        if (!(listHas(chain, "Exception"))) {
+                            throw new AnalyzeError("'" + bn + "' does not extend Exception", 0, 0);
+                        }
+                    }
+                    _ => {
+                        throw new AnalyzeError(
+                            "catch type must be a pointer to a class, got '"
+                            + type_str(ct) + "'", 0, 0);
+                    }
+                }
+            }
+            _ => {
+                throw new AnalyzeError(
+                    "catch type must be a pointer to an Exception subclass, got '"
+                    + type_str(ct) + "'", 0, 0);
+            }
+        }
+    }
+
+    // The `decl` of a using statement is a VarDecl; recover its declared type.
+    TypeNode* usingDeclType(Stmt* declStmt) {
+        match (*declStmt) {
+            Stmt.VarDecl(nm, declType, init, isConst) => {
+                // After check_stmt ran, a var-typed decl's effective type is the
+                // scope entry (var was inferred); read it back from the scope.
+                if (is_var_type(declType)) {
+                    TypeNode* t = this.scope->lookup_local(nm);
+                    if (t != null) { return t; }
+                }
+                return declType;
+            }
+            _ => { return new TypeNode.NamedType("void"); }
+        }
+    }
+
+    void validate_disposable(TypeNode* t) {
+        match (*t) {
+            TypeNode.PointerType(b) => { return; }
+            TypeNode.NamedType(n) => {
+                if (this.env->is_class(n)) {
+                    ClassInfo* info = this.env->classes.getOr(n, null);
+                    MethodDecl* dispose = info->instance_methods.getOr("dispose", null);
+                    if (dispose != null && dispose->params.length() == 0) {
+                        return;
+                    }
+                    throw new AnalyzeError(
+                        "'using' value of class '" + n
+                        + "' needs a zero-argument dispose() method", 0, 0);
+                }
+                throw new AnalyzeError(
+                    "'using' requires a pointer or a class value with dispose(), got '"
+                    + type_str(t) + "'", 0, 0);
+            }
+            _ => {
+                throw new AnalyzeError(
+                    "'using' requires a pointer or a class value with dispose(), got '"
+                    + type_str(t) + "'", 0, 0);
+            }
+        }
+    }
+
+    void check_match(Stmt* stmt) {
+        match (*stmt) {
+            Stmt.MatchStmt(scrutinee, arms) => {
+                TypeNode* scrutinee_t = this.check_expr(scrutinee);
+                // Allow pointer-to-union: auto-unwrap.
+                match (*scrutinee_t) {
+                    TypeNode.PointerType(b) => {
+                        match (*b) {
+                            TypeNode.NamedType(bn) => { scrutinee_t = b; }
+                            _ => { }
+                        }
+                    }
+                    _ => { }
+                }
+                string unionName = "";
+                match (*scrutinee_t) {
+                    TypeNode.NamedType(n) => {
+                        if (this.env->is_union(n)) { unionName = n; }
+                    }
+                    _ => { }
+                }
+                if (unionName == "") {
+                    throw new AnalyzeError(
+                        "match scrutinee must be a union type, got '"
+                        + type_str(scrutinee_t) + "'", 0, 0);
+                }
+                UnionInfo* union_info = this.env->unions.getOr(unionName, null);
+                List<string> covered = List<string>();
+                bool has_wildcard = false;
+                int an = arms.length();
+                for (int i = 0; i < an; ++i) {
+                    MatchArm* arm = arms.get(i);
+                    Pattern* pat = arm->pattern;
+                    match (*pat) {
+                        Pattern.WildcardPattern() => {
+                            has_wildcard = true;
+                            this.check_block(arm->body);
+                        }
+                        Pattern.VariantPattern(un, vn, binds) => {
+                            if (un != unionName) {
+                                throw new AnalyzeError(
+                                    "pattern union '" + un
+                                    + "' does not match scrutinee type '" + unionName + "'", 0, 0);
+                            }
+                            UnionVariantInfo* variant = union_info->variants.getOr(vn, null);
+                            if (variant == null) {
+                                throw new AnalyzeError(
+                                    "'" + unionName + "' has no variant '" + vn + "'", 0, 0);
+                            }
+                            if (binds.length() != variant->fields.length()) {
+                                throw new AnalyzeError(
+                                    "variant '" + vn + "' has "
+                                    + strings::intToStr(variant->fields.length())
+                                    + " field(s), but pattern binds "
+                                    + strings::intToStr(binds.length()), 0, 0);
+                            }
+                            covered.add(vn);
+                            SymbolTable* saved_scope = this.scope;
+                            this.scope = this.scope->child();
+                            int bn2 = binds.length();
+                            for (int j = 0; j < bn2; ++j) {
+                                FieldDecl* fd = variant->fields.get(j);
+                                this.scope->define(binds.get(j), fd->fieldType, 0, 0, false);
+                            }
+                            this.check_block(arm->body);
+                            this.scope = saved_scope;
+                        }
+                    }
+                }
+                if (has_wildcard == false) {
+                    List<string> missing = List<string>();
+                    int vn3 = union_info->variants.size;
+                    for (int i = 0; i < vn3; ++i) {
+                        string vname = union_info->variants.keys[i];
+                        if (!(listHas(covered, vname))) { missing.add(vname); }
+                    }
+                    if (missing.length() > 0) {
+                        sortStrList(missing);
+                        throw new AnalyzeError(
+                            "non-exhaustive match: missing variants " + showSortedList(missing), 0, 0);
+                    }
+                }
+            }
+            _ => { }
+        }
+    }
+
+    // ── Assignment statement ────────────────────────────────────────────────
+
+    void check_assign(Expr* target, string op, Expr* value) {
+        if (!(is_lvalue(target))) {
+            throw new AnalyzeError("left-hand side of '=' is not assignable", 0, 0);
+        }
+        if (this.is_static_method_ref(target)) {
+            throw new AnalyzeError("left-hand side of '=' is not assignable", 0, 0);
+        }
+        TypeNode* target_t = this.check_assignable_target(target);
+        TypeNode* value_t = this.check_expr(value);
+
+        if (op != "=") {
+            // Compound assignment: validate the op makes sense for target_t.
+            string op_symbol = substr(op, 0, len(op) - 1);  // "+=" -> "+"
+            TypeNode* lhs_t = target_t;
+            TypeNode* rhs_t = value_t;
+            // byte-literal coercion
+            if (is_byte(target_t) && !(is_byte(value_t)) && is_byte_literal(value)) {
+                rhs_t = new TypeNode.NamedType("byte");
+            } else if (is_byte(value_t) && !(is_byte(target_t)) && is_byte_literal(target)) {
+                lhs_t = new TypeNode.NamedType("byte");
+            }
+            value_t = this.check_binary_operation_type(op_symbol, lhs_t, rhs_t);
+        }
+
+        if (!(this.assignable(value_t, target_t, value))) {
+            throw new AnalyzeError(
+                "cannot assign '" + type_str(value_t) + "' to '"
+                + type_str(target_t) + "'", 0, 0);
+        }
+
+        // const check
+        match (*target) {
+            Expr.IdentifierExpr(n) => {
+                if (this.scope->is_const_var(n)) {
+                    throw new AnalyzeError("cannot assign to const '" + n + "'", 0, 0);
+                }
+            }
+            Expr.FieldAccessExpr(obj, fieldName) => {
+                this.checkConstField(target, fieldName, true);
+            }
+            Expr.ArrowAccessExpr(ptr, fieldName) => {
+                this.checkConstField(target, fieldName, false);
+            }
+            _ => { }
+        }
+    }
+
+    // receiverIsField: true for FieldAccessExpr (need this-receiver detection),
+    // false for ArrowAccessExpr (receiver is never ThisExpr for our purposes).
+    void checkConstField(Expr* target, string fieldName, bool receiverIsField) {
+        ClassInfo* class_info = this.resolve_target_class_info(target);
+        if (class_info == null) { return; }
+        FieldDecl* fd = class_info->fields.getOr(fieldName, null);
+        if (fd != null && fd->isConst) {
+            bool receiver_is_this = false;
+            if (receiverIsField) {
+                match (*target) {
+                    Expr.FieldAccessExpr(obj, fn2) => {
+                        match (*obj) {
+                            Expr.ThisExpr() => { receiver_is_this = true; }
+                            _ => { }
+                        }
+                    }
+                    _ => { }
+                }
+            }
+            if (!(this.in_constructor && receiver_is_this)) {
+                throw new AnalyzeError(
+                    "cannot assign to const field '" + fieldName + "'", 0, 0);
+            }
+        }
+        StaticFieldDecl* sfd = class_info->static_fields.getOr(fieldName, null);
+        if (sfd != null && sfd->isConst) {
+            throw new AnalyzeError(
+                "cannot assign to const field '" + fieldName + "'", 0, 0);
+        }
+    }
+
+    // ── Expressions ─────────────────────────────────────────────────────────
+
+    TypeNode* check_expr(Expr* expr) {
+        match (*expr) {
+            Expr.LiteralExpr(kind, value) => {
+                return new TypeNode.NamedType(kind);
+            }
+            Expr.NullExpr() => {
+                return NULL_TYPE();
+            }
+            Expr.ClosureExpr(params, returnType, body, captures) => {
+                return this.check_closure(expr);
+            }
+            Expr.IdentifierExpr(name) => {
+                SymbolTable* defining_scope = this.scope->find_scope(name);
+                if (defining_scope != null) {
+                    SymEntry* entry = defining_scope->entry(name);
+                    this.record_capture(name, defining_scope);
+                    return entry->type;
+                }
+                FunctionInfo* fn_info = this.env->functions.getOr(name, null);
+                if (fn_info != null) {
+                    return function_type_from_params(fn_info->params, fn_info->return_type);
+                }
+                throw new AnalyzeError("undefined variable '" + name + "'", 0, 0);
+            }
+            Expr.ThisExpr() => {
+                if (this.in_static_method) {
+                    throw new AnalyzeError("'this' is not available in a static method", 0, 0);
+                }
+                if (this.modifier_target_type != null) {
+                    return this.modifier_target_type;
+                }
+                if (this.current_class == null) {
+                    throw new AnalyzeError("'this' used outside of a class or modifier", 0, 0);
+                }
+                return new TypeNode.PointerType(new TypeNode.NamedType(this.current_class->name));
+            }
+            Expr.SuperExpr() => {
+                if (this.current_class == null || this.current_class->superclass == "") {
+                    throw new AnalyzeError("'super' used in a class with no superclass", 0, 0);
+                }
+                return new TypeNode.PointerType(new TypeNode.NamedType(this.current_class->superclass));
+            }
+            Expr.UnaryExpr(op, operand) => {
+                TypeNode* operand_t = this.check_expr(operand);
+                if (op == "++" || op == "--") {
+                    if (!(is_lvalue(operand))) {
+                        throw new AnalyzeError(
+                            "operand of '" + op + "' must be an lvalue", 0, 0);
+                    }
+                }
+                return this.unaryResult(op, operand_t);
+            }
+            Expr.AddressOfExpr(operand) => {
+                if (!(is_lvalue(operand))) {
+                    throw new AnalyzeError("operand of '&' must be an lvalue", 0, 0);
+                }
+                TypeNode* t = this.check_assignable_target(operand);
+                return new TypeNode.PointerType(t);
+            }
+            Expr.DerefExpr(operand) => {
+                TypeNode* t = this.check_expr(operand);
+                if (!(is_pointer(t))) {
+                    throw new AnalyzeError(
+                        "'*' requires a pointer, got '" + type_str(t) + "'", 0, 0);
+                }
+                return pointer_base(t);
+            }
+            Expr.CastExpr(targetType, inner) => {
+                this.env->resolve_type(targetType);
+                TypeNode* src_t = this.check_expr(inner);
+                validate_cast(src_t, targetType, this.env);
+                return targetType;
+            }
+            Expr.BinaryExpr(left, op, right) => {
+                TypeNode* left_t = this.check_expr(left);
+                TypeNode* right_t = this.check_expr(right);
+                // byte-literal coercion
+                TypeNode* lt = left_t;
+                TypeNode* rt = right_t;
+                if (is_byte(left_t) && !(is_byte(right_t)) && is_byte_literal(right)) {
+                    rt = new TypeNode.NamedType("byte");
+                } else if (is_byte(right_t) && !(is_byte(left_t)) && is_byte_literal(left)) {
+                    lt = new TypeNode.NamedType("byte");
+                }
+                return this.check_binary_operation_type(op, lt, rt);
+            }
+            Expr.CallExpr(name, args, typeArgs) => {
+                return this.check_call(expr);
+            }
+            Expr.IndirectCallExpr(callee, args) => {
+                TypeNode* callee_t = this.check_expr(callee);
+                match (*callee_t) {
+                    TypeNode.FunctionPointerType(ptypes, ret) => {
+                        return this.check_callable_args("function pointer", args, ptypes, ret);
+                    }
+                    _ => {
+                        throw new AnalyzeError(
+                            "'" + type_str(callee_t) + "' is not callable", 0, 0);
+                    }
+                }
+            }
+            Expr.MethodCallExpr(obj, method, args, isArrow) => {
+                return this.check_method_call(expr);
+            }
+            Expr.FieldAccessExpr(obj, fieldName) => {
+                return this.check_field_access(expr);
+            }
+            Expr.ArrowAccessExpr(ptr, fieldName) => {
+                return this.check_arrow_access(expr);
+            }
+            Expr.IndexExpr(array, index) => {
+                return this.check_index_expr(expr, false);
+            }
+            Expr.NewExpr(className, args, typeArgs) => {
+                return this.check_new(expr);
+            }
+            Expr.DeleteExpr(operand) => {
+                TypeNode* t = this.check_expr(operand);
+                if (!(is_pointer(t))) {
+                    throw new AnalyzeError("'delete' requires a pointer to a class", 0, 0);
+                }
+                TypeNode* base = pointer_base(t);
+                bool is_deletable = false;
+                match (*base) {
+                    TypeNode.NamedType(bn) => {
+                        if (this.env->is_class(bn) || this.env->is_union(bn)) {
+                            is_deletable = true;
+                        }
+                    }
+                    _ => { }
+                }
+                if (is_deletable == false) {
+                    throw new AnalyzeError("'delete' requires a pointer to a class or union", 0, 0);
+                }
+                return new TypeNode.NamedType("void");
+            }
+            Expr.AllocExpr(allocType, count) => {
+                this.env->resolve_type(allocType);
+                if (is_named(allocType, "void")) {
+                    throw new AnalyzeError("cannot alloc void", 0, 0);
+                }
+                if (count != null) {
+                    TypeNode* count_t = this.check_expr(count);
+                    if (!(is_integer(count_t))) {
+                        throw new AnalyzeError(
+                            "alloc count must be int, got '" + type_str(count_t) + "'", 0, 0);
+                    }
+                }
+                return new TypeNode.PointerType(allocType);
+            }
+            Expr.FreeExpr(operand) => {
+                TypeNode* t = this.check_expr(operand);
+                if (!(is_pointer(t))) {
+                    throw new AnalyzeError("'free' requires a pointer", 0, 0);
+                }
+                return new TypeNode.NamedType("void");
+            }
+        }
+    }
+
+    // unary result: re-stamp position (Python catches and re-raises; messages
+    // identical, positions irrelevant for tests).
+    TypeNode* unaryResult(string op, TypeNode* operand_t) {
+        TypeNode* result = null;
+        bool errored = false;
+        string em = "";
+        try {
+            result = unary_result_type(op, operand_t);
+        } catch (Exception* ex) {
+            errored = true;
+            em = ex->message;
+        }
+        if (errored) { throw new AnalyzeError(em, 0, 0); }
+        return result;
+    }
+
+    TypeNode* check_call(Expr* expr) {
+        match (*expr) {
+            Expr.CallExpr(name, args, typeArgs) => {
+                SymbolTable* defining_scope = this.scope->find_scope(name);
+                if (defining_scope != null) {
+                    SymEntry* entry = defining_scope->entry(name);
+                    TypeNode* callee_t = entry->type;
+                    match (*callee_t) {
+                        TypeNode.FunctionPointerType(ptypes, ret) => {
+                            return this.check_callable_args(name, args, ptypes, ret);
+                        }
+                        _ => {
+                            throw new AnalyzeError("'" + name + "' is not callable", 0, 0);
+                        }
+                    }
+                }
+
+                // builtin call (check arg types first, then dispatch).
+                if (this.is_builtin_name(name)) {
+                    List<TypeNode*> arg_types = List<TypeNode*>();
+                    int an = args.length();
+                    for (int i = 0; i < an; ++i) {
+                        arg_types.add(this.check_expr(args.get(i)));
+                    }
+                    TypeNode* bt = check_builtin_call(name, arg_types, this.env);
+                    if (bt != null) { return bt; }
+                }
+
+                FunctionInfo* fn_info = this.env->functions.getOr(name, null);
+                if (fn_info != null) {
+                    List<TypeNode*> ptypes = List<TypeNode*>();
+                    int pn = fn_info->params.length();
+                    for (int i = 0; i < pn; ++i) {
+                        ptypes.add(fn_info->params.get(i)->type);
+                    }
+                    return this.check_callable_args(name, args, ptypes, fn_info->return_type);
+                }
+
+                // Stack constructor call: Dog("Rex").
+                ClassInfo* class_info = this.env->classes.getOr(name, null);
+                if (class_info != null) {
+                    ConstructorDecl* ctor = class_info->constructor;
+                    if (ctor != null) {
+                        int expected = ctor->params.length();
+                        int got = args.length();
+                        if (expected != got) {
+                            throw new AnalyzeError(
+                                "'" + name + "' expects " + strings::intToStr(expected)
+                                + " arguments, got " + strings::intToStr(got), 0, 0);
+                        }
+                        for (int i = 0; i < got; ++i) {
+                            Expr* arg = args.get(i);
+                            Param* param = ctor->params.get(i);
+                            TypeNode* arg_t = this.check_expr(arg);
+                            if (!(this.assignable(arg_t, param->type, arg))) {
+                                throw new AnalyzeError(
+                                    "cannot assign '" + type_str(arg_t) + "' to '"
+                                    + type_str(param->type) + "'", 0, 0);
+                            }
+                        }
+                    } else {
+                        if (args.length() > 0) {
+                            throw new AnalyzeError(
+                                "'" + name + "' expects 0 arguments, got "
+                                + strings::intToStr(args.length()), 0, 0);
+                        }
+                    }
+                    return new TypeNode.NamedType(name);
+                }
+
+                throw new AnalyzeError("undefined function '" + name + "'", 0, 0);
+            }
+            _ => { throw new AnalyzeError("internal: check_call on non-call", 0, 0); }
+        }
+    }
+
+    bool is_builtin_name(string name) {
+        return name == "print" || name == "printErr" || name == "len"
+            || name == "toString" || name == "substr" || name == "parseInt"
+            || name == "parseFloat" || name == "startsWith" || name == "endsWith"
+            || name == "contains" || name == "indexOf" || name == "readFile"
+            || name == "writeFile" || name == "fileExists" || name == "bytesFromString"
+            || name == "stringFromBytes" || name == "getArgCount" || name == "getArg"
+            || name == "exit" || name == "intToStr" || name == "readStdin";
+    }
+
+    TypeNode* check_method_call(Expr* expr) {
+        match (*expr) {
+            Expr.MethodCallExpr(obj, method, args, isArrow) => {
+                // Union variant constructor: Expr.Number(42)
+                if (isArrow == false) {
+                    string objName = this.bareTypeName(obj);
+                    if (objName != "" && this.env->is_union(objName)
+                            && this.scope->find(objName) == null) {
+                        UnionInfo* union_info = this.env->unions.getOr(objName, null);
+                        UnionVariantInfo* variant = union_info->variants.getOr(method, null);
+                        if (variant == null) {
+                            throw new AnalyzeError(
+                                "'" + objName + "' has no variant '" + method + "'", 0, 0);
+                        }
+                        if (args.length() != variant->fields.length()) {
+                            throw new AnalyzeError(
+                                "variant '" + method + "' expects "
+                                + strings::intToStr(variant->fields.length())
+                                + " argument(s), got " + strings::intToStr(args.length()), 0, 0);
+                        }
+                        int vn = args.length();
+                        for (int i = 0; i < vn; ++i) {
+                            Expr* arg = args.get(i);
+                            FieldDecl* fd = variant->fields.get(i);
+                            TypeNode* arg_t = this.check_expr(arg);
+                            if (!(this.assignable(arg_t, fd->fieldType, arg))) {
+                                throw new AnalyzeError(
+                                    "cannot assign '" + type_str(arg_t) + "' to '"
+                                    + type_str(fd->fieldType) + "'", 0, 0);
+                            }
+                        }
+                        return new TypeNode.NamedType(objName);
+                    }
+
+                    // Static method call: ClassName.method(args)
+                    if (objName != "" && this.env->is_class(objName)
+                            && this.scope->find(objName) == null) {
+                        ClassInfo* class_info = this.env->classes.getOr(objName, null);
+                        MethodDecl* smethod = class_info->static_methods.getOr(method, null);
+                        if (smethod == null) {
+                            throw new AnalyzeError(
+                                "'" + objName + "' has no method '" + method + "'", 0, 0);
+                        }
+                        int expected = smethod->params.length();
+                        int got = args.length();
+                        if (expected != got) {
+                            throw new AnalyzeError(
+                                "'" + method + "' expects " + strings::intToStr(expected)
+                                + " arguments, got " + strings::intToStr(got), 0, 0);
+                        }
+                        for (int i = 0; i < got; ++i) {
+                            Expr* arg = args.get(i);
+                            Param* param = smethod->params.get(i);
+                            TypeNode* arg_t = this.check_expr(arg);
+                            if (!(this.assignable(arg_t, param->type, arg))) {
+                                throw new AnalyzeError(
+                                    "cannot assign '" + type_str(arg_t) + "' to '"
+                                    + type_str(param->type) + "'", 0, 0);
+                            }
+                        }
+                        return smethod->returnType;
+                    }
+                }
+
+                TypeNode* obj_t = this.check_expr(obj);
+                TypeNode* class_t = null;
+                if (isArrow) {
+                    if (!(is_pointer(obj_t))) {
+                        throw new AnalyzeError(
+                            "'->' requires a pointer, got '" + type_str(obj_t) + "'", 0, 0);
+                    }
+                    class_t = pointer_base(obj_t);
+                } else {
+                    // Auto-deref: this.method()/super.method() via dot notation.
+                    bool unwrapped = false;
+                    match (*obj_t) {
+                        TypeNode.PointerType(b) => {
+                            match (*b) {
+                                TypeNode.NamedType(bn) => { class_t = b; unwrapped = true; }
+                                _ => { }
+                            }
+                        }
+                        _ => { }
+                    }
+                    if (unwrapped == false) { class_t = obj_t; }
+                }
+
+                string class_name = "";
+                match (*class_t) {
+                    TypeNode.NamedType(n) => { class_name = n; }
+                    _ => {
+                        throw new AnalyzeError(
+                            "'" + type_str(obj_t) + "' has no method '" + method + "'", 0, 0);
+                    }
+                }
+
+                ClassInfo* class_info = this.env->classes.getOr(class_name, null);
+                MethodDecl* mmethod = null;
+                bool isInstanceMethod = false;
+                if (class_info == null) {
+                    // Primitive type or unrecognised — check modifier methods.
+                    mmethod = this.modifierMethod(class_name, method);
+                    if (mmethod == null) {
+                        throw new AnalyzeError(
+                            "'" + class_name + "' has no method '" + method + "'", 0, 0);
+                    }
+                } else {
+                    mmethod = class_info->instance_methods.getOr(method, null);
+                    if (mmethod != null) { isInstanceMethod = true; }
+                    if (mmethod == null) {
+                        mmethod = this.modifierMethod(class_name, method);
+                    }
+                    if (mmethod == null) {
+                        throw new AnalyzeError(
+                            "'" + class_name + "' has no method '" + method + "'", 0, 0);
+                    }
+                    if (isInstanceMethod) {
+                        this.check_access(class_name, mmethod->access, method);
+                    }
+                }
+                int expected = mmethod->params.length();
+                int got = args.length();
+                if (expected != got) {
+                    throw new AnalyzeError(
+                        "'" + method + "' expects " + strings::intToStr(expected)
+                        + " arguments, got " + strings::intToStr(got), 0, 0);
+                }
+                for (int i = 0; i < got; ++i) {
+                    Expr* arg = args.get(i);
+                    Param* param = mmethod->params.get(i);
+                    TypeNode* arg_t = this.check_expr(arg);
+                    if (!(this.assignable(arg_t, param->type, arg))) {
+                        throw new AnalyzeError(
+                            "cannot assign '" + type_str(arg_t) + "' to '"
+                            + type_str(param->type) + "'", 0, 0);
+                    }
+                }
+                return mmethod->returnType;
+            }
+            _ => { throw new AnalyzeError("internal: check_method_call", 0, 0); }
+        }
+    }
+
+    // modifier_methods[type][name], or null.
+    MethodDecl* modifierMethod(string typeName, string method) {
+        Map<string, MethodDecl*>* bucket = this.env->modifier_methods.getOr(typeName, null);
+        if (bucket == null) { return null; }
+        return bucket->getOr(method, null);
+    }
+
+    TypeNode* check_field_access(Expr* expr) {
+        match (*expr) {
+            Expr.FieldAccessExpr(obj, fieldName) => {
+                string objName = this.bareTypeName(obj);
+
+                // Union no-field variant access: Expr.Nil
+                if (objName != "" && this.env->is_union(objName)
+                        && this.scope->find(objName) == null) {
+                    UnionInfo* union_info = this.env->unions.getOr(objName, null);
+                    UnionVariantInfo* variant = union_info->variants.getOr(fieldName, null);
+                    if (variant == null) {
+                        throw new AnalyzeError(
+                            "'" + objName + "' has no variant '" + fieldName + "'", 0, 0);
+                    }
+                    if (variant->fields.length() > 0) {
+                        throw new AnalyzeError(
+                            "variant '" + fieldName + "' has fields; use '"
+                            + objName + "." + fieldName + "(...)' to construct it", 0, 0);
+                    }
+                    return new TypeNode.NamedType(objName);
+                }
+
+                // Enum variant access: Color.RED
+                if (objName != "" && this.env->is_enum(objName)
+                        && this.scope->find(objName) == null) {
+                    EnumInfo* enum_info = this.env->enums.getOr(objName, null);
+                    if (!(enum_info->variants.has(fieldName))) {
+                        throw new AnalyzeError(
+                            "'" + objName + "' has no variant '" + fieldName + "'", 0, 0);
+                    }
+                    return new TypeNode.NamedType(objName);
+                }
+
+                // Static field access: ClassName.field
+                if (objName != "" && this.env->is_class(objName)
+                        && this.scope->find(objName) == null) {
+                    ClassInfo* class_info = this.env->classes.getOr(objName, null);
+                    StaticFieldDecl* sfd = class_info->static_fields.getOr(fieldName, null);
+                    if (sfd != null) {
+                        this.check_access(objName, sfd->access, fieldName);
+                        return sfd->fieldType;
+                    }
+                    MethodDecl* smethod = class_info->static_methods.getOr(fieldName, null);
+                    if (smethod != null) {
+                        this.check_access(objName, smethod->access, fieldName);
+                        return function_type_from_params(smethod->params, smethod->returnType);
+                    }
+                    throw new AnalyzeError(
+                        "'" + objName + "' has no field '" + fieldName + "'", 0, 0);
+                }
+
+                TypeNode* obj_t = this.check_expr(obj);
+                string class_name = "";
+                match (*obj_t) {
+                    TypeNode.PointerType(b) => {
+                        match (*b) {
+                            TypeNode.NamedType(bn) => { class_name = bn; }
+                            _ => { }
+                        }
+                    }
+                    TypeNode.NamedType(n) => { class_name = n; }
+                    _ => { }
+                }
+                if (class_name == "") {
+                    throw new AnalyzeError(
+                        "'" + type_str(obj_t) + "' has no field '" + fieldName + "'", 0, 0);
+                }
+                ClassInfo* class_info = this.env->classes.getOr(class_name, null);
+                if (class_info == null) {
+                    throw new AnalyzeError(
+                        "'" + class_name + "' has no field '" + fieldName + "'", 0, 0);
+                }
+                FieldDecl* fd = class_info->fields.getOr(fieldName, null);
+                if (fd == null) {
+                    throw new AnalyzeError(
+                        "'" + class_name + "' has no field '" + fieldName + "'", 0, 0);
+                }
+                string defining = this.field_declaring_class(class_name, fieldName);
+                this.check_access(defining, fd->access, fieldName);
+                return fd->fieldType;
+            }
+            _ => { throw new AnalyzeError("internal: check_field_access", 0, 0); }
+        }
+    }
+
+    TypeNode* check_arrow_access(Expr* expr) {
+        match (*expr) {
+            Expr.ArrowAccessExpr(ptr, fieldName) => {
+                TypeNode* ptr_t = this.check_expr(ptr);
+                if (!(is_pointer(ptr_t))) {
+                    throw new AnalyzeError(
+                        "'->' requires a pointer, got '" + type_str(ptr_t) + "'", 0, 0);
+                }
+                TypeNode* class_t = pointer_base(ptr_t);
+                string class_name = "";
+                match (*class_t) {
+                    TypeNode.NamedType(n) => { class_name = n; }
+                    _ => {
+                        throw new AnalyzeError(
+                            "'" + type_str(ptr_t) + "' has no field '" + fieldName + "'", 0, 0);
+                    }
+                }
+                ClassInfo* class_info = this.env->classes.getOr(class_name, null);
+                if (class_info == null) {
+                    throw new AnalyzeError(
+                        "'" + class_name + "' has no field '" + fieldName + "'", 0, 0);
+                }
+                FieldDecl* fd = class_info->fields.getOr(fieldName, null);
+                if (fd == null) {
+                    throw new AnalyzeError(
+                        "'" + class_name + "' has no field '" + fieldName + "'", 0, 0);
+                }
+                string defining = this.field_declaring_class(class_name, fieldName);
+                this.check_access(defining, fd->access, fieldName);
+                return fd->fieldType;
+            }
+            _ => { throw new AnalyzeError("internal: check_arrow_access", 0, 0); }
+        }
+    }
+
+    TypeNode* check_new(Expr* expr) {
+        match (*expr) {
+            Expr.NewExpr(className, args, typeArgs) => {
+                // Union variant heap allocation: new Shape.Circle(args) -> Shape*
+                int dot = strings::indexOf(className, '.');
+                if (dot >= 0) {
+                    string union_name = substr(className, 0, dot);
+                    string variant_name = substr(className, dot + 1, len(className));
+                    if (!(this.env->is_union(union_name))) {
+                        throw new AnalyzeError("unknown union '" + union_name + "'", 0, 0);
+                    }
+                    UnionInfo* union_info = this.env->unions.getOr(union_name, null);
+                    UnionVariantInfo* variant = union_info->variants.getOr(variant_name, null);
+                    if (variant == null) {
+                        throw new AnalyzeError(
+                            "'" + union_name + "' has no variant '" + variant_name + "'", 0, 0);
+                    }
+                    if (args.length() != variant->fields.length()) {
+                        throw new AnalyzeError(
+                            "variant '" + variant_name + "' expects "
+                            + strings::intToStr(variant->fields.length())
+                            + " argument(s), got " + strings::intToStr(args.length()), 0, 0);
+                    }
+                    int vn = args.length();
+                    for (int i = 0; i < vn; ++i) {
+                        Expr* arg = args.get(i);
+                        FieldDecl* fd = variant->fields.get(i);
+                        TypeNode* arg_t = this.check_expr(arg);
+                        if (!(this.assignable(arg_t, fd->fieldType, arg))) {
+                            throw new AnalyzeError(
+                                "cannot assign '" + type_str(arg_t) + "' to '"
+                                + type_str(fd->fieldType) + "'", 0, 0);
+                        }
+                    }
+                    return new TypeNode.PointerType(new TypeNode.NamedType(union_name));
+                }
+
+                if (!(this.env->classes.has(className))) {
+                    throw new AnalyzeError("unknown class '" + className + "'", 0, 0);
+                }
+                ClassInfo* class_info = this.env->classes.getOr(className, null);
+                this.check_class_access(new TypeNode.NamedType(className));
+                if (class_info->constructor != null) {
+                    int expected = class_info->constructor->params.length();
+                    int got = args.length();
+                    if (expected != got) {
+                        throw new AnalyzeError(
+                            "'" + className + "' expects " + strings::intToStr(expected)
+                            + " arguments, got " + strings::intToStr(got), 0, 0);
+                    }
+                    for (int i = 0; i < got; ++i) {
+                        Expr* arg = args.get(i);
+                        Param* param = class_info->constructor->params.get(i);
+                        TypeNode* arg_t = this.check_expr(arg);
+                        if (!(this.assignable(arg_t, param->type, arg))) {
+                            throw new AnalyzeError(
+                                "cannot assign '" + type_str(arg_t) + "' to '"
+                                + type_str(param->type) + "'", 0, 0);
+                        }
+                    }
+                } else {
+                    if (args.length() > 0) {
+                        throw new AnalyzeError(
+                            "'" + className + "' expects 0 arguments, got "
+                            + strings::intToStr(args.length()), 0, 0);
+                    }
+                }
+                return new TypeNode.PointerType(new TypeNode.NamedType(className));
+            }
+            _ => { throw new AnalyzeError("internal: check_new", 0, 0); }
+        }
+    }
+
+    // ── byte / assignability helpers ─────────────────────────────────────────
+
+    bool assignable(TypeNode* from_t, TypeNode* to_t, Expr* from_expr) {
+        if (is_assignable(from_t, to_t, this.env)) { return true; }
+        if (is_byte(to_t)) {
+            match (*from_expr) {
+                Expr.LiteralExpr(kind, value) => {
+                    if (kind == "int") {
+                        int val = parseInt(value);
+                        if (val < 0 || val > 255) {
+                            throw new AnalyzeError(
+                                "byte literal out of range 0..255: "
+                                + strings::intToStr(val), 0, 0);
+                        }
+                        return true;
+                    }
+                }
+                _ => { }
+            }
+        }
+        return false;
+    }
+
+    TypeNode* check_assignable_target(Expr* expr) {
+        match (*expr) {
+            Expr.IndexExpr(array, index) => {
+                return this.check_index_expr(expr, true);
+            }
+            _ => { return this.check_expr(expr); }
+        }
+    }
+
+    TypeNode* check_index_expr(Expr* expr, bool require_lvalue) {
+        match (*expr) {
+            Expr.IndexExpr(arrayE, indexE) => {
+                TypeNode* container_t = this.check_expr(arrayE);
+                TypeNode* idx_t = this.check_expr(indexE);
+
+                match (*container_t) {
+                    TypeNode.ArrayType(base, sz) => {
+                        if (!(is_integer(idx_t))) {
+                            throw new AnalyzeError(
+                                "array index must be int, got '" + type_str(idx_t) + "'", 0, 0);
+                        }
+                        return base;
+                    }
+                    TypeNode.PointerType(base) => {
+                        if (!(is_integer(idx_t))) {
+                            throw new AnalyzeError(
+                                "pointer index must be int, got '" + type_str(idx_t) + "'", 0, 0);
+                        }
+                        return base;
+                    }
+                    _ => { }
+                }
+
+                if (is_string(container_t)) {
+                    if (!(is_integer(idx_t))) {
+                        throw new AnalyzeError(
+                            "string index must be int, got '" + type_str(idx_t) + "'", 0, 0);
+                    }
+                    if (require_lvalue) {
+                        throw new AnalyzeError("string index is not assignable", 0, 0);
+                    }
+                    return new TypeNode.NamedType("char");
+                }
+
+                string class_name = this.class_value_name(container_t);
+                if (class_name != "") {
+                    if (require_lvalue) {
+                        throw new AnalyzeError("operator[] result is not assignable", 0, 0);
+                    }
+                    MethodDecl* method = this.find_instance_method(class_name, "operator[]");
+                    if (method == null) {
+                        throw new AnalyzeError("'" + class_name + "' has no operator[]", 0, 0);
+                    }
+                    string defining = this.method_declaring_class(class_name, "operator[]");
+                    this.check_access(defining, method->access, method->name);
+                    List<Expr*> oneArg = List<Expr*>();
+                    oneArg.add(indexE);
+                    List<TypeNode*> oneParam = List<TypeNode*>();
+                    oneParam.add(method->params.get(0)->type);
+                    return this.check_callable_args(method->name, oneArg, oneParam, method->returnType);
+                }
+
+                throw new AnalyzeError(
+                    "'[]' requires an array or string, got '" + type_str(container_t) + "'", 0, 0);
+            }
+            _ => { throw new AnalyzeError("internal: check_index_expr", 0, 0); }
+        }
+    }
+
+    TypeNode* check_binary_operation_type(string op, TypeNode* left_t, TypeNode* right_t) {
+        TypeNode* overload_t = this.check_binary_operator_overload(op, left_t, right_t);
+        if (overload_t != null) { return overload_t; }
+        // binary_result_type throws base Exception (tu_core stopgap); re-stamp
+        // it as AnalyzeError so the driver's catch sees it (Python re-raises a
+        // TypeError with line/col here too).
+        TypeNode* result = null;
+        bool errored = false;
+        string em = "";
+        try {
+            result = binary_result_type(op, left_t, right_t);
+        } catch (Exception* ex) {
+            errored = true;
+            em = ex->message;
+        }
+        if (errored) { throw new AnalyzeError(em, 0, 0); }
+        return result;
+    }
+
+    TypeNode* check_binary_operator_overload(string op, TypeNode* left_t, TypeNode* right_t) {
+        if (!(is_binary_overload_op(op))) { return null; }
+        string class_name = this.class_value_name(left_t);
+        if (class_name == "") { return null; }
+        if (!(types_equal(left_t, right_t))) { return null; }
+
+        string method_name = "operator" + op;
+        MethodDecl* method = this.find_instance_method(class_name, method_name);
+        if (method == null && op == "!=") {
+            method = this.find_instance_method(class_name, "operator==");
+            if (method == null) { return null; }
+            string defining = this.method_declaring_class(class_name, "operator==");
+            this.check_access(defining, method->access, method->name);
+            return new TypeNode.NamedType("bool");
+        }
+        if (method == null) { return null; }
+        string defining2 = this.method_declaring_class(class_name, method_name);
+        this.check_access(defining2, method->access, method->name);
+        return method->returnType;
+    }
+
+    string class_value_name(TypeNode* t) {
+        match (*t) {
+            TypeNode.NamedType(n) => {
+                if (this.env->is_class(n)) { return n; }
+                return "";
+            }
+            _ => { return ""; }
+        }
+    }
+
+    MethodDecl* find_instance_method(string class_name, string method_name) {
+        ClassInfo* info = this.env->classes.getOr(class_name, null);
+        if (info == null) { return null; }
+        return info->instance_methods.getOr(method_name, null);
+    }
+
+    TypeNode* foreach_element_type(TypeNode* iterable_t) {
+        match (*iterable_t) {
+            TypeNode.ArrayType(base, sz) => { return base; }
+            _ => { }
+        }
+        if (is_string(iterable_t)) { return new TypeNode.NamedType("char"); }
+
+        string class_name = this.iterable_class_name(iterable_t);
+        if (class_name == "") {
+            throw new AnalyzeError(
+                "foreach requires an array, string, or iterable class, got '"
+                + type_str(iterable_t) + "'", 0, 0);
+        }
+
+        MethodDecl* length_method = this.find_instance_method(class_name, "length");
+        MethodDecl* get_method = this.find_instance_method(class_name, "get");
+        bool bad = false;
+        if (length_method == null) { bad = true; }
+        else if (length_method->params.length() != 0) { bad = true; }
+        else if (!(is_integer(length_method->returnType))) { bad = true; }
+        if (get_method == null) { bad = true; }
+        else if (get_method->params.length() != 1) { bad = true; }
+        else if (!(is_integer(get_method->params.get(0)->type))) { bad = true; }
+        if (bad) {
+            throw new AnalyzeError(
+                "foreach requires '" + class_name + "' to define length() and get(int)", 0, 0);
+        }
+        string length_defining = this.method_declaring_class(class_name, "length");
+        string get_defining = this.method_declaring_class(class_name, "get");
+        this.check_access(length_defining, length_method->access, "length");
+        this.check_access(get_defining, get_method->access, "get");
+        return get_method->returnType;
+    }
+
+    string iterable_class_name(TypeNode* t) {
+        TypeNode* inner = t;
+        match (*t) {
+            TypeNode.PointerType(b) => { inner = b; }
+            _ => { }
+        }
+        match (*inner) {
+            TypeNode.NamedType(n) => {
+                if (this.env->is_class(n)) { return n; }
+                return "";
+            }
+            _ => { return ""; }
+        }
+    }
+
+    // ── Closures ─────────────────────────────────────────────────────────────
+
+    TypeNode* check_closure(Expr* expr) {
+        match (*expr) {
+            Expr.ClosureExpr(params, returnType, body, captures) => {
+                this.env->resolve_type(returnType);
+                this.check_class_access(returnType);
+                int pn = params.length();
+                for (int i = 0; i < pn; ++i) {
+                    Param* p = params.get(i);
+                    this.env->resolve_type(p->type);
+                    this.check_class_access(p->type);
+                }
+
+                SymbolTable* saved_scope = this.scope;
+                TypeNode* saved_return = this.return_type;
+                bool saved_loop = this.in_loop;
+                bool saved_ctor = this.in_constructor;
+
+                SymbolTable* closure_scope = this.scope->child();
+                ClosureContext* ctx = new ClosureContext(closure_scope);
+                this.scope = closure_scope;
+                for (int i = 0; i < pn; ++i) {
+                    Param* p = params.get(i);
+                    this.scope->define(p->name, p->type, 0, 0, p->isConst);
+                }
+                this.return_type = returnType;
+                this.in_loop = false;
+                this.in_constructor = false;
+                this.closure_stack.add(ctx);
+
+                bool errored = false;
+                string errMsg = "";
+                try {
+                    this.check_block(body);
+                    if (returnTypeName(returnType) != "void"
+                            && !(this.always_returns_body(body))) {
+                        throw new AnalyzeError("not all code paths return a value", 0, 0);
+                    }
+                } catch (AnalyzeError* ae) {
+                    errored = true;
+                    errMsg = ae->message;
+                }
+
+                // restore (the Python `finally`)
+                this.closure_stack.removeAt(this.closure_stack.length() - 1);
+                this.scope = saved_scope;
+                this.return_type = saved_return;
+                this.in_loop = saved_loop;
+                this.in_constructor = saved_ctor;
+
+                if (errored) {
+                    throw new AnalyzeError(errMsg, 0, 0);
+                }
+
+                return function_type_from_params(params, returnType);
+            }
+            _ => { throw new AnalyzeError("internal: check_closure", 0, 0); }
+        }
+    }
+
+    void record_capture(string name, SymbolTable* defining_scope) {
+        if (this.closure_stack.length() == 0) { return; }
+        SymEntry* entry = defining_scope->entry(name);
+        if (entry == null) { return; }
+        int n = this.closure_stack.length();
+        for (int i = 0; i < n; ++i) {
+            ClosureContext* ctx = this.closure_stack.get(i);
+            if (!(defining_scope->is_descendant_of(ctx->root))) {
+                if (!(ctx->captures.has(name))) {
+                    ctx->captures.set(name, entry->type);
+                    ctx->captureOrder.add(name);
+                }
+            }
+        }
+    }
+
+    TypeNode* check_callable_args(string name, List<Expr*> args,
+                                  List<TypeNode*> param_types, TypeNode* return_type) {
+        int expected = param_types.length();
+        int got = args.length();
+        if (expected != got) {
+            throw new AnalyzeError(
+                "'" + name + "' expects " + strings::intToStr(expected)
+                + " arguments, got " + strings::intToStr(got), 0, 0);
+        }
+        for (int i = 0; i < expected; ++i) {
+            Expr* arg = args.get(i);
+            TypeNode* param_t = param_types.get(i);
+            TypeNode* arg_t = this.check_expr(arg);
+            if (!(this.assignable(arg_t, param_t, arg))) {
+                throw new AnalyzeError(
+                    "cannot assign '" + type_str(arg_t) + "' to '"
+                    + type_str(param_t) + "'", 0, 0);
+            }
+        }
+        return return_type;
+    }
+
+    // ── Access / const helpers ───────────────────────────────────────────────
+
+    void check_access(string defining_class, string access, string member) {
+        if (access == "public") { return; }
+        string accessor = "";
+        if (this.current_class != null) { accessor = this.current_class->name; }
+        if (access == "private") {
+            if (accessor != defining_class) {
+                throw new AnalyzeError(
+                    "'" + member + "' is private to '" + defining_class + "'", 0, 0);
+            }
+        } else if (access == "protected") {
+            List<string> chain = List<string>();
+            if (accessor != "") { chain = superclass_chain(accessor, this.env); }
+            if (!(listHas(chain, defining_class))) {
+                throw new AnalyzeError(
+                    "'" + member + "' is protected in '" + defining_class + "'", 0, 0);
+            }
+        }
+    }
+
+    void check_class_access(TypeNode* type_node) {
+        match (*type_node) {
+            TypeNode.NamedType(n) => {
+                ClassInfo* ci = this.env->classes.getOr(n, null);
+                if (ci != null && ci->access != "public" && this.current_class == null) {
+                    throw new AnalyzeError(
+                        "class '" + n + "' is " + ci->access
+                        + " and cannot be used outside a class body", 0, 0);
+                }
+            }
+            TypeNode.PointerType(b) => { this.check_class_access(b); }
+            TypeNode.ArrayType(b, sz) => { this.check_class_access(b); }
+            TypeNode.FunctionPointerType(ps, ret) => {
+                int n = ps.length();
+                for (int i = 0; i < n; ++i) { this.check_class_access(ps.get(i)); }
+                this.check_class_access(ret);
+            }
+            _ => { }
+        }
+    }
+
+    // Which class in the chain actually *declares* a field (from decl.fields).
+    string field_declaring_class(string class_name, string field_name) {
+        List<string> chain = superclass_chain(class_name, this.env);
+        int n = chain.length();
+        for (int i = 0; i < n; ++i) {
+            string cls = chain.get(i);
+            ClassInfo* info = this.env->classes.getOr(cls, null);
+            if (info != null && this.declHasField(info->decl, field_name)) {
+                return cls;
+            }
+        }
+        return class_name;
+    }
+
+    string method_declaring_class(string class_name, string method_name) {
+        List<string> chain = superclass_chain(class_name, this.env);
+        int n = chain.length();
+        for (int i = 0; i < n; ++i) {
+            string cls = chain.get(i);
+            ClassInfo* info = this.env->classes.getOr(cls, null);
+            if (info != null && this.declHasMethod(info->decl, method_name)) {
+                return cls;
+            }
+        }
+        return class_name;
+    }
+
+    bool declHasField(Decl* d, string field_name) {
+        match (*d) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                int n = fields.length();
+                for (int i = 0; i < n; ++i) {
+                    if (fields.get(i)->name == field_name) { return true; }
+                }
+                return false;
+            }
+            _ => { return false; }
+        }
+    }
+
+    bool declHasMethod(Decl* d, string method_name) {
+        match (*d) {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                int n = methods.length();
+                for (int i = 0; i < n; ++i) {
+                    if (methods.get(i)->name == method_name) { return true; }
+                }
+                return false;
+            }
+            _ => { return false; }
+        }
+    }
+
+    // Resolve the ClassInfo for a field-access assignment target without
+    // re-invoking check_expr (which would fail for class-name receivers).
+    ClassInfo* resolve_target_class_info(Expr* target) {
+        match (*target) {
+            Expr.FieldAccessExpr(obj, fieldName) => {
+                // Static field: ClassName.field
+                string objName = this.bareTypeName(obj);
+                if (objName != "" && this.env->is_class(objName)
+                        && this.scope->find(objName) == null) {
+                    return this.env->classes.getOr(objName, null);
+                }
+                // this.field
+                match (*obj) {
+                    Expr.ThisExpr() => { return this.current_class; }
+                    Expr.IdentifierExpr(n) => {
+                        SymEntry* entry = this.scope->find(n);
+                        if (entry != null) {
+                            TypeNode* t = entry->type;
+                            match (*t) {
+                                TypeNode.PointerType(b) => {
+                                    match (*b) {
+                                        TypeNode.NamedType(bn) => { return this.env->classes.getOr(bn, null); }
+                                        _ => { return null; }
+                                    }
+                                }
+                                TypeNode.NamedType(nn) => { return this.env->classes.getOr(nn, null); }
+                                _ => { return null; }
+                            }
+                        }
+                        return null;
+                    }
+                    _ => { return null; }
+                }
+            }
+            Expr.ArrowAccessExpr(ptr, fieldName) => {
+                match (*ptr) {
+                    Expr.ThisExpr() => { return this.current_class; }
+                    Expr.IdentifierExpr(n) => {
+                        SymEntry* entry = this.scope->find(n);
+                        if (entry != null) {
+                            TypeNode* t = entry->type;
+                            if (is_pointer(t)) {
+                                TypeNode* base = pointer_base(t);
+                                match (*base) {
+                                    TypeNode.NamedType(bn) => { return this.env->classes.getOr(bn, null); }
+                                    _ => { return null; }
+                                }
+                            }
+                        }
+                        return null;
+                    }
+                    _ => { return null; }
+                }
+            }
+            _ => { return null; }
+        }
+    }
+
+    bool is_static_method_ref(Expr* expr) {
+        match (*expr) {
+            Expr.FieldAccessExpr(obj, fieldName) => {
+                string objName = this.bareTypeName(obj);
+                if (objName != "" && this.env->is_class(objName)
+                        && this.scope->find(objName) == null) {
+                    ClassInfo* class_info = this.env->classes.getOr(objName, null);
+                    bool notStaticField = !(class_info->static_fields.has(fieldName));
+                    bool isStaticMethod = class_info->static_methods.has(fieldName);
+                    return notStaticField && isStaticMethod;
+                }
+                return false;
+            }
+            _ => { return false; }
+        }
+    }
+
+    // A bare identifier naming a type: returns its name, else "".
+    string bareTypeName(Expr* e) {
+        match (*e) {
+            Expr.IdentifierExpr(n) => { return n; }
+            _ => { return ""; }
+        }
+    }
+}
+
+// ── small list helpers ──────────────────────────────────────────────────────
+bool listHas(List<string> xs, string v) {
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (xs.get(i) == v) { return true; }
+    }
+    return false;
+}
+
+void sortStrList(List<string> xs) {
+    int n = xs.length();
+    for (int i = 1; i < n; ++i) {
+        string key = xs.get(i);
+        int j = i - 1;
+        while (j >= 0 && strLessP2(key, xs.get(j))) {
+            xs.set(j + 1, xs.get(j));
+            j = j - 1;
+        }
+        xs.set(j + 1, key);
+    }
+}
+
+bool strLessP2(string a, string b) {
+    int la = len(a);
+    int lb = len(b);
+    int n = la;
+    if (lb < n) { n = lb; }
+    for (int i = 0; i < n; ++i) {
+        char xa = a[i];
+        char xb = b[i];
+        int ca = (int) xa;
+        int cb = (int) xb;
+        if (ca < cb) { return true; }
+        if (ca > cb) { return false; }
+    }
+    return la < lb;
+}
+
+// Python's f"missing variants {sorted(missing)}" -> "['A', 'B']" repr form.
+string showSortedList(List<string> xs) {
+    StringBuilder sb = StringBuilder();
+    sb.appendChar('[');
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.append(", "); }
+        sb.appendChar('\'');
+        sb.append(xs.get(i));
+        sb.appendChar('\'');
+    }
+    sb.appendChar(']');
+    return sb.build();
+}

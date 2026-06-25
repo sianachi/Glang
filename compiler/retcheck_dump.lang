@@ -1,0 +1,89 @@
+// compiler/retcheck_dump.lang — Format-B driver for retcheck.lang.
+//
+// Reads a whole Glang program from stdin, parses it (GLexer -> Parser, reusing
+// compiler/decl_parser.lang's Parser), and for each top-level FunctionDecl and
+// each MethodDecl inside a class prints one line:
+//
+//     <name> | <true|false>
+//
+// where the bool is always_returns(body stmts).  Methods are reported by their
+// bare method name (no class qualifier), in declaration order; for any body
+// that is a Stmt.Block its `stmts` list is passed to always_returns.
+//
+// On parse/lex error, prints `PARSEERROR <msg>` / `LEXERROR <msg>` and exits 1.
+
+import "std/list.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "retcheck.lang";
+
+// Extract the statement list of a body that is a Stmt.Block; if for some reason
+// the body is not a block, treat it as a single-element list.
+bool bodyAlwaysReturns(Stmt* body) {
+    match (*body) {
+        Stmt.Block(stmts) => {
+            return always_returns(stmts);
+        }
+        _ => {
+            List<Stmt*> one = List<Stmt*>();
+            one.add(body);
+            return always_returns(one);
+        }
+    }
+}
+
+string boolStr(bool b) {
+    if (b) { return "true"; }
+    return "false";
+}
+
+void emit(string name, bool b) {
+    print(name + " | " + boolStr(b));
+}
+
+void handleDecl(Decl* d) {
+    match (*d) {
+        Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+            emit(name, bodyAlwaysReturns(body));
+        }
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            int n = methods.length();
+            for (int i = 0; i < n; ++i) {
+                MethodDecl* m = methods.get(i);
+                if (m->body != null) {
+                    emit(m->name, bodyAlwaysReturns(m->body));
+                }
+            }
+        }
+        _ => {
+        }
+    }
+}
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+        List<Decl*> decls = prog->declarations;
+        int n = decls.length();
+        for (int i = 0; i < n; ++i) {
+            handleDecl(decls.get(i));
+        }
+    } catch (ParseError* pe) {
+        print("PARSEERROR " + pe->message);
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR " + le->message);
+        return 1;
+    }
+    return 0;
+}

@@ -1,0 +1,350 @@
+// compiler/pass2_support.lang — state-free Pass2 helpers (contract §8.1).
+//
+// Port of the functions in analyser/pass2_checker.py that do NOT touch the
+// Pass2Checker instance, so they can be free functions consumed by pass2-core:
+//   _validate_cast, _is_primitive_value_type, _is_byte_literal,
+//   _check_operator_method_decl, _function_type_from_params,
+//   _is_var_type / _is_null_type, _class_value_name, the operator-overload
+//   module constants, and a restructured _check_builtin_call that TAKES the
+//   already-checked arg types (List<TypeNode*>) instead of re-checking exprs.
+//
+// Every Python `raise TypeError(msg, line, col)` becomes
+// `throw new AnalyzeError(msg, line, col)` with identical message text (tests
+// match substrings).  MethodDecl carries no line/col in ast.lang, so the
+// operator-method checks raise at (0,0).
+
+import "ast.lang";
+import "tu_core.lang";
+import "tu_env.lang";
+import "symtab.lang";
+import "std/list.lang";
+import "std/map.lang";
+
+// ── Operator-overload sets (Python module constants) ──────────────────────────
+// _BINARY_OPERATOR_OVERLOADS = {+ - * / % == != < <= > >=}
+// _COMPARISON_OPERATOR_OVERLOADS = {== != < <= > >=}
+// _ALL_OPERATOR_OVERLOADS = _BINARY | {[]}
+
+bool is_binary_overload_op(string op) {
+    return op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
+        || op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=";
+}
+
+bool is_comparison_overload_op(string op) {
+    return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=";
+}
+
+bool is_overloadable_op(string op) {
+    return is_binary_overload_op(op) || op == "[]";
+}
+
+// ── is_primitive_value_type ───────────────────────────────────────────────────
+
+bool is_primitive_value_type(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => {
+            return n == "int" || n == "float" || n == "bool"
+                || n == "char" || n == "byte" || n == "string";
+        }
+        _ => { return false; }
+    }
+}
+
+// ── is_var_type / is_null_type ────────────────────────────────────────────────
+
+bool is_var_type(TypeNode* t) {
+    return is_named(t, "var");
+}
+
+bool is_null_type(TypeNode* t) {
+    return is_named(t, "null");
+}
+
+// ── class_value_name ──────────────────────────────────────────────────────────
+// class name if NamedType names a class, else "" (was Optional[str] -> None).
+
+string class_value_name(TypeNode* t) {
+    // NOTE: the Python helper takes the env; signature here keeps it env-free per
+    // the frozen §8.1 contract.  Callers that need env-aware class lookup use
+    // tu_env::class_handle_name.  Pure NamedType-name extraction lives here.
+    match (*t) {
+        TypeNode.NamedType(n) => { return n; }
+        _ => { return ""; }
+    }
+}
+
+// ── is_byte_literal ───────────────────────────────────────────────────────────
+// True iff `e` is an int literal usable as a byte (0..255).  Throws on an
+// out-of-range int literal.  Non-literals (and non-int literals) return false.
+
+bool is_byte_literal(Expr* e) {
+    match (*e) {
+        Expr.LiteralExpr(kind, value) => {
+            if (kind != "int") { return false; }
+            int val = parseInt(value);
+            if (val < 0 || val > 255) {
+                throw new AnalyzeError(
+                    "byte literal out of range 0..255: " + strings::intToStr(val), 0, 0);
+            }
+            return true;
+        }
+        _ => { return false; }
+    }
+}
+
+// ── function_type_from_params ─────────────────────────────────────────────────
+
+TypeNode* function_type_from_params(List<Param*> params, TypeNode* ret) {
+    List<TypeNode*> ptypes = List<TypeNode*>();
+    int n = params.length();
+    for (int i = 0; i < n; ++i) {
+        Param* p = params.get(i);
+        ptypes.add(p->type);
+    }
+    return new TypeNode.FunctionPointerType(ptypes, ret);
+}
+
+// ── check_operator_method_decl ────────────────────────────────────────────────
+// Validates operator-overload method shape.  `owner_class` is the enclosing
+// class name ("" when not inside a class — mirrors `self._current_class is None`,
+// which skips the parameter-type check).
+
+void check_operator_method_decl(MethodDecl* m, string owner_class) {
+    string name = m->name;
+    if (!(startsWith(name, "operator"))) { return; }
+    string op = substr(name, len("operator"), len(name));
+    if (!(is_overloadable_op(op))) {
+        throw new AnalyzeError("unsupported operator overload '" + name + "'", 0, 0);
+    }
+    if (m->isStatic) {
+        throw new AnalyzeError("operator overloads must be instance methods", 0, 0);
+    }
+    if (m->params.length() != 1) {
+        throw new AnalyzeError("'" + name + "' expects exactly 1 parameter", 0, 0);
+    }
+    if (is_named(m->returnType, "void")) {
+        throw new AnalyzeError("'" + name + "' must return a value", 0, 0);
+    }
+    if (is_comparison_overload_op(op) && !(is_bool(m->returnType))) {
+        throw new AnalyzeError("'" + name + "' must return bool", 0, 0);
+    }
+    if (op != "[]" && owner_class != "") {
+        TypeNode* expected = new TypeNode.NamedType(owner_class);
+        Param* p0 = m->params.get(0);
+        if (!(types_equal(p0->type, expected))) {
+            throw new AnalyzeError(
+                "'" + name + "' parameter must be '" + owner_class + "'", 0, 0);
+        }
+    }
+}
+
+// ── validate_cast ─────────────────────────────────────────────────────────────
+// Throws AnalyzeError on an illegal cast from `src` to `dst`.
+
+bool is_numeric_cast_pair(string s, string d) {
+    if (s == "int" && d == "float") { return true; }
+    if (s == "float" && d == "int") { return true; }
+    if (s == "int" && d == "char") { return true; }
+    if (s == "char" && d == "int") { return true; }
+    if (s == "int" && d == "byte") { return true; }
+    if (s == "byte" && d == "int") { return true; }
+    if (s == "char" && d == "byte") { return true; }
+    if (s == "byte" && d == "char") { return true; }
+    return false;
+}
+
+void validate_cast(TypeNode* src, TypeNode* dst, GlobalEnv* env) {
+    string src_s = type_str(src);
+    string dst_s = type_str(dst);
+
+    // Enum <-> int casts; numeric pairs (both NamedType).
+    match (*src) {
+        TypeNode.NamedType(sn) => {
+            match (*dst) {
+                TypeNode.NamedType(dn) => {
+                    if (dn == "int" && env->is_enum(sn)) { return; }
+                    if (env->is_enum(dn) && sn == "int") { return; }
+                    if (is_numeric_cast_pair(sn, dn)) { return; }
+                }
+                _ => { }
+            }
+        }
+        _ => { }
+    }
+
+    // Pointer <-> pointer.
+    if (is_pointer(src) && is_pointer(dst)) {
+        TypeNode* sb = pointer_base(src);
+        TypeNode* db = pointer_base(dst);
+        // any pointer -> void*
+        if (is_named(db, "void")) { return; }
+        // void* -> any pointer
+        if (is_named(sb, "void")) { return; }
+        // class* -> class* (unsafe, allowed by spec): both bases NamedType.
+        match (*sb) {
+            TypeNode.NamedType(sbn) => {
+                match (*db) {
+                    TypeNode.NamedType(dbn) => { return; }
+                    _ => { }
+                }
+            }
+            _ => { }
+        }
+    }
+
+    throw new AnalyzeError(
+        "invalid cast from '" + src_s + "' to '" + dst_s + "'", 0, 0);
+}
+
+// ── check_builtin_call ────────────────────────────────────────────────────────
+// Given the builtin name and the ALREADY-CHECKED argument types, returns the
+// builtin's return type.  Returns null when `name` is not a builtin.  Throws
+// AnalyzeError on arity / type mismatch.  The Python original calls
+// self._check_expr on args first; here pass2-core checks the args and passes the
+// resulting types in.
+
+TypeNode* T(string n) { return new TypeNode.NamedType(n); }
+
+// Fixed-signature builtins use this helper: checks arity then each arg against
+// the expected param type via is_assignable (with byte-literal coercion handled
+// by pass2-core before it hands us the types — we use is_assignable directly,
+// matching _check_callable_args but without an Expr to coerce).
+TypeNode* check_callable_args(string name, List<TypeNode*> arg_types,
+                              List<TypeNode*> param_types, TypeNode* ret,
+                              GlobalEnv* env) {
+    int expected = param_types.length();
+    int got = arg_types.length();
+    if (expected != got) {
+        throw new AnalyzeError(
+            "'" + name + "' expects " + strings::intToStr(expected)
+            + " arguments, got " + strings::intToStr(got), 0, 0);
+    }
+    for (int i = 0; i < expected; ++i) {
+        TypeNode* at = arg_types.get(i);
+        TypeNode* pt = param_types.get(i);
+        if (!(is_assignable(at, pt, env))) {
+            throw new AnalyzeError(
+                "cannot assign '" + type_str(at) + "' to '" + type_str(pt) + "'", 0, 0);
+        }
+    }
+    return ret;
+}
+
+TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* env) {
+    if (name == "print" || name == "printErr") {
+        if (arg_types.length() != 1) {
+            throw new AnalyzeError(
+                "'" + name + "' expects 1 argument, got "
+                + strings::intToStr(arg_types.length()), 0, 0);
+        }
+        TypeNode* arg_t = arg_types.get(0);
+        if (!(is_primitive_value_type(arg_t))) {
+            throw new AnalyzeError(
+                "'" + name + "' requires a primitive argument, got '"
+                + type_str(arg_t) + "'", 0, 0);
+        }
+        return new TypeNode.NamedType("void");
+    }
+
+    if (name == "len") {
+        if (arg_types.length() != 1) {
+            throw new AnalyzeError(
+                "'len' expects 1 argument, got "
+                + strings::intToStr(arg_types.length()), 0, 0);
+        }
+        TypeNode* arg_t = arg_types.get(0);
+        if (!(is_string(arg_t) || is_array(arg_t))) {
+            throw new AnalyzeError(
+                "'len' requires string or array, got '" + type_str(arg_t) + "'", 0, 0);
+        }
+        return new TypeNode.NamedType("int");
+    }
+
+    if (name == "toString") {
+        if (arg_types.length() != 1) {
+            throw new AnalyzeError(
+                "'toString' expects 1 argument, got "
+                + strings::intToStr(arg_types.length()), 0, 0);
+        }
+        TypeNode* arg_t = arg_types.get(0);
+        if (!(is_primitive_value_type(arg_t))) {
+            throw new AnalyzeError(
+                "'toString' requires a primitive argument, got '"
+                + type_str(arg_t) + "'", 0, 0);
+        }
+        return new TypeNode.NamedType("string");
+    }
+
+    // Fixed-signature builtins.
+    List<TypeNode*> ps = List<TypeNode*>();
+
+    if (name == "substr") {
+        ps.add(T("string")); ps.add(T("int")); ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "parseInt") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "parseFloat") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("float"), env);
+    }
+    if (name == "startsWith") {
+        ps.add(T("string")); ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "endsWith") {
+        ps.add(T("string")); ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "contains") {
+        ps.add(T("string")); ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "indexOf") {
+        ps.add(T("string")); ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "readFile") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "writeFile") {
+        ps.add(T("string")); ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
+    }
+    if (name == "fileExists") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "bytesFromString") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps,
+            new TypeNode.PointerType(T("byte")), env);
+    }
+    if (name == "stringFromBytes") {
+        ps.add(new TypeNode.PointerType(T("byte"))); ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "getArgCount") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "getArg") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "exit") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
+    }
+    if (name == "intToStr") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "readStdin") {
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+
+    return null;
+}
