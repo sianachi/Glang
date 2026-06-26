@@ -51,3 +51,5 @@ plan.md
 # Working / planning notes (not part of the shipped compiler)
 /Toolchain/compiler/notes/
 /Toolchain/compiler/SELFHOST.md
+/Toolchain/glangi
+/Toolchain/glangi.c
