@@ -1,0 +1,64 @@
+// std/arena.lang — Arena<T>, a typed bump allocator.
+//
+// One contiguous block of `cap` elements is allocated up front with
+// alloc(T, cap). allocOne() hands out interior pointers into that block by
+// bumping a cursor — O(1), no per-object allocation. reset() rewinds the cursor
+// to reuse the whole block at once (the classic "free everything together"
+// pattern, e.g. per-request scratch memory). Pointers returned by allocOne()
+// are valid until reset()/dispose()/~Arena().
+//
+// Allocating by element count (over a typed T* block) avoids needing sizeof.
+//
+// Release styles (as with std/memory.lang):
+//   heap:   Arena<T>* a = new Arena<T>(n); ... ; delete a;   // ~Arena() frees
+//   value:  Arena<T> a = Arena<T>(n);      ... ; a.dispose(); // explicit free
+
+class Arena<T> {
+    T* block;
+    int cap;
+    int next;
+
+    Arena(int cap) {
+        int c = cap;
+        if (c < 1) { c = 1; }
+        this.block = alloc(T, c);
+        this.cap = c;
+        this.next = 0;
+    }
+
+    ~Arena() {
+        free(this.block);
+    }
+
+    void dispose() {
+        free(this.block);
+    }
+
+    int capacity() {
+        return this.cap;
+    }
+
+    int used() {
+        return this.next;
+    }
+
+    int remaining() {
+        return this.cap - this.next;
+    }
+
+    // Reserve one element and return a pointer to it. Throws when exhausted.
+    T* allocOne() {
+        if (this.next >= this.cap) {
+            throw new Exception("Arena.allocOne: arena exhausted");
+        }
+        T* p = &(this.block[this.next]);
+        this.next = this.next + 1;
+        return p;
+    }
+
+    // Rewind so the whole block can be reused. Does not clear memory; callers
+    // re-initialise through the pointers they receive from allocOne().
+    void reset() {
+        this.next = 0;
+    }
+}

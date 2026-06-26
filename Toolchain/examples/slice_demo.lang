@@ -1,0 +1,34 @@
+// Demonstrates std/slice.lang — a bounds-checked, non-owning view over a block.
+// The safe successor to Span<T>: out-of-range access throws a catchable
+// Exception. Run: python3 main.py run examples/slice_demo.lang
+
+import "std/slice.lang";
+
+int main() {
+    int* blk = alloc(int, 5);
+    for (int i = 0; i < 5; ++i) { blk[i] = i * 100; }
+
+    Slice<int> s = Slice<int>(blk, 0, 5);
+    print(s.length());           // 5
+    print(s.get(2));             // 200
+
+    s.set(2, 999);
+    print(s.get(2));             // 999  (writes through to the backing block)
+    print(blk[2]);               // 999
+
+    // A sub-view shares the same backing storage.
+    Slice<int> sub = s.slice(1, 4);
+    print(sub.length());         // 3
+    print(sub.get(0));           // 100
+
+    // Out-of-range access throws a catchable Exception.
+    try {
+        int y = sub.get(10);
+        print(y);
+    } catch (Exception* e) {
+        print(e->message);       // Slice.get: index out of range
+    }
+
+    free(blk);
+    return 0;
+}

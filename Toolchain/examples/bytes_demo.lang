@@ -1,0 +1,34 @@
+// Demonstrates std/bytes.lang — a growable, bounds-checked byte buffer with
+// little/big-endian integer packing. Run: python3 main.py run examples/bytes_demo.lang
+
+import "std/bytes.lang";
+
+int main() {
+    Bytes b = Bytes(2);          // small initial cap; grows on append
+    b.append(0x48);              // 'H'
+    b.append(0x69);              // 'i'
+    b.append(0x21);              // '!'
+    print(b.length());           // 3
+    print((int)(b.get(0)));      // 72
+    print((int)(b.get(2)));      // 33
+
+    // Integer packing round-trips (LE + BE).
+    Bytes p = Bytes(8);
+    for (int i = 0; i < 8; ++i) { p.append(0); }
+    p.putU16LE(0, 0xBEEF);
+    print(p.getU16LE(0));        // 48879
+    p.putU32BE(4, 0x01020304);
+    print(p.getU32BE(4));        // 16909060
+
+    // Out-of-range access throws a catchable Exception (safe on every backend).
+    try {
+        byte x = b.get(99);
+        print((int)x);
+    } catch (Exception* e) {
+        print(e->message);       // Bytes.get: index out of range
+    }
+
+    b.dispose();
+    p.dispose();
+    return 0;
+}

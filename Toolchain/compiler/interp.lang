@@ -399,6 +399,19 @@ class Interp {
         } catch (ReturnSig* r) {
             result = this.coerce(r->value, retType);
             returned = true;
+        } catch (ThrowSig* t) {
+            // A propagating signal must still pop this call's frame before it
+            // unwinds, or the caller's `cur()` would point at this stale frame.
+            // Each signal type is rethrown specifically so its dynamic class is
+            // preserved (a re-tagged `Exception` would slip past `catch`).
+            this.frames.removeAt(this.frames.length() - 1);
+            throw t;
+        } catch (ExitSig* x) {
+            this.frames.removeAt(this.frames.length() - 1);
+            throw x;
+        } catch (RtError* err) {
+            this.frames.removeAt(this.frames.length() - 1);
+            throw err;
         }
         this.frames.removeAt(this.frames.length() - 1);
         if (returned) { return result; }
@@ -1173,16 +1186,29 @@ class Interp {
         Frame* f = new Frame(thisVal, className);
         if (ctor != null) { this.bindParams(f, ctor->params, args); }
         this.frames.add(f);
-        if (ctor != null && ctor->hasSuper) {
-            List<RtVal*> superArgs = List<RtVal*>();
-            int sn = ctor->superArgs.length();
-            for (int i = 0; i < sn; ++i) { superArgs.add(this.eval(ctor->superArgs.get(i))); }
-            this.runConstructor(info->superclass, thisVal, superArgs);
-        } else if (info->superclass != "") {
-            this.runConstructor(info->superclass, thisVal, List<RtVal*>());
-        }
-        if (ctor != null) {
-            try { this.execBody(ctor->body); } catch (ReturnSig* r) { }
+        try {
+            if (ctor != null && ctor->hasSuper) {
+                List<RtVal*> superArgs = List<RtVal*>();
+                int sn = ctor->superArgs.length();
+                for (int i = 0; i < sn; ++i) { superArgs.add(this.eval(ctor->superArgs.get(i))); }
+                this.runConstructor(info->superclass, thisVal, superArgs);
+            } else if (info->superclass != "") {
+                this.runConstructor(info->superclass, thisVal, List<RtVal*>());
+            }
+            if (ctor != null) {
+                try { this.execBody(ctor->body); } catch (ReturnSig* r) { }
+            }
+        } catch (ThrowSig* t) {
+            // Pop this constructor's frame before the signal unwinds; rethrow the
+            // specific type so its dynamic class survives for the caller's catch.
+            this.frames.removeAt(this.frames.length() - 1);
+            throw t;
+        } catch (ExitSig* x) {
+            this.frames.removeAt(this.frames.length() - 1);
+            throw x;
+        } catch (RtError* err) {
+            this.frames.removeAt(this.frames.length() - 1);
+            throw err;
         }
         this.frames.removeAt(this.frames.length() - 1);
     }

@@ -1,0 +1,33 @@
+// Demonstrates std/arena.lang — a typed bump allocator. allocOne() hands out
+// interior pointers into one block; reset() reuses the whole block at once.
+// Run: python3 main.py run examples/arena_demo.lang
+
+import "std/arena.lang";
+
+int main() {
+    Arena<int> a = Arena<int>(3);
+
+    int* x = a.allocOne(); *x = 10;
+    int* y = a.allocOne(); *y = 20;
+    int* z = a.allocOne(); *z = 30;
+    print(*x + *y + *z);         // 60
+    print(a.used());             // 3
+    print(a.remaining());        // 0
+
+    // Exhausting the arena throws a catchable Exception.
+    try {
+        int* w = a.allocOne();
+        print(*w);
+    } catch (Exception* e) {
+        print(e->message);       // Arena.allocOne: arena exhausted
+    }
+
+    // reset() rewinds so the block can be reused.
+    a.reset();
+    print(a.used());             // 0
+    int* r = a.allocOne(); *r = 7;
+    print(*r);                   // 7
+
+    a.dispose();
+    return 0;
+}

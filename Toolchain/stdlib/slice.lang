@@ -1,0 +1,54 @@
+// std/slice.lang — Slice<T>, a non-owning, bounds-checked view over storage.
+//
+// The safe successor to std/span.lang: same (pointer, offset, length) view, but
+// out-of-range get/set/slice throw a catchable Exception instead of forcing a
+// deliberate negative-index access. Throwing works under both the interpreter
+// and the C compiler (the compiled `data[i]` form is not bounds-checked by C),
+// so a Slice is memory-safe on every backend.
+//
+// A Slice does NOT own its backing block: the block must outlive every slice
+// over it, and freeing the block leaves existing slices dangling. Slices never
+// allocate or free. Indexing is data[off + i] so slice() narrows the view with
+// no pointer arithmetic.
+
+class Slice<T> {
+    T* data;   // backing block (not owned)
+    int off;   // start index of this view within the block
+    int len;   // number of elements in this view
+
+    Slice(T* data, int off, int len) {
+        this.data = data;
+        this.off = off;
+        this.len = len;
+    }
+
+    int length() {
+        return this.len;
+    }
+
+    bool isEmpty() {
+        return this.len == 0;
+    }
+
+    T get(int i) {
+        if (i < 0 || i >= this.len) {
+            throw new Exception("Slice.get: index out of range");
+        }
+        return this.data[this.off + i];
+    }
+
+    void set(int i, T v) {
+        if (i < 0 || i >= this.len) {
+            throw new Exception("Slice.set: index out of range");
+        }
+        this.data[this.off + i] = v;
+    }
+
+    // A sub-view [start, end) of this slice, sharing the same backing block.
+    Slice<T> slice(int start, int end) {
+        if (start < 0 || end < start || end > this.len) {
+            throw new Exception("Slice.slice: bounds out of range");
+        }
+        return Slice<T>(this.data, this.off + start, end - start);
+    }
+}

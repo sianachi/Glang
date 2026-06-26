@@ -1,0 +1,162 @@
+// std/bytes.lang — Bytes, a growable, bounds-checked byte buffer.
+//
+// Unlike a raw `byte*` block, every access is bounds-checked and throws an
+// Exception on an out-of-range index, so the same program is memory-safe under
+// the interpreter AND the C compiler (the compiled `data[i]` form is NOT
+// bounds-checked by C itself). Integer values can be packed/unpacked at a byte
+// offset in little- or big-endian order.
+//
+// Release styles (pick one, as with std/memory.lang):
+//   heap:   Bytes* b = new Bytes(16); ... ; delete b;   // ~Bytes() frees
+//   value:  Bytes b = Bytes(16);      ... ; b.dispose(); // explicit free
+//
+// Float packing is intentionally not provided: Glang has no float<->bits
+// reinterpretation, so it cannot be expressed in pure Glang.
+
+class Bytes {
+    byte* data;
+    int cap;
+    int size;
+
+    Bytes(int cap) {
+        int c = cap;
+        if (c < 1) { c = 1; }
+        this.data = alloc(byte, c);
+        this.cap = c;
+        this.size = 0;
+    }
+
+    ~Bytes() {
+        free(this.data);
+    }
+
+    void dispose() {
+        free(this.data);
+    }
+
+    int length() {
+        return this.size;
+    }
+
+    bool isEmpty() {
+        return this.size == 0;
+    }
+
+    byte get(int i) {
+        if (i < 0 || i >= this.size) {
+            throw new Exception("Bytes.get: index out of range");
+        }
+        return this.data[i];
+    }
+
+    void set(int i, byte v) {
+        if (i < 0 || i >= this.size) {
+            throw new Exception("Bytes.set: index out of range");
+        }
+        this.data[i] = v;
+    }
+
+    void _grow() {
+        int newcap = this.cap * 2;
+        byte* bigger = alloc(byte, newcap);
+        for (int i = 0; i < this.size; ++i) {
+            bigger[i] = this.data[i];
+        }
+        free(this.data);
+        this.data = bigger;
+        this.cap = newcap;
+    }
+
+    void append(byte v) {
+        if (this.size == this.cap) {
+            this._grow();
+        }
+        this.data[this.size] = v;
+        this.size = this.size + 1;
+    }
+
+    void clear() {
+        this.size = 0;
+    }
+
+    // ── Integer packing ─────────────────────────────────────────────────────
+    // All arithmetic is done in `int` space (bytes widened with (int), shift
+    // counts are int), and only the final store is narrowed with (byte) — this
+    // satisfies the rule that bitwise operands must share a type.
+
+    void putU16LE(int off, int v) {
+        if (off < 0 || off + 2 > this.size) {
+            throw new Exception("Bytes.putU16LE: range out of bounds");
+        }
+        this.data[off]     = (byte)(v & 0xFF);
+        this.data[off + 1] = (byte)((v >> 8) & 0xFF);
+    }
+
+    void putU16BE(int off, int v) {
+        if (off < 0 || off + 2 > this.size) {
+            throw new Exception("Bytes.putU16BE: range out of bounds");
+        }
+        this.data[off]     = (byte)((v >> 8) & 0xFF);
+        this.data[off + 1] = (byte)(v & 0xFF);
+    }
+
+    int getU16LE(int off) {
+        if (off < 0 || off + 2 > this.size) {
+            throw new Exception("Bytes.getU16LE: range out of bounds");
+        }
+        int b0 = (int)(this.data[off]);
+        int b1 = (int)(this.data[off + 1]);
+        return b0 | (b1 << 8);
+    }
+
+    int getU16BE(int off) {
+        if (off < 0 || off + 2 > this.size) {
+            throw new Exception("Bytes.getU16BE: range out of bounds");
+        }
+        int b0 = (int)(this.data[off]);
+        int b1 = (int)(this.data[off + 1]);
+        return (b0 << 8) | b1;
+    }
+
+    void putU32LE(int off, int v) {
+        if (off < 0 || off + 4 > this.size) {
+            throw new Exception("Bytes.putU32LE: range out of bounds");
+        }
+        this.data[off]     = (byte)(v & 0xFF);
+        this.data[off + 1] = (byte)((v >> 8) & 0xFF);
+        this.data[off + 2] = (byte)((v >> 16) & 0xFF);
+        this.data[off + 3] = (byte)((v >> 24) & 0xFF);
+    }
+
+    void putU32BE(int off, int v) {
+        if (off < 0 || off + 4 > this.size) {
+            throw new Exception("Bytes.putU32BE: range out of bounds");
+        }
+        this.data[off]     = (byte)((v >> 24) & 0xFF);
+        this.data[off + 1] = (byte)((v >> 16) & 0xFF);
+        this.data[off + 2] = (byte)((v >> 8) & 0xFF);
+        this.data[off + 3] = (byte)(v & 0xFF);
+    }
+
+    int getU32LE(int off) {
+        if (off < 0 || off + 4 > this.size) {
+            throw new Exception("Bytes.getU32LE: range out of bounds");
+        }
+        int b0 = (int)(this.data[off]);
+        int b1 = (int)(this.data[off + 1]);
+        int b2 = (int)(this.data[off + 2]);
+        int b3 = (int)(this.data[off + 3]);
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    int getU32BE(int off) {
+        if (off < 0 || off + 4 > this.size) {
+            throw new Exception("Bytes.getU32BE: range out of bounds");
+        }
+        int b0 = (int)(this.data[off]);
+        int b1 = (int)(this.data[off + 1]);
+        int b2 = (int)(this.data[off + 2]);
+        int b3 = (int)(this.data[off + 3]);
+        return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+    }
+}

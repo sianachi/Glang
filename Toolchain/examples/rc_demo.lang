@@ -1,0 +1,25 @@
+// Demonstrates std/rc.lang — a manually reference-counted owner of a heap
+// payload. retain()/release() move a shared count; the payload is freed when the
+// last owner releases. Run: python3 main.py run examples/rc_demo.lang
+
+import "std/rc.lang";
+
+int main() {
+    int* payload = alloc(int, 1);
+    payload[0] = 42;
+
+    Rc<int> r = Rc<int>(payload);
+    print(r.count());            // 1
+    print(r.get()[0]);           // 42
+
+    r.retain();                  // a second owner
+    print(r.count());            // 2
+
+    r.release();                 // drop one owner
+    print(r.count());            // 1
+
+    r.release();                 // last owner: frees payload + count cell
+    print(0);                    // 0  (reached cleanly after final release)
+
+    return 0;
+}

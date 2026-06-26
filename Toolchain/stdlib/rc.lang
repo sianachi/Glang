@@ -1,0 +1,47 @@
+// std/rc.lang — Rc<T>, a manually reference-counted owner of a heap payload.
+//
+// Rc<T> owns a payload `T*` together with a shared heap count cell. Copying an
+// Rc value (assignment / passing it around) shares the same payload and the same
+// count cell, so retain()/release() on any copy move the one shared count.
+// release() frees the payload and the count cell when the count reaches zero.
+//
+// Glang has no automatic scope-exit destructors for stack values (only `delete`
+// on heap objects and `using` blocks), so reference counting is EXPLICIT: call
+// retain() before keeping an extra copy, and release() exactly once per live
+// handle. Rc owns a block/value (it `free`s, it does not `delete` an object
+// graph). A thread-safe Arc<T> with atomic counting is added in a later phase
+// once atomics exist.
+
+class Rc<T> {
+    T* ptr;     // shared payload
+    int* cell;  // shared heap cell holding the reference count
+
+    Rc(T* ptr) {
+        this.ptr = ptr;
+        this.cell = alloc(int, 1);
+        this.cell[0] = 1;
+    }
+
+    // Record one more owner of the shared payload.
+    void retain() {
+        this.cell[0] = this.cell[0] + 1;
+    }
+
+    int count() {
+        return this.cell[0];
+    }
+
+    T* get() {
+        return this.ptr;
+    }
+
+    // Drop one owner; when the last owner releases, free the payload and cell.
+    void release() {
+        int c = this.cell[0] - 1;
+        this.cell[0] = c;
+        if (c <= 0) {
+            free(this.ptr);
+            free(this.cell);
+        }
+    }
+}
