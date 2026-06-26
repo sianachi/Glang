@@ -158,7 +158,7 @@ class Monomorphizer {
             Decl* d = program->declarations.get(di);
             bool handled = false;
             match (*d) {
-                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                     if (tps.length() > 0) {
                         this.class_templates.set(name, d);
                         handled = true;
@@ -220,7 +220,7 @@ class Monomorphizer {
         for (int i = 0; i < n; ++i) {
             Decl* d = decls.get(i);
             match (*d) {
-                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                     this.class_names.set(name, true);
                     this.class_supers.set(name, superName);
                     List<string> ic = List<string>();
@@ -299,7 +299,7 @@ class Monomorphizer {
     void register_class_instance_metadata(string base, List<TypeNode*> args, string mangled) {
         Decl* template = this.class_templates.getOr(base, null);
         match (*template) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 Map<string, TypeNode*> mapping = zip_mapping(tps, args);
                 this.class_names.set(mangled, true);
                 this.class_instance_args.set(mangled, new InstanceArgs(base, clone_type_list(args)));
@@ -379,7 +379,7 @@ class Monomorphizer {
     // Helper: extract type params from a template decl (ClassDecl/FunctionDecl/ModifierDecl).
     List<string> decl_type_params(Decl* d) {
         match (*d) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 return tps;
             }
             Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
@@ -465,6 +465,9 @@ class Monomorphizer {
             TypeNode.PointerType(b) => {
                 return new TypeNode.PointerType(this.t_type(b, m));
             }
+            TypeNode.HandleType(b) => {
+                return new TypeNode.HandleType(this.t_type(b, m));
+            }
             TypeNode.ArrayType(b, sz) => {
                 return new TypeNode.ArrayType(this.t_type(b, m), sz);
             }
@@ -510,7 +513,7 @@ class Monomorphizer {
                 return new Decl.FunctionDecl(name, nparams, nret, nbody,
                     clone_str_list(tps), clone_bounds(bounds));
             }
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 List<FieldDecl*> nfields = List<FieldDecl*>();
                 int nf = fields.length();
                 for (int i = 0; i < nf; ++i) {
@@ -537,7 +540,7 @@ class Monomorphizer {
                 }
                 return new Decl.ClassDecl(name, nfields, nsfields, nmethods, superName,
                     clone_str_list(ifaces), nctor, ndtor, access,
-                    clone_str_list(tps), clone_bounds(bounds));
+                    clone_str_list(tps), clone_bounds(bounds), mgd);
             }
             Decl.ModifierDecl(tps, target, methods) => {
                 TypeNode* ntarget = this.t_type(target, m);
@@ -589,7 +592,7 @@ class Monomorphizer {
                 return new Decl.FunctionDecl(mangled, nparams, nret, nbody,
                     List<string>(), Map<string, TypeNode*>());
             }
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 List<FieldDecl*> nfields = List<FieldDecl*>();
                 int nf = fields.length();
                 for (int i = 0; i < nf; ++i) {
@@ -616,7 +619,7 @@ class Monomorphizer {
                 }
                 return new Decl.ClassDecl(mangled, nfields, nsfields, nmethods, superName,
                     clone_str_list(ifaces), nctor, ndtor, access,
-                    List<string>(), Map<string, TypeNode*>());
+                    List<string>(), Map<string, TypeNode*>(), mgd);
             }
             _ => { return clone_decl(d); }
         }
@@ -955,7 +958,7 @@ class Monomorphizer {
                 if (kind == "func") { params = fps; }
                 tparams = tps;
             }
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 tparams = tps;
                 if (ctor != null) { params = ctor->params; }
             }
@@ -1088,7 +1091,7 @@ class Monomorphizer {
         List<string> tparams = List<string>();
         Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
         match (*template) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds, mgd) => {
                 tparams = tps; bounds = bnds;
             }
             Decl.FunctionDecl(name, params, ret, body, tps, bnds) => {

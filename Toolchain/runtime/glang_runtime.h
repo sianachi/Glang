@@ -110,4 +110,15 @@ typedef struct { const char* name; const char* parent; } GlangClassEntry;
 /* ── Alloc helpers ────────────────────────────────────────────────────── */
 /* alloc(T) and alloc(T, n) are emitted inline by the transpiler */
 
+/* ── Managed memory (GC) ──────────────────────────────────────────────────
+   Instances of a `managed class` are allocated through glang_managed_alloc,
+   which zero-initialises the block and records it in a global registry. The
+   registry is swept once at program exit (registered lazily via atexit on the
+   first managed allocation), so managed objects are reclaimed automatically and
+   never leak — the program never calls `delete` on a managed handle.
+   This is the refcount/cycle collector's allocation seam; today it is a
+   tracked allocate-and-sweep-at-exit collector. */
+void* glang_managed_alloc(size_t size);
+void  glang_managed_sweep(void);
+
 #endif /* GLANG_RUNTIME_H */

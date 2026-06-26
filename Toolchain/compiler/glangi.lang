@@ -49,7 +49,7 @@ Decl* make_exception_decl() {
     List<string> typeParams = List<string>();
     Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
     return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
-                              ctor, null, "public", typeParams, bounds);
+                              ctor, null, "public", typeParams, bounds, false);
 }
 
 void flush(Interp ip) {

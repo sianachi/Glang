@@ -31,7 +31,7 @@ void _register_class_names(GlobalEnv* env, Program* program) {
     for (int i = 0; i < n; ++i) {
         Decl* decl = program->declarations.get(i);
         match (*decl) {
-            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds) => {
+            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds, mgd) => {
                 _register_class_shell(env, decl);
             }
             _ => { }
@@ -151,7 +151,7 @@ void _register_function(GlobalEnv* env, Decl* decl) {
 
 void _register_class_shell(GlobalEnv* env, Decl* decl) {
     match (*decl) {
-        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds, mgd) => {
             if (_name_taken(env, name)) {
                 throw new AnalyzeError("name '" + name + "' is already defined", 0, 0);
             }
@@ -172,7 +172,8 @@ void _register_class_shell(GlobalEnv* env, Decl* decl) {
                 superName,
                 ifaceCopy,
                 decl,
-                access));
+                access,
+                mgd));
         }
         _ => { }
     }
@@ -183,7 +184,7 @@ void _populate_classes(GlobalEnv* env, Program* program) {
     for (int i = 0; i < n; ++i) {
         Decl* decl = program->declarations.get(i);
         match (*decl) {
-            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds) => {
+            Decl.ClassDecl(nm, fs, sfs, ms, sup, ifs, ctor, dtor, acc, tps, bnds, mgd) => {
                 _populate_class(env, decl);
             }
             _ => { }
@@ -193,7 +194,7 @@ void _populate_classes(GlobalEnv* env, Program* program) {
 
 void _populate_class(GlobalEnv* env, Decl* decl) {
     match (*decl) {
-        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds, mgd) => {
             Map<string, FieldDecl*>* fmap = new Map<string, FieldDecl*>();
             int fcount = fields.length();
             for (int i = 0; i < fcount; ++i) {
@@ -609,7 +610,7 @@ bool _signatures_match(MethodDecl* a, MethodDecl* b) {
 // Re-read the *declared* (non-merged) fields of a ClassDecl held in a Decl*.
 List<FieldDecl*> _class_decl_fields(Decl* decl) {
     match (*decl) {
-        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds) => {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds, mgd) => {
             return fields;
         }
         _ => { return List<FieldDecl*>(); }

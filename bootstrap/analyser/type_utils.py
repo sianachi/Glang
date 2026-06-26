@@ -2,7 +2,8 @@ from __future__ import annotations
 from typing import List, TYPE_CHECKING
 
 from parser.ast_nodes import (
-    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, Expr,
+    TypeNode, NamedType, PointerType, ManagedHandleType, ArrayType,
+    FunctionPointerType, Expr,
     IdentifierExpr, FieldAccessExpr, ArrowAccessExpr, DerefExpr, IndexExpr,
     GenericType, NullableType,
 )
@@ -27,6 +28,8 @@ def types_equal(a: TypeNode, b: TypeNode) -> bool:
         return a.name == b.name
     if isinstance(a, PointerType):
         return types_equal(a.base, b.base)
+    if isinstance(a, ManagedHandleType):
+        return types_equal(a.base, b.base)
     if isinstance(a, ArrayType):
         return a.size == b.size and types_equal(a.base, b.base)
     if isinstance(a, FunctionPointerType):
@@ -45,14 +48,32 @@ def is_assignable(from_type: TypeNode, to_type: TypeNode, env: GlobalEnv) -> boo
     if types_equal(from_type, to_type):
         return True
 
-    # null → any pointer or nullable
+    # null → any pointer, handle, function pointer, or nullable
     if isinstance(from_type, NamedType) and from_type.name == "null":
         if isinstance(to_type, PointerType):
+            return True
+        if isinstance(to_type, ManagedHandleType):
             return True
         if isinstance(to_type, FunctionPointerType):
             return True
         if isinstance(to_type, NullableType):
             return True
+
+    # Managed handle covariance: a subclass handle widens to a superclass /
+    # interface handle. Handles never mix with raw pointers or class values.
+    if isinstance(from_type, ManagedHandleType) and isinstance(to_type, ManagedHandleType):
+        fb = from_type.base
+        tb = to_type.base
+        if isinstance(fb, NamedType) and isinstance(tb, NamedType):
+            if fb.name == tb.name:
+                return True
+            if env.is_class(fb.name) and env.is_class(tb.name):
+                if tb.name in superclass_chain(fb.name, env)[1:]:
+                    return True
+            if env.is_class(fb.name) and env.is_interface(tb.name):
+                if implements_interface(fb.name, tb.name, env):
+                    return True
+        return False
 
     # T → T?  (implicit promotion to nullable)
     if isinstance(to_type, NullableType):
@@ -131,6 +152,14 @@ def is_pointer(t: TypeNode) -> bool:
     return isinstance(t, PointerType)
 
 
+def is_managed_handle(t: TypeNode) -> bool:
+    return isinstance(t, ManagedHandleType)
+
+
+def handle_base(t: ManagedHandleType) -> TypeNode:
+    return t.base
+
+
 def is_array(t: TypeNode) -> bool:
     return isinstance(t, ArrayType)
 
@@ -148,6 +177,8 @@ def type_str(t: TypeNode) -> str:
         return t.name
     if isinstance(t, PointerType):
         return type_str(t.base) + "*"
+    if isinstance(t, ManagedHandleType):
+        return type_str(t.base) + "@"
     if isinstance(t, ArrayType):
         return f"{type_str(t.base)}[{t.size}]"
     if isinstance(t, FunctionPointerType):
@@ -221,6 +252,15 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
         null_name = isinstance(left, NamedType) and left.name == "null"
         null_name2 = isinstance(right, NamedType) and right.name == "null"
         if (null_name and is_pointer(right)) or (null_name2 and is_pointer(left)):
+            return NamedType("bool")
+        # null vs managed handle, and handle vs handle of the same base
+        if (null_name and is_managed_handle(right)) or (null_name2 and is_managed_handle(left)):
+            return NamedType("bool")
+        if (
+            isinstance(left, ManagedHandleType)
+            and isinstance(right, ManagedHandleType)
+            and types_equal(left.base, right.base)
+        ):
             return NamedType("bool")
         if (
             (null_name and is_function_pointer(right))

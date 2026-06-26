@@ -38,6 +38,7 @@ class ClassInfo:
     interfaces: List[str]
     decl: ClassDecl
     access: str = "public"
+    is_managed: bool = False
 
 
 @dataclass
@@ -146,7 +147,8 @@ class GlobalEnv:
 
     def resolve_type(self, node: TypeNode) -> None:
         from parser.ast_nodes import (
-            PointerType, ArrayType, FunctionPointerType, GenericType, NullableType,
+            PointerType, ManagedHandleType, ArrayType, FunctionPointerType,
+            GenericType, NullableType,
         )
         if isinstance(node, GenericType):
             # Monomorphization should have rewritten every GenericType already;
@@ -168,6 +170,15 @@ class GlobalEnv:
                 )
         elif isinstance(node, PointerType):
             self.resolve_type(node.base)
+        elif isinstance(node, ManagedHandleType):
+            self.resolve_type(node.base)
+            base = node.base
+            if isinstance(base, NamedType) and not self.is_managed_class(base.name):
+                raise TypeError(
+                    f"managed handle '{base.name}@' requires a managed class; "
+                    f"declare it with 'managed class {base.name}'",
+                    node.line, node.col,
+                )
         elif isinstance(node, ArrayType):
             self.resolve_type(node.base)
         elif isinstance(node, FunctionPointerType):
@@ -179,6 +190,9 @@ class GlobalEnv:
 
     def is_class(self, name: str) -> bool:
         return name in self.classes
+
+    def is_managed_class(self, name: str) -> bool:
+        return name in self.classes and self.classes[name].is_managed
 
     def is_interface(self, name: str) -> bool:
         return name in self.interfaces

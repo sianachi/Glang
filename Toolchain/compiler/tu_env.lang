@@ -80,8 +80,38 @@ bool is_assignable(TypeNode* from_t, TypeNode* to_t, GlobalEnv* env) {
     bool from_null = is_named(from_t, "null");
     if (from_null) {
         if (is_pointer(to_t)) { return true; }
+        if (is_handle(to_t)) { return true; }
         if (is_function_pointer(to_t)) { return true; }
         if (is_nullable(to_t)) { return true; }
+    }
+
+    // Managed handle covariance: a subclass handle widens to a superclass /
+    // interface handle. Handles never mix with raw pointers or class values.
+    if (is_handle(from_t) && is_handle(to_t)) {
+        TypeNode* fb = handle_base(from_t);
+        TypeNode* tb = handle_base(to_t);
+        match (*fb) {
+            TypeNode.NamedType(fbn) => {
+                match (*tb) {
+                    TypeNode.NamedType(tbn) => {
+                        if (fbn == tbn) { return true; }
+                        if (env->is_class(fbn) && env->is_class(tbn)) {
+                            List<string> chain = superclass_chain(fbn, env);
+                            int n = chain.length();
+                            for (int i = 1; i < n; ++i) {
+                                if (chain.get(i) == tbn) { return true; }
+                            }
+                        }
+                        if (env->is_class(fbn) && env->is_interface(tbn)) {
+                            if (implements_interface(fbn, tbn, env)) { return true; }
+                        }
+                    }
+                    _ => { }
+                }
+            }
+            _ => { }
+        }
+        return false;
     }
 
     // T → T?  (implicit promotion to nullable)

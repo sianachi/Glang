@@ -24,6 +24,8 @@ char*   glang_readfile(const char* path);
 void    glang_writefile(const char* path, const char* content);
 int     glang_fileexists(const char* path);
 char*   glang_readstdin(void);
+void* glang_managed_alloc(size_t size);
+void  glang_managed_sweep(void);
 void glang_print_int(int64_t v);
 void glang_print_float(double v);
 void glang_print_bool(int v);
@@ -215,57 +217,59 @@ typedef int64_t TokenType;
 #define TokenType__KW_PROTECTED ((int64_t)44)
 #define TokenType__KW_PUBLIC ((int64_t)45)
 #define TokenType__KW_MODIFIER ((int64_t)46)
-#define TokenType__KW_TRY ((int64_t)47)
-#define TokenType__KW_CATCH ((int64_t)48)
-#define TokenType__KW_THROW ((int64_t)49)
-#define TokenType__PLUS ((int64_t)50)
-#define TokenType__MINUS ((int64_t)51)
-#define TokenType__STAR ((int64_t)52)
-#define TokenType__SLASH ((int64_t)53)
-#define TokenType__PERCENT ((int64_t)54)
-#define TokenType__AMP ((int64_t)55)
-#define TokenType__PIPE ((int64_t)56)
-#define TokenType__CARET ((int64_t)57)
-#define TokenType__TILDE ((int64_t)58)
-#define TokenType__LSHIFT ((int64_t)59)
-#define TokenType__RSHIFT ((int64_t)60)
-#define TokenType__AND ((int64_t)61)
-#define TokenType__OR ((int64_t)62)
-#define TokenType__BANG ((int64_t)63)
-#define TokenType__EQ ((int64_t)64)
-#define TokenType__NEQ ((int64_t)65)
-#define TokenType__LT ((int64_t)66)
-#define TokenType__LTE ((int64_t)67)
-#define TokenType__GT ((int64_t)68)
-#define TokenType__GTE ((int64_t)69)
-#define TokenType__ASSIGN ((int64_t)70)
-#define TokenType__PLUS_ASSIGN ((int64_t)71)
-#define TokenType__MINUS_ASSIGN ((int64_t)72)
-#define TokenType__STAR_ASSIGN ((int64_t)73)
-#define TokenType__SLASH_ASSIGN ((int64_t)74)
-#define TokenType__PERCENT_ASSIGN ((int64_t)75)
-#define TokenType__AMP_ASSIGN ((int64_t)76)
-#define TokenType__PIPE_ASSIGN ((int64_t)77)
-#define TokenType__CARET_ASSIGN ((int64_t)78)
-#define TokenType__LSHIFT_ASSIGN ((int64_t)79)
-#define TokenType__RSHIFT_ASSIGN ((int64_t)80)
-#define TokenType__PLUS_PLUS ((int64_t)81)
-#define TokenType__MINUS_MINUS ((int64_t)82)
-#define TokenType__QUESTION ((int64_t)83)
-#define TokenType__QUESTION_QUESTION ((int64_t)84)
-#define TokenType__LBRACE ((int64_t)85)
-#define TokenType__RBRACE ((int64_t)86)
-#define TokenType__LPAREN ((int64_t)87)
-#define TokenType__RPAREN ((int64_t)88)
-#define TokenType__LBRACKET ((int64_t)89)
-#define TokenType__RBRACKET ((int64_t)90)
-#define TokenType__SEMICOLON ((int64_t)91)
-#define TokenType__COMMA ((int64_t)92)
-#define TokenType__DOT ((int64_t)93)
-#define TokenType__ARROW ((int64_t)94)
-#define TokenType__COLON ((int64_t)95)
-#define TokenType__COLONCOLON ((int64_t)96)
-#define TokenType__EOF ((int64_t)97)
+#define TokenType__KW_MANAGED ((int64_t)47)
+#define TokenType__KW_TRY ((int64_t)48)
+#define TokenType__KW_CATCH ((int64_t)49)
+#define TokenType__KW_THROW ((int64_t)50)
+#define TokenType__PLUS ((int64_t)51)
+#define TokenType__MINUS ((int64_t)52)
+#define TokenType__STAR ((int64_t)53)
+#define TokenType__SLASH ((int64_t)54)
+#define TokenType__PERCENT ((int64_t)55)
+#define TokenType__AT ((int64_t)56)
+#define TokenType__AMP ((int64_t)57)
+#define TokenType__PIPE ((int64_t)58)
+#define TokenType__CARET ((int64_t)59)
+#define TokenType__TILDE ((int64_t)60)
+#define TokenType__LSHIFT ((int64_t)61)
+#define TokenType__RSHIFT ((int64_t)62)
+#define TokenType__AND ((int64_t)63)
+#define TokenType__OR ((int64_t)64)
+#define TokenType__BANG ((int64_t)65)
+#define TokenType__EQ ((int64_t)66)
+#define TokenType__NEQ ((int64_t)67)
+#define TokenType__LT ((int64_t)68)
+#define TokenType__LTE ((int64_t)69)
+#define TokenType__GT ((int64_t)70)
+#define TokenType__GTE ((int64_t)71)
+#define TokenType__ASSIGN ((int64_t)72)
+#define TokenType__PLUS_ASSIGN ((int64_t)73)
+#define TokenType__MINUS_ASSIGN ((int64_t)74)
+#define TokenType__STAR_ASSIGN ((int64_t)75)
+#define TokenType__SLASH_ASSIGN ((int64_t)76)
+#define TokenType__PERCENT_ASSIGN ((int64_t)77)
+#define TokenType__AMP_ASSIGN ((int64_t)78)
+#define TokenType__PIPE_ASSIGN ((int64_t)79)
+#define TokenType__CARET_ASSIGN ((int64_t)80)
+#define TokenType__LSHIFT_ASSIGN ((int64_t)81)
+#define TokenType__RSHIFT_ASSIGN ((int64_t)82)
+#define TokenType__PLUS_PLUS ((int64_t)83)
+#define TokenType__MINUS_MINUS ((int64_t)84)
+#define TokenType__QUESTION ((int64_t)85)
+#define TokenType__QUESTION_QUESTION ((int64_t)86)
+#define TokenType__LBRACE ((int64_t)87)
+#define TokenType__RBRACE ((int64_t)88)
+#define TokenType__LPAREN ((int64_t)89)
+#define TokenType__RPAREN ((int64_t)90)
+#define TokenType__LBRACKET ((int64_t)91)
+#define TokenType__RBRACKET ((int64_t)92)
+#define TokenType__SEMICOLON ((int64_t)93)
+#define TokenType__COMMA ((int64_t)94)
+#define TokenType__DOT ((int64_t)95)
+#define TokenType__ARROW ((int64_t)96)
+#define TokenType__COLON ((int64_t)97)
+#define TokenType__COLONCOLON ((int64_t)98)
+#define TokenType__EOF ((int64_t)99)
 
 struct Exception {
     char* message;
@@ -310,6 +314,7 @@ struct TokenStream {
 typedef enum {
     TypeNode__NamedType,
     TypeNode__PointerType,
+    TypeNode__HandleType,
     TypeNode__ArrayType,
     TypeNode__GenericType,
     TypeNode__NullableType,
@@ -325,6 +330,9 @@ struct TypeNode {
         struct {
             TypeNode* base;
         } as_PointerType;
+        struct {
+            TypeNode* base;
+        } as_HandleType;
         struct {
             TypeNode* base;
             int64_t size;
@@ -354,6 +362,13 @@ static TypeNode TypeNode__PointerType_new(TypeNode* base) {
     TypeNode __v;
     __v.tag = TypeNode__PointerType;
     __v.data.as_PointerType.base = base;
+    return __v;
+}
+
+static TypeNode TypeNode__HandleType_new(TypeNode* base) {
+    TypeNode __v;
+    __v.tag = TypeNode__HandleType;
+    __v.data.as_HandleType.base = base;
     return __v;
 }
 
@@ -1009,6 +1024,7 @@ struct Decl {
             char* access;
             List_string* typeParams;
             Map_string_TypeNode* bounds;
+            int isManaged;
         } as_ClassDecl;
         struct {
             char* name;
@@ -1058,7 +1074,7 @@ static Decl Decl__FunctionDecl_new(char* name, List_Param* params, TypeNode* ret
     return __v;
 }
 
-static Decl Decl__ClassDecl_new(char* name, List_FieldDecl* fields, List_StaticFieldDecl* staticFields, List_MethodDecl* methods, char* superclass, List_string* interfaces, ConstructorDecl* constructor, DestructorDecl* destructor, char* access, List_string* typeParams, Map_string_TypeNode* bounds) {
+static Decl Decl__ClassDecl_new(char* name, List_FieldDecl* fields, List_StaticFieldDecl* staticFields, List_MethodDecl* methods, char* superclass, List_string* interfaces, ConstructorDecl* constructor, DestructorDecl* destructor, char* access, List_string* typeParams, Map_string_TypeNode* bounds, int isManaged) {
     Decl __v;
     __v.tag = Decl__ClassDecl;
     __v.data.as_ClassDecl.name = name;
@@ -1072,6 +1088,7 @@ static Decl Decl__ClassDecl_new(char* name, List_FieldDecl* fields, List_StaticF
     __v.data.as_ClassDecl.access = access;
     __v.data.as_ClassDecl.typeParams = typeParams;
     __v.data.as_ClassDecl.bounds = bounds;
+    __v.data.as_ClassDecl.isManaged = isManaged;
     return __v;
 }
 
@@ -1195,6 +1212,7 @@ struct ClassInfo {
     List_string* interfaces;
     Decl* decl;
     char* access;
+    int isManaged;
 };
 
 struct InterfaceInfo {
@@ -1928,7 +1946,7 @@ Decl* DeclParser__parseUnion(DeclParser* self);
 TypeParams* DeclParser__parseTypeParams(DeclParser* self);
 void DeclParser__parseOneTypeParam(DeclParser* self, List_string* names, Map_string_TypeNode* bounds);
 Decl* DeclParser__parseFunction(DeclParser* self);
-Decl* DeclParser__parseClass(DeclParser* self, char* access);
+Decl* DeclParser__parseClass(DeclParser* self, char* access, int isManaged);
 Decl* DeclParser__parseInterface(DeclParser* self);
 Decl* DeclParser__parseModifier(DeclParser* self);
 char* DeclParser__parseMemberName(DeclParser* self);
@@ -1944,8 +1962,8 @@ void AnalyzeError_delete(AnalyzeError* self);
 FunctionInfo* FunctionInfo_new(char* n, List_Param* p, TypeNode* rt, Decl* d);
 void FunctionInfo__init(FunctionInfo* self, char* n, List_Param* p, TypeNode* rt, Decl* d);
 void FunctionInfo_delete(FunctionInfo* self);
-ClassInfo* ClassInfo_new(char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc);
-void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc);
+ClassInfo* ClassInfo_new(char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc, int isMgd);
+void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc, int isMgd);
 void ClassInfo_delete(ClassInfo* self);
 InterfaceInfo* InterfaceInfo_new(char* n, Map_string_MethodDecl* m, Decl* d);
 void InterfaceInfo__init(InterfaceInfo* self, char* n, Map_string_MethodDecl* m, Decl* d);
@@ -1981,6 +1999,7 @@ void GlobalEnv__init(GlobalEnv* self);
 void GlobalEnv_delete(GlobalEnv* self);
 void GlobalEnv__resolve_type(GlobalEnv* self, TypeNode* node);
 int GlobalEnv__is_class(GlobalEnv* self, char* name);
+int GlobalEnv__is_managed_class(GlobalEnv* self, char* name);
 int GlobalEnv__is_interface(GlobalEnv* self, char* name);
 int GlobalEnv__is_enum(GlobalEnv* self, char* name);
 int GlobalEnv__is_union(GlobalEnv* self, char* name);
@@ -1994,6 +2013,8 @@ int is_bool(TypeNode* t);
 int is_string(TypeNode* t);
 int is_pointer(TypeNode* t);
 int is_array(TypeNode* t);
+int is_handle(TypeNode* t);
+TypeNode* handle_base(TypeNode* t);
 int is_function_pointer(TypeNode* t);
 int is_float(TypeNode* t);
 int is_named(TypeNode* t, char* nm);
@@ -2288,8 +2309,9 @@ void CEmit__emitMatch(CEmit* self, Expr* scrutinee, List_MatchArm* arms);
 char* CEmit__buildParamListWith(CEmit* self, List_Param* params, char* extraFirst);
 void CEmit__emitPrototype(CEmit* self, Decl* d);
 void CEmit__emitDecl(CEmit* self, Decl* d);
-void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char* sup, ConstructorDecl* ctor, DestructorDecl* dtor);
-void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, char* sup);
+char* CEmit__allocExpr(CEmit* self, char* cn, int isManaged);
+void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char* sup, ConstructorDecl* ctor, DestructorDecl* dtor, int isManaged);
+void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, char* sup, int isManaged);
 void CEmit__emitDestructor(CEmit* self, char* rawName, DestructorDecl* dtor);
 void CEmit__emitMethod(CEmit* self, char* rawName, MethodDecl* m);
 void CEmit__emitFunc(CEmit* self, char* name, List_Param* params, TypeNode* ret, Stmt* body);
@@ -2308,6 +2330,7 @@ char* CEmit__emitLit(CEmit* self, char* kind, char* value);
 char* CEmit__cStringLit(CEmit* self, char* val);
 char* CEmit__cCharLit(CEmit* self, char* val);
 char* CEmit__infer(CEmit* self, Expr* e);
+char* CEmit__inferRaw(CEmit* self, Expr* e);
 char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args);
 char* CEmit__emitArgs(CEmit* self, List_Expr* args);
 void CEmit__collectUsedIdents(CEmit* self, Expr* e, List_string* used);
@@ -3318,6 +3341,7 @@ Map_string_TokenType* keywords(void) {
     Map_string_TokenType__set(kw, "protected", TokenType__KW_PROTECTED);
     Map_string_TokenType__set(kw, "public", TokenType__KW_PUBLIC);
     Map_string_TokenType__set(kw, "modifier", TokenType__KW_MODIFIER);
+    Map_string_TokenType__set(kw, "managed", TokenType__KW_MANAGED);
     Map_string_TokenType__set(kw, "try", TokenType__KW_TRY);
     Map_string_TokenType__set(kw, "catch", TokenType__KW_CATCH);
     Map_string_TokenType__set(kw, "throw", TokenType__KW_THROW);
@@ -3466,6 +3490,9 @@ char* tokenName(TokenType t) {
     if ((t == TokenType__KW_MODIFIER)) {
         return "KW_MODIFIER";
     }
+    if ((t == TokenType__KW_MANAGED)) {
+        return "KW_MANAGED";
+    }
     if ((t == TokenType__KW_TRY)) {
         return "KW_TRY";
     }
@@ -3489,6 +3516,9 @@ char* tokenName(TokenType t) {
     }
     if ((t == TokenType__PERCENT)) {
         return "PERCENT";
+    }
+    if ((t == TokenType__AT)) {
+        return "AT";
     }
     if ((t == TokenType__AMP)) {
         return "AMP";
@@ -4104,6 +4134,9 @@ Token* GLexer__lexOp(GLexer* self, int64_t line, int64_t col) {
     if ((c == '~')) {
         return Token_new(TokenType__TILDE, "~", line, col);
     }
+    if ((c == '@')) {
+        return Token_new(TokenType__AT, "@", line, col);
+    }
     if ((c == '{')) {
         return Token_new(TokenType__LBRACE, "{", line, col);
     }
@@ -4278,6 +4311,11 @@ char* showType(TypeNode* t) {
         case TypeNode__PointerType: {
             TypeNode* b = __match__.data.as_PointerType.base;
             return glang_str_concat(showType(b), "*");
+            break;
+        }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return glang_str_concat(showType(b), "@");
             break;
         }
         case TypeNode__ArrayType: {
@@ -5078,6 +5116,7 @@ char* showDecl(Decl* d) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             char* ext = "_";
             if ((strcmp(superName, "") != 0)) {
                 ext = superName;
@@ -5094,7 +5133,11 @@ char* showDecl(Decl* d) {
             if ((dtor != NULL)) {
                 dtorS = glang_str_concat(glang_str_concat("(dtor ", showStmt(dtor->body)), ")");
             }
-            return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(class ", access), " "), name), " "), showTypeParams(tps, bounds)), " ext:"), ext), " impl:"), showStrList(ifaces)), " sf:"), showSFieldList(sfields)), " f:"), showFieldList(fields)), " ctor:"), ctorS), " dtor:"), dtorS), " m:"), showMethodList(methods)), ")");
+            char* mgdS = "no";
+            if (mgd) {
+                mgdS = "yes";
+            }
+            return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(class ", access), " mgd:"), mgdS), " "), name), " "), showTypeParams(tps, bounds)), " ext:"), ext), " impl:"), showStrList(ifaces)), " sf:"), showSFieldList(sfields)), " f:"), showFieldList(fields)), " ctor:"), ctorS), " dtor:"), dtorS), " m:"), showMethodList(methods)), ")");
             break;
         }
         case Decl__InterfaceDecl: {
@@ -5201,6 +5244,11 @@ int isPointerOrFn(TypeNode* t) {
             return 1;
             break;
         }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return 1;
+            break;
+        }
         case TypeNode__FunctionPointerType: {
             List_TypeNode* p = __match__.data.as_FunctionPointerType.paramTypes;
             TypeNode* r = __match__.data.as_FunctionPointerType.returnType;
@@ -5278,6 +5326,13 @@ TypeNode* TypeParser__parseType(TypeParser* self) {
     while (TokenStream__check(self->s, TokenType__STAR)) {
         TokenStream__advance(self->s);
         node = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(node); __up; });
+    }
+    if (TokenStream__check(self->s, TokenType__AT)) {
+        Token* at = TokenStream__advance(self->s);
+        if (isPointerOrFn(node)) {
+            GLANG_THROW(ParseError_new("'@' managed handle cannot be applied to a pointer type", at->line, at->col), "ParseError");
+        }
+        node = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(node); __up; });
     }
     if (TokenStream__check(self->s, TokenType__QUESTION)) {
         Token* q = TokenStream__advance(self->s);
@@ -5879,6 +5934,9 @@ int StmtParser__isVarDeclStart(StmtParser* self) {
     if ((TokenStream__peek(self->s, 1)->type == TokenType__COLONCOLON)) {
         return StmtParser__looksLikeQualifiedVarDecl(self);
     }
+    if (((TokenStream__peek(self->s, 1)->type == TokenType__AT) && (TokenStream__peek(self->s, 2)->type == TokenType__IDENT))) {
+        return 1;
+    }
     int64_t i = 1;
     while ((TokenStream__peek(self->s, i)->type == TokenType__STAR)) {
         i = (i + 1);
@@ -6203,8 +6261,12 @@ Decl* DeclParser__parseTopLevelDecl(DeclParser* self) {
     if (isAccessKw(TokenStream__peek(self->s, 0)->type)) {
         access = TokenStream__advance(self->s)->value;
     }
+    int isManaged = TokenStream__accept(self->s, TokenType__KW_MANAGED);
     if (TokenStream__check(self->s, TokenType__KW_CLASS)) {
-        return DeclParser__parseClass(self, access);
+        return DeclParser__parseClass(self, access, isManaged);
+    }
+    if (isManaged) {
+        GLANG_THROW(TokenStream__error(self->s, "'managed' may only modify a class declaration"), "ParseError");
     }
     if (TokenStream__check(self->s, TokenType__KW_INTERFACE)) {
         return DeclParser__parseInterface(self);
@@ -6355,7 +6417,7 @@ Decl* DeclParser__parseFunction(DeclParser* self) {
     return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__FunctionDecl_new(nameTok->value, params, retType, body, tps->names, tps->bounds); __up; });
 }
 
-Decl* DeclParser__parseClass(DeclParser* self, char* access) {
+Decl* DeclParser__parseClass(DeclParser* self, char* access, int isManaged) {
     TokenStream__advance(self->s);
     Token* nameTok = TokenStream__expect(self->s, TokenType__IDENT);
     TypeParams* tps = DeclParser__parseTypeParams(self);
@@ -6468,7 +6530,7 @@ Decl* DeclParser__parseClass(DeclParser* self, char* access) {
         }
     }
     TokenStream__expect(self->s, TokenType__RBRACE);
-    return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(nameTok->value, fields, staticFields, methods, superclass, interfaces, constructor, destructor, access, tps->names, tps->bounds); __up; });
+    return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(nameTok->value, fields, staticFields, methods, superclass, interfaces, constructor, destructor, access, tps->names, tps->bounds, isManaged); __up; });
 }
 
 Decl* DeclParser__parseInterface(DeclParser* self) {
@@ -6619,7 +6681,7 @@ void FunctionInfo_delete(FunctionInfo* self) {
     free(self);
 }
 
-void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc) {
+void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc, int isMgd) {
     self->name = n;
     self->fields = f;
     self->static_fields = sf;
@@ -6632,11 +6694,12 @@ void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_stri
     self->interfaces = ifaces;
     self->decl = d;
     self->access = acc;
+    self->isManaged = isMgd;
 }
 
-ClassInfo* ClassInfo_new(char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc) {
+ClassInfo* ClassInfo_new(char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc, int isMgd) {
     ClassInfo* self = (ClassInfo*)calloc(1, sizeof(ClassInfo));
-    ClassInfo__init(self, n, f, sf, im, sm, vt, ctor, dtor, superName, ifaces, d, acc);
+    ClassInfo__init(self, n, f, sf, im, sm, vt, ctor, dtor, superName, ifaces, d, acc, isMgd);
     return self;
 }
 
@@ -6874,6 +6937,26 @@ void GlobalEnv__resolve_type(GlobalEnv* self, TypeNode* node) {
             GlobalEnv__resolve_type(self, b);
             break;
         }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            GlobalEnv__resolve_type(self, b);
+            {
+                TypeNode __match__ = (*b);
+                switch (__match__.tag) {
+                case TypeNode__NamedType: {
+                    char* bn = __match__.data.as_NamedType.name;
+                    if ((!GlobalEnv__is_managed_class(self, bn))) {
+                        GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("managed handle '", bn), "@' requires a managed class; "), "declare it with 'managed class "), bn), "'"), 0, 0), "AnalyzeError");
+                    }
+                    break;
+                }
+                default: {
+                    break;
+                }
+                }
+            }
+            break;
+        }
         case TypeNode__ArrayType: {
             TypeNode* b = __match__.data.as_ArrayType.base;
             int64_t sz = __match__.data.as_ArrayType.size;
@@ -6901,6 +6984,14 @@ void GlobalEnv__resolve_type(GlobalEnv* self, TypeNode* node) {
 
 int GlobalEnv__is_class(GlobalEnv* self, char* name) {
     return Map_string_ClassInfo__has(self->classes, name);
+}
+
+int GlobalEnv__is_managed_class(GlobalEnv* self, char* name) {
+    if ((!Map_string_ClassInfo__has(self->classes, name))) {
+        return 0;
+    }
+    ClassInfo* ci = Map_string_ClassInfo__getOr(self->classes, name, NULL);
+    return ci->isManaged;
 }
 
 int GlobalEnv__is_interface(GlobalEnv* self, char* name) {
@@ -7060,6 +7151,40 @@ int is_array(TypeNode* t) {
     }
 }
 
+int is_handle(TypeNode* t) {
+    {
+        TypeNode __match__ = (*t);
+        switch (__match__.tag) {
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return 1;
+            break;
+        }
+        default: {
+            return 0;
+            break;
+        }
+        }
+    }
+}
+
+TypeNode* handle_base(TypeNode* t) {
+    {
+        TypeNode __match__ = (*t);
+        switch (__match__.tag) {
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return b;
+            break;
+        }
+        default: {
+            GLANG_THROW(Exception_new("handle_base: not a handle type"), "Exception");
+            break;
+        }
+        }
+    }
+}
+
 int is_function_pointer(TypeNode* t) {
     {
         TypeNode __match__ = (*t);
@@ -7169,6 +7294,24 @@ int types_equal(TypeNode* a, TypeNode* b) {
             }
             break;
         }
+        case TypeNode__HandleType: {
+            TypeNode* ab = __match__.data.as_HandleType.base;
+            {
+                TypeNode __match__ = (*b);
+                switch (__match__.tag) {
+                case TypeNode__HandleType: {
+                    TypeNode* bb = __match__.data.as_HandleType.base;
+                    return types_equal(ab, bb);
+                    break;
+                }
+                default: {
+                    return 0;
+                    break;
+                }
+                }
+            }
+            break;
+        }
         case TypeNode__ArrayType: {
             TypeNode* ab = __match__.data.as_ArrayType.base;
             int64_t asz = __match__.data.as_ArrayType.size;
@@ -7261,6 +7404,11 @@ char* type_str(TypeNode* t) {
         case TypeNode__PointerType: {
             TypeNode* b = __match__.data.as_PointerType.base;
             return glang_str_concat(type_str(b), "*");
+            break;
+        }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return glang_str_concat(type_str(b), "@");
             break;
         }
         case TypeNode__ArrayType: {
@@ -7411,6 +7559,14 @@ TypeNode* binary_result_type(char* op, TypeNode* left, TypeNode* right) {
         }
         if (((null_left && is_function_pointer(right)) || (null_right && is_function_pointer(left)))) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("bool"); __up; });
+        }
+        if (((null_left && is_handle(right)) || (null_right && is_handle(left)))) {
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("bool"); __up; });
+        }
+        if ((is_handle(left) && is_handle(right))) {
+            if (types_equal(handle_base(left), handle_base(right))) {
+                return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("bool"); __up; });
+            }
         }
         TypeNode* l_base = left;
         {
@@ -7661,12 +7817,61 @@ int is_assignable(TypeNode* from_t, TypeNode* to_t, GlobalEnv* env) {
         if (is_pointer(to_t)) {
             return 1;
         }
+        if (is_handle(to_t)) {
+            return 1;
+        }
         if (is_function_pointer(to_t)) {
             return 1;
         }
         if (is_nullable(to_t)) {
             return 1;
         }
+    }
+    if ((is_handle(from_t) && is_handle(to_t))) {
+        TypeNode* fb = handle_base(from_t);
+        TypeNode* tb = handle_base(to_t);
+        {
+            TypeNode __match__ = (*fb);
+            switch (__match__.tag) {
+            case TypeNode__NamedType: {
+                char* fbn = __match__.data.as_NamedType.name;
+                {
+                    TypeNode __match__ = (*tb);
+                    switch (__match__.tag) {
+                    case TypeNode__NamedType: {
+                        char* tbn = __match__.data.as_NamedType.name;
+                        if ((strcmp(fbn, tbn) == 0)) {
+                            return 1;
+                        }
+                        if ((GlobalEnv__is_class(env, fbn) && GlobalEnv__is_class(env, tbn))) {
+                            List_string* chain = superclass_chain(fbn, env);
+                            int64_t n = List_string__length(chain);
+                            for (int64_t i = 1; (i < n); (++i)) {
+                                if ((strcmp(List_string__get(chain, i), tbn) == 0)) {
+                                    return 1;
+                                }
+                            }
+                        }
+                        if ((GlobalEnv__is_class(env, fbn) && GlobalEnv__is_interface(env, tbn))) {
+                            if (implements_interface(fbn, tbn, env)) {
+                                return 1;
+                            }
+                        }
+                        break;
+                    }
+                    default: {
+                        break;
+                    }
+                    }
+                }
+                break;
+            }
+            default: {
+                break;
+            }
+            }
+        }
+        return 0;
     }
     {
         TypeNode __match__ = (*to_t);
@@ -8479,6 +8684,7 @@ char* NamespaceResolver__decl_name(NamespaceResolver* self, Decl* d) {
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             return name;
             break;
         }
@@ -8550,7 +8756,8 @@ Decl* NamespaceResolver__qualify_decl_name(NamespaceResolver* self, Decl* d, cha
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(glang_str_concat(glang_str_concat(prefix, "::"), name), f, sf, m, sup, ifc, ct, dt, acc, tps, bnd); __up; });
+            int mgd = __match__.data.as_ClassDecl.isManaged;
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(glang_str_concat(glang_str_concat(prefix, "::"), name), f, sf, m, sup, ifc, ct, dt, acc, tps, bnd, mgd); __up; });
             break;
         }
         case Decl__InterfaceDecl: {
@@ -8724,6 +8931,7 @@ Decl* NamespaceResolver__r_decl(NamespaceResolver* self, Decl* d, List_string* p
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             self->type_params = NamespaceResolver__params_set(self, tps);
             NamespaceResolver__r_bounds(self, tps, bounds, p);
             char* nsup = sup;
@@ -8763,7 +8971,7 @@ Decl* NamespaceResolver__r_decl(NamespaceResolver* self, Decl* d, List_string* p
                 List_MethodDecl__add(nmethods, NamespaceResolver__r_method(self, List_MethodDecl__get(methods, i), p));
             }
             self->type_params = Map_string_bool_new();
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, fields, sfields, nmethods, nsup, nifaces, nctor, ndtor, access, tps, bounds); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, fields, sfields, nmethods, nsup, nifaces, nctor, ndtor, access, tps, bounds, mgd); __up; });
             break;
         }
         case Decl__InterfaceDecl: {
@@ -8894,6 +9102,11 @@ TypeNode* NamespaceResolver__r_type(NamespaceResolver* self, TypeNode* t, List_s
         case TypeNode__PointerType: {
             TypeNode* b = __match__.data.as_PointerType.base;
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(NamespaceResolver__r_type(self, b, p)); __up; });
+            break;
+        }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(NamespaceResolver__r_type(self, b, p)); __up; });
             break;
         }
         case TypeNode__ArrayType: {
@@ -9434,6 +9647,11 @@ TypeNode* clone_type(TypeNode* t) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(clone_type(b)); __up; });
             break;
         }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(clone_type(b)); __up; });
+            break;
+        }
         case TypeNode__ArrayType: {
             TypeNode* b = __match__.data.as_ArrayType.base;
             int64_t sz = __match__.data.as_ArrayType.size;
@@ -9806,6 +10024,7 @@ Decl* clone_decl(Decl* d) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             ConstructorDecl* c = NULL;
             if ((ctor != NULL)) {
                 c = clone_constructor(ctor);
@@ -9814,7 +10033,7 @@ Decl* clone_decl(Decl* d) {
             if ((dtor != NULL)) {
                 dt = clone_destructor(dtor);
             }
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, clone_field_list(fields), clone_static_field_list(sfields), clone_method_list(methods), superName, clone_str_list(ifaces), c, dt, access, clone_str_list(tps), clone_bounds(bounds)); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, clone_field_list(fields), clone_static_field_list(sfields), clone_method_list(methods), superName, clone_str_list(ifaces), c, dt, access, clone_str_list(tps), clone_bounds(bounds), mgd); __up; });
             break;
         }
         case Decl__InterfaceDecl: {
@@ -9997,6 +10216,7 @@ Program* Monomorphizer__run(Monomorphizer* self, Program* program) {
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 if ((List_string__length(tps) > 0)) {
                     Map_string_Decl__set(self->class_templates, name, d);
                     handled = 1;
@@ -10097,6 +10317,7 @@ void Monomorphizer__collect_known_decls(Monomorphizer* self, List_Decl* decls) {
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 Map_string_bool__set(self->class_names, name, 1);
                 Map_string_string__set(self->class_supers, name, superName);
                 List_string* ic = List_string_new();
@@ -10211,6 +10432,7 @@ void Monomorphizer__register_class_instance_metadata(Monomorphizer* self, char* 
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             Map_string_TypeNode* mapping = zip_mapping(tps, args);
             Map_string_bool__set(self->class_names, mangled, 1);
             Map_string_InstanceArgs__set(self->class_instance_args, mangled, InstanceArgs_new(base, clone_type_list(args)));
@@ -10341,6 +10563,7 @@ List_string* Monomorphizer__decl_type_params(Monomorphizer* self, Decl* d) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             return tps;
             break;
         }
@@ -10487,6 +10710,11 @@ TypeNode* Monomorphizer__t_type(Monomorphizer* self, TypeNode* t, Map_string_Typ
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(Monomorphizer__t_type(self, b, m)); __up; });
             break;
         }
+        case TypeNode__HandleType: {
+            TypeNode* b = __match__.data.as_HandleType.base;
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(Monomorphizer__t_type(self, b, m)); __up; });
+            break;
+        }
         case TypeNode__ArrayType: {
             TypeNode* b = __match__.data.as_ArrayType.base;
             int64_t sz = __match__.data.as_ArrayType.size;
@@ -10564,6 +10792,7 @@ Decl* Monomorphizer__t_decl(Monomorphizer* self, Decl* d, Map_string_TypeNode* m
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             List_FieldDecl* nfields = List_FieldDecl_new();
             int64_t nf = List_FieldDecl__length(fields);
             for (int64_t i = 0; (i < nf); (++i)) {
@@ -10593,7 +10822,7 @@ Decl* Monomorphizer__t_decl(Monomorphizer* self, Decl* d, Map_string_TypeNode* m
             for (int64_t i = 0; (i < nm); (++i)) {
                 List_MethodDecl__add(nmethods, Monomorphizer__t_method(self, List_MethodDecl__get(methods, i), m));
             }
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, clone_str_list(tps), clone_bounds(bounds)); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(name, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, clone_str_list(tps), clone_bounds(bounds), mgd); __up; });
             break;
         }
         case Decl__ModifierDecl: {
@@ -10673,6 +10902,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             List_FieldDecl* nfields = List_FieldDecl_new();
             int64_t nf = List_FieldDecl__length(fields);
             for (int64_t i = 0; (i < nf); (++i)) {
@@ -10702,7 +10932,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             for (int64_t i = 0; (i < nm); (++i)) {
                 List_MethodDecl__add(nmethods, Monomorphizer__t_method(self, List_MethodDecl__get(methods, i), m));
             }
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(mangled, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, List_string_new(), Map_string_TypeNode_new()); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(mangled, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, List_string_new(), Map_string_TypeNode_new(), mgd); __up; });
             break;
         }
         default: {
@@ -11213,6 +11443,7 @@ List_TypeNode* Monomorphizer__infer_instantiation(Monomorphizer* self, char* kin
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             tparams = tps;
             if ((ctor != NULL)) {
                 params = ctor->params;
@@ -11410,6 +11641,7 @@ void Monomorphizer__check_type_arg_bounds(Monomorphizer* self, Decl* template, L
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             tparams = tps;
             bounds = bnds;
             break;
@@ -11871,6 +12103,7 @@ void _register_class_names(GlobalEnv* env, Program* program) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 _register_class_shell(env, decl);
                 break;
             }
@@ -12096,6 +12329,7 @@ void _register_class_shell(GlobalEnv* env, Decl* decl) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             if (_name_taken(env, name)) {
                 GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat("name '", name), "' is already defined"), 0, 0), "AnalyzeError");
             }
@@ -12104,7 +12338,7 @@ void _register_class_shell(GlobalEnv* env, Decl* decl) {
             for (int64_t i = 0; (i < icount); (++i)) {
                 List_string__add(ifaceCopy, List_string__get(ifaces, i));
             }
-            Map_string_ClassInfo__set(env->classes, name, ClassInfo_new(name, Map_string_FieldDecl_new(), Map_string_StaticFieldDecl_new(), Map_string_MethodDecl_new(), Map_string_MethodDecl_new(), Map_string_MethodDecl_new(), ctor, dtor, superName, ifaceCopy, decl, access));
+            Map_string_ClassInfo__set(env->classes, name, ClassInfo_new(name, Map_string_FieldDecl_new(), Map_string_StaticFieldDecl_new(), Map_string_MethodDecl_new(), Map_string_MethodDecl_new(), Map_string_MethodDecl_new(), ctor, dtor, superName, ifaceCopy, decl, access, mgd));
             break;
         }
         default: {
@@ -12133,6 +12367,7 @@ void _populate_classes(GlobalEnv* env, Program* program) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 _populate_class(env, decl);
                 break;
             }
@@ -12160,6 +12395,7 @@ void _populate_class(GlobalEnv* env, Decl* decl) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             Map_string_FieldDecl* fmap = Map_string_FieldDecl_new();
             int64_t fcount = List_FieldDecl__length(fields);
             for (int64_t i = 0; (i < fcount); (++i)) {
@@ -12599,6 +12835,7 @@ List_FieldDecl* _class_decl_fields(Decl* decl) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             return fields;
             break;
         }
@@ -12707,6 +12944,7 @@ void Pass2Checker__check_program(Pass2Checker* self, Program* program) {
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 ClassInfo* info = Map_string_ClassInfo__getOr(self->env->classes, name, NULL);
                 Pass2Checker__check_class(self, d, info);
                 break;
@@ -12814,6 +13052,7 @@ void Pass2Checker__check_class(Pass2Checker* self, Decl* d, ClassInfo* info) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             ClassInfo* saved_class = self->current_class;
             int saved_static = self->in_static_method;
             self->current_class = info;
@@ -13620,6 +13859,9 @@ TypeNode* Pass2Checker__check_expr(Pass2Checker* self, Expr* expr) {
             if ((self->current_class == NULL)) {
                 GLANG_THROW(AnalyzeError_new("'this' used outside of a class or modifier", 0, 0), "AnalyzeError");
             }
+            if (self->current_class->isManaged) {
+                return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new(self->current_class->name); __up; })); __up; });
+            }
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new(self->current_class->name); __up; })); __up; });
             break;
         }
@@ -13751,6 +13993,9 @@ TypeNode* Pass2Checker__check_expr(Pass2Checker* self, Expr* expr) {
         case Expr__DeleteExpr: {
             Expr* operand = __match__.data.as_DeleteExpr.operand;
             TypeNode* t = Pass2Checker__check_expr(self, operand);
+            if (is_handle(t)) {
+                GLANG_THROW(AnalyzeError_new(glang_str_concat("'delete' cannot be used on a managed handle; managed ", "objects are reclaimed automatically"), 0, 0), "AnalyzeError");
+            }
             if ((!is_pointer(t))) {
                 GLANG_THROW(AnalyzeError_new("'delete' requires a pointer to a class", 0, 0), "AnalyzeError");
             }
@@ -13996,6 +14241,24 @@ TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
                         }
                         break;
                     }
+                    case TypeNode__HandleType: {
+                        TypeNode* b = __match__.data.as_HandleType.base;
+                        {
+                            TypeNode __match__ = (*b);
+                            switch (__match__.tag) {
+                            case TypeNode__NamedType: {
+                                char* bn = __match__.data.as_NamedType.name;
+                                class_t = b;
+                                unwrapped = 1;
+                                break;
+                            }
+                            default: {
+                                break;
+                            }
+                            }
+                        }
+                        break;
+                    }
                     default: {
                         break;
                     }
@@ -14122,6 +14385,23 @@ TypeNode* Pass2Checker__check_field_access(Pass2Checker* self, Expr* expr) {
                 switch (__match__.tag) {
                 case TypeNode__PointerType: {
                     TypeNode* b = __match__.data.as_PointerType.base;
+                    {
+                        TypeNode __match__ = (*b);
+                        switch (__match__.tag) {
+                        case TypeNode__NamedType: {
+                            char* bn = __match__.data.as_NamedType.name;
+                            class_name = bn;
+                            break;
+                        }
+                        default: {
+                            break;
+                        }
+                        }
+                    }
+                    break;
+                }
+                case TypeNode__HandleType: {
+                    TypeNode* b = __match__.data.as_HandleType.base;
                     {
                         TypeNode __match__ = (*b);
                         switch (__match__.tag) {
@@ -14276,6 +14556,9 @@ TypeNode* Pass2Checker__check_new(Pass2Checker* self, Expr* expr) {
                 if ((List_Expr__length(args) > 0)) {
                     GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat("'", className), "' expects 0 arguments, got "), strings__intToStr(List_Expr__length(args))), 0, 0), "AnalyzeError");
                 }
+            }
+            if (class_info->isManaged) {
+                return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__HandleType_new(({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new(className); __up; })); __up; });
             }
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new(className); __up; })); __up; });
             break;
@@ -14789,6 +15072,7 @@ int Pass2Checker__declHasField(Pass2Checker* self, Decl* d, char* field_name) {
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             int64_t n = List_FieldDecl__length(fields);
             for (int64_t i = 0; (i < n); (++i)) {
                 if ((strcmp(List_FieldDecl__get(fields, i)->name, field_name) == 0)) {
@@ -14822,6 +15106,7 @@ int Pass2Checker__declHasMethod(Pass2Checker* self, Decl* d, char* method_name) 
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             int64_t n = List_MethodDecl__length(methods);
             for (int64_t i = 0; (i < n); (++i)) {
                 if ((strcmp(List_MethodDecl__get(methods, i)->name, method_name) == 0)) {
@@ -14867,6 +15152,24 @@ ClassInfo* Pass2Checker__resolve_target_class_info(Pass2Checker* self, Expr* tar
                             switch (__match__.tag) {
                             case TypeNode__PointerType: {
                                 TypeNode* b = __match__.data.as_PointerType.base;
+                                {
+                                    TypeNode __match__ = (*b);
+                                    switch (__match__.tag) {
+                                    case TypeNode__NamedType: {
+                                        char* bn = __match__.data.as_NamedType.name;
+                                        return Map_string_ClassInfo__getOr(self->env->classes, bn, NULL);
+                                        break;
+                                    }
+                                    default: {
+                                        return NULL;
+                                        break;
+                                    }
+                                    }
+                                }
+                                break;
+                            }
+                            case TypeNode__HandleType: {
+                                TypeNode* b = __match__.data.as_HandleType.base;
                                 {
                                     TypeNode __match__ = (*b);
                                     switch (__match__.tag) {
@@ -15365,6 +15668,9 @@ char* cTypeOf(char* t) {
     if (glang_endswith(t, "*")) {
         return glang_str_concat(cTypeOf(glang_str_substr(t, 0, ((int64_t)strlen(t) - 1))), "*");
     }
+    if (glang_endswith(t, "@")) {
+        return glang_str_concat(cTypeOf(glang_str_substr(t, 0, ((int64_t)strlen(t) - 1))), "*");
+    }
     if (glang_endswith(t, "?")) {
         return cTypeOf(glang_str_substr(t, 0, ((int64_t)strlen(t) - 1)));
     }
@@ -15517,6 +15823,7 @@ List_FieldDecl* CEmit__ownFieldsOf(CEmit* self, char* name) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 return fields;
                 break;
             }
@@ -15547,6 +15854,7 @@ List_MethodDecl* CEmit__ownMethodsOf(CEmit* self, char* name) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 return m;
                 break;
             }
@@ -15653,6 +15961,7 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 char* cn = mangleName(nm);
                 StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("typedef struct ", cn), " "), cn), ";"));
                 if ((strcmp(sup, "") != 0)) {
@@ -15707,6 +16016,7 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
                 Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
                 CEmit__emitClassStruct(self, nm);
                 break;
             }
@@ -16038,6 +16348,7 @@ void CEmit__emitPrototype(CEmit* self, Decl* d) {
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+            int mgd = __match__.data.as_ClassDecl.isManaged;
             char* cn = mangleName(name);
             char* selfp = glang_str_concat(cn, "* self");
             if ((ctor != NULL)) {
@@ -16112,7 +16423,8 @@ void CEmit__emitDecl(CEmit* self, Decl* d) {
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
             Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
-            CEmit__emitClass(self, name, methods, sup, ctor, dtor);
+            int mgd = __match__.data.as_ClassDecl.isManaged;
+            CEmit__emitClass(self, name, methods, sup, ctor, dtor, mgd);
             break;
         }
         case Decl__ModifierDecl: {
@@ -16129,10 +16441,17 @@ void CEmit__emitDecl(CEmit* self, Decl* d) {
     }
 }
 
-void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char* sup, ConstructorDecl* ctor, DestructorDecl* dtor) {
+char* CEmit__allocExpr(CEmit* self, char* cn, int isManaged) {
+    if (isManaged) {
+        return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", cn), "*)glang_managed_alloc(sizeof("), cn), "))");
+    }
+    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", cn), "*)calloc(1, sizeof("), cn), "))");
+}
+
+void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char* sup, ConstructorDecl* ctor, DestructorDecl* dtor, int isManaged) {
     char* cn = mangleName(rawName);
     if ((ctor != NULL)) {
-        CEmit__emitConstructor(self, rawName, ctor, sup);
+        CEmit__emitConstructor(self, rawName, ctor, sup, isManaged);
     } else {
         StringBuilder__appendLine(self->out, "");
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("void ", cn), "__init("), cn), "* self) {"));
@@ -16142,7 +16461,7 @@ void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char
         }
         StringBuilder__appendLine(self->out, "}");
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(cn, "* "), cn), "_new(void) {"));
-        StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = ("), cn), "*)calloc(1, sizeof("), cn), "));"));
+        StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = "), CEmit__allocExpr(self, cn, isManaged)), ";"));
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat("    ", cn), "__init(self);"));
         StringBuilder__appendLine(self->out, "    return self;");
         StringBuilder__appendLine(self->out, "}");
@@ -16170,7 +16489,7 @@ void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char
     }
 }
 
-void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, char* sup) {
+void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, char* sup, int isManaged) {
     char* cn = mangleName(rawName);
     StringBuilder__appendLine(self->out, "");
     StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("void ", cn), "__init("), CEmit__buildParamListWith(self, ctor->params, glang_str_concat(cn, "* self"))), ") {"));
@@ -16202,7 +16521,7 @@ void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, c
     StringBuilder__appendLine(self->out, "}");
     StringBuilder__appendLine(self->out, "");
     StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(cn, "* "), cn), "_new("), CEmit__buildParamList(self, ctor->params)), ") {"));
-    StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = ("), cn), "*)calloc(1, sizeof("), cn), "));"));
+    StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = "), CEmit__allocExpr(self, cn, isManaged)), ";"));
     StringBuilder* ic = StringBuilder_new();
     StringBuilder__append(ic, glang_str_concat(glang_str_concat("    ", cn), "__init(self"));
     for (int64_t i = 0; (i < pn); (++i)) {
@@ -16903,6 +17222,14 @@ char* CEmit__cCharLit(CEmit* self, char* val) {
 }
 
 char* CEmit__infer(CEmit* self, Expr* e) {
+    char* r = CEmit__inferRaw(self, e);
+    if (glang_endswith(r, "@")) {
+        return glang_str_concat(glang_str_substr(r, 0, ((int64_t)strlen(r) - 1)), "*");
+    }
+    return r;
+}
+
+char* CEmit__inferRaw(CEmit* self, Expr* e) {
     {
         Expr __match__ = (*e);
         switch (__match__.tag) {
@@ -17749,6 +18076,8 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "void    glang_writefile(const char* path, const char* content);");
     StringBuilder__appendLine(f, "int     glang_fileexists(const char* path);");
     StringBuilder__appendLine(f, "char*   glang_readstdin(void);");
+    StringBuilder__appendLine(f, "void* glang_managed_alloc(size_t size);");
+    StringBuilder__appendLine(f, "void  glang_managed_sweep(void);");
     StringBuilder__appendLine(f, "void glang_print_int(int64_t v);");
     StringBuilder__appendLine(f, "void glang_print_float(double v);");
     StringBuilder__appendLine(f, "void glang_print_bool(int v);");
@@ -17817,7 +18146,7 @@ Decl* make_exception_decl(void) {
     List_string* ifaces = List_string_new();
     List_string* typeParams = List_string_new();
     Map_string_TypeNode* bounds = Map_string_TypeNode_new();
-    return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new("Exception", fields, sfields, methods, "", ifaces, ctor, NULL, "public", typeParams, bounds); __up; });
+    return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new("Exception", fields, sfields, methods, "", ifaces, ctor, NULL, "public", typeParams, bounds, 0); __up; });
 }
 
 int64_t glang_main(void) {

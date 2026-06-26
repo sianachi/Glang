@@ -1,0 +1,86 @@
+// Demonstrates managed memory: `managed class` types and the `T@` handle.
+//
+// A `managed class` is GC-managed: `new` yields a handle `T@` (not a raw `T*`),
+// member access uses dot notation, and the object is reclaimed automatically —
+// you never `delete` a handle. Handles are reference-like: assigning one aliases
+// the same object, and a handle may be `null` and compared against `null`.
+//
+// Run: python3 main.py run examples/managed_memory.lang
+
+// ── A managed singly-linked list of ints ────────────────────────────────────
+managed class Node {
+    int value;
+    Node@ next;            // a managed field holding another handle
+
+    Node(int v) {
+        this.value = v;
+        this.next = null;
+    }
+
+    // Recursive traversal through handle fields.
+    int sum() {
+        int total = this.value;
+        if (this.next != null) {
+            total = total + this.next.sum();
+        }
+        return total;
+    }
+
+    int length() {
+        if (this.next == null) { return 1; }
+        return 1 + this.next.length();
+    }
+}
+
+// Build a chain 1 -> 2 -> ... -> n and return its head handle.
+Node@ buildChain(int n) {
+    Node@ head = null;
+    for (int i = n; i >= 1; --i) {
+        Node@ node = new Node(i);
+        node.next = head;     // managed -> managed field assignment
+        head = node;          // reassigning a handle (aliases, old head kept alive via node.next)
+    }
+    return head;              // returning a handle
+}
+
+// ── Managed inheritance + handle widening ────────────────────────────────────
+managed class Shape {
+    int tag;
+    Shape() { this.tag = 0; }
+    int area() { return 0; }
+}
+
+managed class Square extends Shape {
+    int side;
+    Square(int s) : super() { this.side = s; }
+    int area() { return this.side * this.side; }
+}
+
+int main() {
+    Node@ chain = buildChain(5);
+    print(chain.length());    // 5
+    print(chain.sum());       // 15  (1+2+3+4+5)
+    print(chain.value);       // 1   (head)
+    print(chain.next.value);  // 2
+
+    // Aliasing: two handles to the same object observe the same mutation.
+    Node@ a = new Node(100);
+    Node@ b = a;
+    b.value = 7;
+    print(a.value);           // 7
+
+    // null handle + null comparison.
+    Node@ empty = null;
+    if (empty == null) { print(-1); }   // -1
+
+    // Managed inheritance: a Square@ widens to a Shape@ handle (assignment is
+    // well-typed because Square is a subclass). Methods are called on the
+    // concrete handle.
+    Square@ sq = new Square(4);
+    Shape@ base = sq;         // subclass handle widens to a superclass handle
+    print(sq.area());         // 16
+    print(sq.side);           // 4
+    print(base.tag);          // 0  (inherited base field, read through Shape@)
+
+    return 0;
+}

@@ -419,6 +419,7 @@ class GLexer {
             return new Token(TokenType.BANG, "!", line, col);
         }
         if (c == '~') { return new Token(TokenType.TILDE,     "~", line, col); }
+        if (c == '@') { return new Token(TokenType.AT,        "@", line, col); }
         if (c == '{') { return new Token(TokenType.LBRACE,    "{", line, col); }
         if (c == '}') { return new Token(TokenType.RBRACE,    "}", line, col); }
         if (c == '(') { return new Token(TokenType.LPAREN,    "(", line, col); }

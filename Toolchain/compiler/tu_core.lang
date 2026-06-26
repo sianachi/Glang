@@ -83,6 +83,20 @@ bool is_array(TypeNode* t) {
     }
 }
 
+bool is_handle(TypeNode* t) {
+    match (*t) {
+        TypeNode.HandleType(b) => { return true; }
+        _ => { return false; }
+    }
+}
+
+TypeNode* handle_base(TypeNode* t) {
+    match (*t) {
+        TypeNode.HandleType(b) => { return b; }
+        _ => { throw new Exception("handle_base: not a handle type"); }
+    }
+}
+
 bool is_function_pointer(TypeNode* t) {
     match (*t) {
         TypeNode.FunctionPointerType(p, r) => { return true; }
@@ -129,6 +143,12 @@ bool types_equal(TypeNode* a, TypeNode* b) {
                 _ => { return false; }
             }
         }
+        TypeNode.HandleType(ab) => {
+            match (*b) {
+                TypeNode.HandleType(bb) => { return types_equal(ab, bb); }
+                _ => { return false; }
+            }
+        }
         TypeNode.ArrayType(ab, asz) => {
             match (*b) {
                 TypeNode.ArrayType(bb, bsz) => {
@@ -171,6 +191,7 @@ string type_str(TypeNode* t) {
     match (*t) {
         TypeNode.NamedType(n) => { return n; }
         TypeNode.PointerType(b) => { return type_str(b) + "*"; }
+        TypeNode.HandleType(b) => { return type_str(b) + "@"; }
         TypeNode.ArrayType(b, sz) => {
             return type_str(b) + "[" + strings::intToStr(sz) + "]";
         }
@@ -267,6 +288,15 @@ TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
         }
         if ((null_left && is_function_pointer(right)) || (null_right && is_function_pointer(left))) {
             return new TypeNode.NamedType("bool");
+        }
+        // null vs managed handle, and handle vs handle of the same base.
+        if ((null_left && is_handle(right)) || (null_right && is_handle(left))) {
+            return new TypeNode.NamedType("bool");
+        }
+        if (is_handle(left) && is_handle(right)) {
+            if (types_equal(handle_base(left), handle_base(right))) {
+                return new TypeNode.NamedType("bool");
+            }
         }
         // A class value `C` and a pointer to the same class `C*` are the same
         // handle, so comparing them by reference is well-typed.

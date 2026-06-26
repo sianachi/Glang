@@ -98,6 +98,12 @@ class StmtParser {
         if (this.s->peek(1)->type == TokenType.IDENT) { return true; }
         if (this.s->peek(1)->type == TokenType.LT) { return this.looksLikeGenericVarDecl(); }
         if (this.s->peek(1)->type == TokenType.COLONCOLON) { return this.looksLikeQualifiedVarDecl(); }
+        // Managed handle type: `Dog@ d = ...` / `Dog@ d;`. `@` is only ever a
+        // type suffix (never an operator), so `IDENT @ IDENT` is a declaration.
+        if (this.s->peek(1)->type == TokenType.AT
+            && this.s->peek(2)->type == TokenType.IDENT) {
+            return true;
+        }
         // User-defined pointer type: `Dog* d = ...`.  Require the trailing `=`
         // so `a * b;` (a multiplication statement) is not mistaken for a decl.
         int i = 1;

@@ -107,6 +107,14 @@ class StmtParser:
         # Qualified type declaration: `ns::Color c = ...`, `ns::List<int>* p = ...`.
         if self._s.peek(1).type == TokenType.COLONCOLON:
             return self._looks_like_qualified_var_decl()
+        # Managed handle type: `Dog@ d = ...` or `Dog@ d;`. `@` is only ever a
+        # type suffix (never an operator), so `IDENT @ IDENT` is unambiguously a
+        # declaration.
+        if (
+            self._s.peek(1).type == TokenType.AT
+            and self._s.peek(2).type == TokenType.IDENT
+        ):
+            return True
         # User-defined pointer type: `Dog* d = ...`, `Dog** d = ...`.
         # We require the trailing `=` to disambiguate from a multiplication
         # expression statement (`a * b;`): `IDENT STAR+ IDENT =` is never a

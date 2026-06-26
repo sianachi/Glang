@@ -50,6 +50,8 @@ string cTypeOf(string t) {
     if (t == "null")   { return "void*"; }
     if (startsWith(t, "fn(")) { return "GlangFn"; }
     if (endsWith(t, "*")) { return cTypeOf(substr(t, 0, len(t) - 1)) + "*"; }
+    // A managed handle T@ is a pointer in C; the runtime tracks its lifetime.
+    if (endsWith(t, "@")) { return cTypeOf(substr(t, 0, len(t) - 1)) + "*"; }
     if (endsWith(t, "?")) { return cTypeOf(substr(t, 0, len(t) - 1)); }
     if (endsWith(t, "]")) {
         int lb = strings::indexOf(t, '[');
@@ -170,7 +172,7 @@ class CEmit {
         Decl* d = this.classDeclOf(name);
         if (d != null) {
             match (*d) {
-                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn) => { return fields; }
+                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn, mgd) => { return fields; }
                 _ => { }
             }
         }
@@ -180,7 +182,7 @@ class CEmit {
         Decl* d = this.classDeclOf(name);
         if (d != null) {
             match (*d) {
-                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn) => { return m; }
+                Decl.ClassDecl(nm, fields, sf, m, sup, ifc, ct, dt, acc, tps, bn, mgd) => { return m; }
                 _ => { }
             }
         }
@@ -244,7 +246,7 @@ class CEmit {
         // Pass 1: forward typedefs for class + union structs.
         for (int i = 0; i < n; ++i) {
             match (*(decls.get(i))) {
-                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn) => {
+                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn, mgd) => {
                     string cn = mangleName(nm);
                     this.preamble.appendLine("typedef struct " + cn + " " + cn + ";");
                     if (sup != "") {
@@ -269,7 +271,7 @@ class CEmit {
         // Pass 2b: class + union struct bodies.
         for (int i = 0; i < n; ++i) {
             match (*(decls.get(i))) {
-                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn) => {
+                Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn, mgd) => {
                     this.emitClassStruct(nm);
                 }
                 Decl.UnionDecl(nm, tps, variants) => {
@@ -519,7 +521,7 @@ class CEmit {
                 if (cname == "main") { cname = "glang_main"; }
                 this.protos.appendLine(this.cRetTypeOf(ret) + " " + cname + "(" + this.buildParamList(params) + ");");
             }
-            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn) => {
+            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn, mgd) => {
                 string cn = mangleName(name);
                 string selfp = cn + "* self";
                 if (ctor != null) {
@@ -561,8 +563,8 @@ class CEmit {
             Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
                 this.emitFunc(name, params, ret, body);
             }
-            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn) => {
-                this.emitClass(name, methods, sup, ctor, dtor);
+            Decl.ClassDecl(name, fields, sf, methods, sup, ifc, ctor, dtor, acc, tps, bn, mgd) => {
+                this.emitClass(name, methods, sup, ctor, dtor, mgd);
             }
             Decl.ModifierDecl(tps, target, methods) => {
                 this.emitModifier(showType(target), target, methods);
@@ -571,11 +573,18 @@ class CEmit {
         }
     }
 
-    void emitClass(string rawName, List<MethodDecl*> methods, string sup, ConstructorDecl* ctor, DestructorDecl* dtor) {
+    // The C allocation expression for one instance of class `cn`. Managed
+    // classes are allocated through the tracked GC allocator; others use calloc.
+    string allocExpr(string cn, bool isManaged) {
+        if (isManaged) { return "(" + cn + "*)glang_managed_alloc(sizeof(" + cn + "))"; }
+        return "(" + cn + "*)calloc(1, sizeof(" + cn + "))";
+    }
+
+    void emitClass(string rawName, List<MethodDecl*> methods, string sup, ConstructorDecl* ctor, DestructorDecl* dtor, bool isManaged) {
         string cn = mangleName(rawName);
         // constructor (__init + _new)
         if (ctor != null) {
-            this.emitConstructor(rawName, ctor, sup);
+            this.emitConstructor(rawName, ctor, sup, isManaged);
         } else {
             this.out.appendLine("");
             this.out.appendLine("void " + cn + "__init(" + cn + "* self) {");
@@ -585,7 +594,7 @@ class CEmit {
             }
             this.out.appendLine("}");
             this.out.appendLine(cn + "* " + cn + "_new(void) {");
-            this.out.appendLine("    " + cn + "* self = (" + cn + "*)calloc(1, sizeof(" + cn + "));");
+            this.out.appendLine("    " + cn + "* self = " + this.allocExpr(cn, isManaged) + ";");
             this.out.appendLine("    " + cn + "__init(self);");
             this.out.appendLine("    return self;");
             this.out.appendLine("}");
@@ -609,7 +618,7 @@ class CEmit {
         for (int i = 0; i < mn; ++i) { this.emitMethod(rawName, methods.get(i)); }
     }
 
-    void emitConstructor(string rawName, ConstructorDecl* ctor, string sup) {
+    void emitConstructor(string rawName, ConstructorDecl* ctor, string sup, bool isManaged) {
         string cn = mangleName(rawName);
         this.out.appendLine("");
         this.out.appendLine("void " + cn + "__init(" + this.buildParamListWith(ctor->params, cn + "* self") + ") {");
@@ -637,7 +646,7 @@ class CEmit {
         // _new
         this.out.appendLine("");
         this.out.appendLine(cn + "* " + cn + "_new(" + this.buildParamList(ctor->params) + ") {");
-        this.out.appendLine("    " + cn + "* self = (" + cn + "*)calloc(1, sizeof(" + cn + "));");
+        this.out.appendLine("    " + cn + "* self = " + this.allocExpr(cn, isManaged) + ";");
         StringBuilder ic = StringBuilder();
         ic.append("    " + cn + "__init(self");
         for (int i = 0; i < pn; ++i) { ic.append(", " + ctor->params.get(i)->name); }
@@ -1028,7 +1037,15 @@ class CEmit {
     }
 
     // Minimal expression-type inference (for print dispatch); returns a Glang type string.
+    // A managed handle T@ is represented as a pointer T* in C, so the emitter
+    // treats handle type strings exactly like pointer type strings.
     string infer(Expr* e) {
+        string r = this.inferRaw(e);
+        if (endsWith(r, "@")) { return substr(r, 0, len(r) - 1) + "*"; }
+        return r;
+    }
+
+    string inferRaw(Expr* e) {
         match (*e) {
             Expr.LiteralExpr(k, v) => { return k; }
             Expr.IdentifierExpr(n) => { return this.lookupVar(n); }
@@ -1448,6 +1465,8 @@ class CEmit {
         f.appendLine("void    glang_writefile(const char* path, const char* content);");
         f.appendLine("int     glang_fileexists(const char* path);");
         f.appendLine("char*   glang_readstdin(void);");
+        f.appendLine("void* glang_managed_alloc(size_t size);");
+        f.appendLine("void  glang_managed_sweep(void);");
         f.appendLine("void glang_print_int(int64_t v);");
         f.appendLine("void glang_print_float(double v);");
         f.appendLine("void glang_print_bool(int v);");

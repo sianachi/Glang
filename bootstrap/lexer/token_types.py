@@ -39,6 +39,7 @@ class TokenType(Enum):
     # Memory
     KW_ALLOC     = auto()  # alloc
     KW_FREE      = auto()  # free
+    KW_MANAGED   = auto()  # managed (GC-managed class modifier)
     # Control flow
     KW_IF        = auto()  # if
     KW_ELSE      = auto()  # else
@@ -74,6 +75,7 @@ class TokenType(Enum):
     PLUS    = auto()  # +
     MINUS   = auto()  # -
     STAR    = auto()  # *  (also pointer type / dereference)
+    AT      = auto()  # @  (managed handle type, e.g. Foo@)
     SLASH   = auto()  # /
     PERCENT = auto()  # %
 
@@ -160,6 +162,7 @@ KEYWORDS: dict[str, TokenType] = {
     "static":     TokenType.KW_STATIC,
     "alloc":      TokenType.KW_ALLOC,
     "free":       TokenType.KW_FREE,
+    "managed":    TokenType.KW_MANAGED,
     "if":         TokenType.KW_IF,
     "else":       TokenType.KW_ELSE,
     "while":      TokenType.KW_WHILE,

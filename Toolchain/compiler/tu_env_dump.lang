@@ -39,7 +39,7 @@ void registerClass(GlobalEnv* env, string name, string superName, List<string> i
         Map<string, MethodDecl*>(),
         null, null, superName,
         ifaces,
-        null, "public");
+        null, "public", false);
     env->classes.set(name, ci);
 }
 

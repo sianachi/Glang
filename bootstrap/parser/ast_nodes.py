@@ -58,6 +58,22 @@ class PointerType(TypeNode):
 
 
 @dataclass
+class ManagedHandleType(TypeNode):
+    """A managed (GC-tracked) handle to a managed class (T@).
+
+    Parallel to PointerType (T*) but denotes an automatically managed
+    reference: instances are reclaimed by the runtime, never `delete`d.
+    Only managed classes may be the base.
+
+    Examples:
+      Node@   → ManagedHandleType(NamedType("Node"))
+    """
+    base: TypeNode
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class ArrayType(TypeNode):
     """A fixed-size stack array (T[N]).
 
@@ -322,6 +338,7 @@ class ClassDecl(Decl):
     constructor: Optional[ConstructorDecl] = None
     destructor: Optional[DestructorDecl] = None
     access: str = "public"
+    is_managed: bool = False
     type_params: List[str] = field(default_factory=list)
     type_param_bounds: Dict[str, TypeNode] = field(default_factory=dict)
     line: int = 0

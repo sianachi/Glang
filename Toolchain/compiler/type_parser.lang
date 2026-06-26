@@ -32,6 +32,7 @@ string typeKeywordName(TokenType t) {
 bool isPointerOrFn(TypeNode* t) {
     match (*t) {
         TypeNode.PointerType(b)            => { return true; }
+        TypeNode.HandleType(b)             => { return true; }
         TypeNode.FunctionPointerType(p, r) => { return true; }
         TypeNode.NamedType(n)              => { return false; }
         TypeNode.ArrayType(b, sz)          => { return false; }
@@ -78,6 +79,17 @@ class TypeParser {
         while (this.s->check(TokenType.STAR)) {
             this.s->advance();
             node = new TypeNode.PointerType(node);
+        }
+
+        // Managed handle suffix: T@ (reference-like; not combinable with '*').
+        if (this.s->check(TokenType.AT)) {
+            Token* at = this.s->advance();
+            if (isPointerOrFn(node)) {
+                throw new ParseError(
+                    "'@' managed handle cannot be applied to a pointer type",
+                    at->line, at->col);
+            }
+            node = new TypeNode.HandleType(node);
         }
 
         if (this.s->check(TokenType.QUESTION)) {

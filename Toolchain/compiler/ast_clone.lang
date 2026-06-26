@@ -154,6 +154,9 @@ TypeNode* clone_type(TypeNode* t) {
         TypeNode.PointerType(b) => {
             return new TypeNode.PointerType(clone_type(b));
         }
+        TypeNode.HandleType(b) => {
+            return new TypeNode.HandleType(clone_type(b));
+        }
         TypeNode.ArrayType(b, sz) => {
             return new TypeNode.ArrayType(clone_type(b), sz);
         }
@@ -378,14 +381,14 @@ Decl* clone_decl(Decl* d) {
             return new Decl.FunctionDecl(name, clone_param_list(params), clone_type(ret),
                                          clone_stmt(body), clone_str_list(tps), clone_bounds(bounds));
         }
-        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
             ConstructorDecl* c = null;
             if (ctor != null) { c = clone_constructor(ctor); }
             DestructorDecl* dt = null;
             if (dtor != null) { dt = clone_destructor(dtor); }
             return new Decl.ClassDecl(name, clone_field_list(fields), clone_static_field_list(sfields),
                                       clone_method_list(methods), superName, clone_str_list(ifaces),
-                                      c, dt, access, clone_str_list(tps), clone_bounds(bounds));
+                                      c, dt, access, clone_str_list(tps), clone_bounds(bounds), mgd);
         }
         Decl.InterfaceDecl(name, methods) => {
             return new Decl.InterfaceDecl(name, clone_method_list(methods));

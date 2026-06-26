@@ -62,6 +62,7 @@ enum TokenType {
     KW_PROTECTED,
     KW_PUBLIC,
     KW_MODIFIER,
+    KW_MANAGED,
     KW_TRY,
     KW_CATCH,
     KW_THROW,
@@ -72,6 +73,7 @@ enum TokenType {
     STAR,
     SLASH,
     PERCENT,
+    AT,
 
     // --- Bitwise operators ---
     AMP,
@@ -199,6 +201,7 @@ Map<string, TokenType> keywords() {
     kw.set("protected",  TokenType.KW_PROTECTED);
     kw.set("public",     TokenType.KW_PUBLIC);
     kw.set("modifier",   TokenType.KW_MODIFIER);
+    kw.set("managed",    TokenType.KW_MANAGED);
     kw.set("try",        TokenType.KW_TRY);
     kw.set("catch",      TokenType.KW_CATCH);
     kw.set("throw",      TokenType.KW_THROW);
@@ -259,6 +262,7 @@ string tokenName(TokenType t) {
     if (t == TokenType.KW_PROTECTED)  { return "KW_PROTECTED"; }
     if (t == TokenType.KW_PUBLIC)     { return "KW_PUBLIC"; }
     if (t == TokenType.KW_MODIFIER)   { return "KW_MODIFIER"; }
+    if (t == TokenType.KW_MANAGED)    { return "KW_MANAGED"; }
     if (t == TokenType.KW_TRY)        { return "KW_TRY"; }
     if (t == TokenType.KW_CATCH)      { return "KW_CATCH"; }
     if (t == TokenType.KW_THROW)      { return "KW_THROW"; }
@@ -268,6 +272,7 @@ string tokenName(TokenType t) {
     if (t == TokenType.STAR)    { return "STAR"; }
     if (t == TokenType.SLASH)   { return "SLASH"; }
     if (t == TokenType.PERCENT) { return "PERCENT"; }
+    if (t == TokenType.AT)      { return "AT"; }
 
     if (t == TokenType.AMP)    { return "AMP"; }
     if (t == TokenType.PIPE)   { return "PIPE"; }

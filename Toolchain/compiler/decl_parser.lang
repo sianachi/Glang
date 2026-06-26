@@ -62,7 +62,9 @@ class DeclParser {
         if (isAccessKw(this.s->peek(0)->type)) {
             access = this.s->advance()->value;
         }
-        if (this.s->check(TokenType.KW_CLASS))     { return this.parseClass(access); }
+        bool isManaged = this.s->accept(TokenType.KW_MANAGED);
+        if (this.s->check(TokenType.KW_CLASS))     { return this.parseClass(access, isManaged); }
+        if (isManaged) { throw this.s->error("'managed' may only modify a class declaration"); }
         if (this.s->check(TokenType.KW_INTERFACE)) { return this.parseInterface(); }
         if (this.s->check(TokenType.KW_ENUM))      { return this.parseEnum(); }
         // 'union' is context-sensitive (not a keyword).
@@ -226,7 +228,7 @@ class DeclParser {
     // Classes
     // ------------------------------------------------------------------
 
-    Decl* parseClass(string access) {
+    Decl* parseClass(string access, bool isManaged) {
         this.s->advance();   // consume 'class'
         Token* nameTok = this.s->expect(TokenType.IDENT);
         TypeParams* tps = this.parseTypeParams();
@@ -347,7 +349,7 @@ class DeclParser {
 
         return new Decl.ClassDecl(nameTok->value, fields, staticFields, methods,
                                   superclass, interfaces, constructor, destructor,
-                                  access, tps->names, tps->bounds);
+                                  access, tps->names, tps->bounds, isManaged);
     }
 
     // ------------------------------------------------------------------

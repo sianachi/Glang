@@ -14,7 +14,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from parser.ast_nodes import (
-    TypeNode, NamedType, PointerType, ArrayType, GenericType,
+    TypeNode, NamedType, PointerType, ManagedHandleType, ArrayType, GenericType,
     NullableType, FunctionPointerType,
 )
 
@@ -24,6 +24,8 @@ def _type_str(t: TypeNode) -> str:
         return t.name
     if isinstance(t, PointerType):
         return _type_str(t.base) + '*'
+    if isinstance(t, ManagedHandleType):
+        return _type_str(t.base) + '@'
     if isinstance(t, ArrayType):
         return _type_str(t.base) + '[' + str(t.size) + ']'
     if isinstance(t, NullableType):

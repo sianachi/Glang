@@ -6,6 +6,43 @@ int    glang_argc = 0;
 char** glang_argv = NULL;
 GlangExcFrame* __glang_exc_top = NULL;
 
+/* ── Managed memory (GC) ──────────────────────────────────────────────────
+   A tracked allocate-and-sweep-at-exit collector for `managed class` instances.
+   Every managed object is recorded here; the registry is freed once at program
+   exit, so managed objects are reclaimed without any explicit `delete`. */
+static void**  glang_managed_objs = NULL;
+static size_t  glang_managed_count = 0;
+static size_t  glang_managed_cap = 0;
+static int     glang_managed_atexit_set = 0;
+
+void glang_managed_sweep(void) {
+    for (size_t i = 0; i < glang_managed_count; ++i) {
+        free(glang_managed_objs[i]);
+        glang_managed_objs[i] = NULL;
+    }
+    free(glang_managed_objs);
+    glang_managed_objs = NULL;
+    glang_managed_count = 0;
+    glang_managed_cap = 0;
+}
+
+void* glang_managed_alloc(size_t size) {
+    if (!glang_managed_atexit_set) {
+        atexit(glang_managed_sweep);
+        glang_managed_atexit_set = 1;
+    }
+    void* obj = calloc(1, size);
+    if (!obj) { fprintf(stderr, "glang: out of memory (managed)\n"); exit(1); }
+    if (glang_managed_count == glang_managed_cap) {
+        size_t ncap = glang_managed_cap == 0 ? 64 : glang_managed_cap * 2;
+        glang_managed_objs = (void**)realloc(glang_managed_objs, ncap * sizeof(void*));
+        if (!glang_managed_objs) { fprintf(stderr, "glang: out of memory (managed registry)\n"); exit(1); }
+        glang_managed_cap = ncap;
+    }
+    glang_managed_objs[glang_managed_count++] = obj;
+    return obj;
+}
+
 /* ── String operations ────────────────────────────────────────────────── */
 
 char* glang_str_concat(const char* a, const char* b) {

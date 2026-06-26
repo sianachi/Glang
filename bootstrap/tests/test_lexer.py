@@ -412,7 +412,7 @@ class TestEOF:
 class TestErrors:
     def test_unexpected_character(self):
         with pytest.raises(LexError, match="unexpected character"):
-            Lexer("@").tokenize()
+            Lexer("`").tokenize()
 
     def test_invalid_escape_in_string(self):
         with pytest.raises(LexError, match="unknown escape"):

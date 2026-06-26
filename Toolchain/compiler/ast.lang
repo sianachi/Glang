@@ -24,6 +24,7 @@ union TypeNode {
     // Primitives and user-defined names alike (no separate ClassType/EnumType).
     NamedType { string name; }
     PointerType { TypeNode* base; }
+    HandleType { TypeNode* base; }
     ArrayType { TypeNode* base; int size; }
     GenericType { string name; List<TypeNode*> typeArgs; }
     NullableType { TypeNode* base; }
@@ -40,6 +41,9 @@ string showType(TypeNode* t) {
         }
         TypeNode.PointerType(b) => {
             return showType(b) + "*";
+        }
+        TypeNode.HandleType(b) => {
+            return showType(b) + "@";
         }
         TypeNode.ArrayType(b, sz) => {
             return showType(b) + "[" + strings::intToStr(sz) + "]";
@@ -434,6 +438,7 @@ union Decl {
         List<MethodDecl*> methods; string superclass; List<string> interfaces;
         ConstructorDecl* constructor; DestructorDecl* destructor; string access;
         List<string> typeParams; Map<string, TypeNode*> bounds;
+        bool isManaged;
     }
     InterfaceDecl { string name; List<MethodDecl*> methods; }
     EnumDecl { string name; List<EnumVariant*> variants; }
@@ -580,7 +585,7 @@ string showDecl(Decl* d) {
             return "(fn " + name + " " + showTypeParams(tps, bounds) + " " + showParams(params)
                  + " " + showType(ret) + " " + showStmt(body) + ")";
         }
-        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+        Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
             string ext = "_";
             if (superName != "") { ext = superName; }
             string ctorS = "_";
@@ -591,7 +596,9 @@ string showDecl(Decl* d) {
             }
             string dtorS = "_";
             if (dtor != null) { dtorS = "(dtor " + showStmt(dtor->body) + ")"; }
-            return "(class " + access + " " + name + " " + showTypeParams(tps, bounds)
+            string mgdS = "no";
+            if (mgd) { mgdS = "yes"; }
+            return "(class " + access + " mgd:" + mgdS + " " + name + " " + showTypeParams(tps, bounds)
                  + " ext:" + ext + " impl:" + showStrList(ifaces)
                  + " sf:" + showSFieldList(sfields) + " f:" + showFieldList(fields)
                  + " ctor:" + ctorS + " dtor:" + dtorS + " m:" + showMethodList(methods) + ")";

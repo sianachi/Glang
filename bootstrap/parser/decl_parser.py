@@ -63,8 +63,11 @@ class DeclParser:
         access = "public"
         if self._s.check(TokenType.KW_PRIVATE, TokenType.KW_PROTECTED, TokenType.KW_PUBLIC):
             access = self._s.advance().value
+        is_managed = bool(self._s.match(TokenType.KW_MANAGED))
         if self._s.check(TokenType.KW_CLASS):
-            return self._parse_class(access=access)
+            return self._parse_class(access=access, is_managed=is_managed)
+        if is_managed:
+            raise self._s.error("'managed' may only modify a class declaration")
         if self._s.check(TokenType.KW_INTERFACE):
             return self._parse_interface()
         if self._s.check(TokenType.KW_ENUM):
@@ -227,7 +230,7 @@ class DeclParser:
     # Classes
     # ------------------------------------------------------------------
 
-    def _parse_class(self, access: str = "public") -> ClassDecl:
+    def _parse_class(self, access: str = "public", is_managed: bool = False) -> ClassDecl:
         tok = self._s.advance()  # consume 'class'
         name_tok = self._s.expect(TokenType.IDENT)
         type_params, type_param_bounds = self._parse_type_params()
@@ -255,6 +258,7 @@ class DeclParser:
             constructor=constructor,
             destructor=destructor,
             access=access,
+            is_managed=is_managed,
             type_params=type_params,
             type_param_bounds=type_param_bounds,
             line=tok.line,

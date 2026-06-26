@@ -49,10 +49,11 @@ class ClassInfo {
     List<string> interfaces;
     Decl* decl;
     string access;
+    bool isManaged;
     ClassInfo(string n, Map<string, FieldDecl*> f, Map<string, StaticFieldDecl*> sf,
               Map<string, MethodDecl*> im, Map<string, MethodDecl*> sm,
               Map<string, MethodDecl*> vt, ConstructorDecl* ctor, DestructorDecl* dtor,
-              string superName, List<string> ifaces, Decl* d, string acc) {
+              string superName, List<string> ifaces, Decl* d, string acc, bool isMgd) {
         this.name = n;
         this.fields = f;
         this.static_fields = sf;
@@ -65,6 +66,7 @@ class ClassInfo {
         this.interfaces = ifaces;
         this.decl = d;
         this.access = acc;
+        this.isManaged = isMgd;
     }
 }
 
@@ -258,6 +260,19 @@ class GlobalEnv {
             TypeNode.PointerType(b) => {
                 this.resolve_type(b);
             }
+            TypeNode.HandleType(b) => {
+                this.resolve_type(b);
+                match (*b) {
+                    TypeNode.NamedType(bn) => {
+                        if (!(this.is_managed_class(bn))) {
+                            throw new AnalyzeError(
+                                "managed handle '" + bn + "@' requires a managed class; "
+                                + "declare it with 'managed class " + bn + "'", 0, 0);
+                        }
+                    }
+                    _ => { }
+                }
+            }
             TypeNode.ArrayType(b, sz) => {
                 this.resolve_type(b);
             }
@@ -276,6 +291,12 @@ class GlobalEnv {
 
     bool is_class(string name) {
         return this.classes.has(name);
+    }
+
+    bool is_managed_class(string name) {
+        if (!(this.classes.has(name))) { return false; }
+        ClassInfo* ci = this.classes.getOr(name, null);
+        return ci->isManaged;
     }
 
     bool is_interface(string name) {

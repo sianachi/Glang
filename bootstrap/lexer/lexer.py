@@ -408,6 +408,7 @@ class Lexer:
             if self._match("="): return Token(TokenType.NEQ,    "!=", line, col)
             return Token(TokenType.BANG, "!", line, col)
         if ch == "~": return Token(TokenType.TILDE,     "~",  line, col)
+        if ch == "@": return Token(TokenType.AT,        "@",  line, col)
         if ch == "{": return Token(TokenType.LBRACE,    "{",  line, col)
         if ch == "}": return Token(TokenType.RBRACE,    "}",  line, col)
         if ch == "(": return Token(TokenType.LPAREN,    "(",  line, col)

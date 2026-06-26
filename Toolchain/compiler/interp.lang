@@ -348,7 +348,7 @@ class Interp {
         int n = decls.length();
         for (int i = 0; i < n; ++i) {
             match (*(decls.get(i))) {
-                Decl.ClassDecl(nm, fields, sfields, methods, sup, ifc, ct, dt, acc, tps, bn) => {
+                Decl.ClassDecl(nm, fields, sfields, methods, sup, ifc, ct, dt, acc, tps, bn, mgd) => {
                     int sn = sfields.length();
                     for (int j = 0; j < sn; ++j) {
                         StaticFieldDecl* sf = sfields.get(j);

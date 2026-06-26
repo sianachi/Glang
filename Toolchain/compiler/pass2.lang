@@ -71,7 +71,7 @@ class Pass2Checker {
                 Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
                     this.check_function(d);
                 }
-                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+                Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                     ClassInfo* info = this.env->classes.getOr(name, null);
                     this.check_class(d, info);
                 }
@@ -131,7 +131,7 @@ class Pass2Checker {
 
     void check_class(Decl* d, ClassInfo* info) {
         match (*d) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 ClassInfo* saved_class = this.current_class;
                 bool saved_static = this.in_static_method;
                 this.current_class = info;
@@ -800,6 +800,9 @@ class Pass2Checker {
                 if (this.current_class == null) {
                     throw new AnalyzeError("'this' used outside of a class or modifier", 0, 0);
                 }
+                if (this.current_class->isManaged) {
+                    return new TypeNode.HandleType(new TypeNode.NamedType(this.current_class->name));
+                }
                 return new TypeNode.PointerType(new TypeNode.NamedType(this.current_class->name));
             }
             Expr.SuperExpr() => {
@@ -884,6 +887,11 @@ class Pass2Checker {
             }
             Expr.DeleteExpr(operand) => {
                 TypeNode* t = this.check_expr(operand);
+                if (is_handle(t)) {
+                    throw new AnalyzeError(
+                        "'delete' cannot be used on a managed handle; managed "
+                        + "objects are reclaimed automatically", 0, 0);
+                }
                 if (!(is_pointer(t))) {
                     throw new AnalyzeError("'delete' requires a pointer to a class", 0, 0);
                 }
@@ -1101,10 +1109,17 @@ class Pass2Checker {
                     }
                     class_t = pointer_base(obj_t);
                 } else {
-                    // Auto-deref: this.method()/super.method() via dot notation.
+                    // Auto-deref: this.method()/super.method() via dot notation;
+                    // managed handles use dot access like a class reference.
                     bool unwrapped = false;
                     match (*obj_t) {
                         TypeNode.PointerType(b) => {
+                            match (*b) {
+                                TypeNode.NamedType(bn) => { class_t = b; unwrapped = true; }
+                                _ => { }
+                            }
+                        }
+                        TypeNode.HandleType(b) => {
                             match (*b) {
                                 TypeNode.NamedType(bn) => { class_t = b; unwrapped = true; }
                                 _ => { }
@@ -1238,6 +1253,12 @@ class Pass2Checker {
                             _ => { }
                         }
                     }
+                    TypeNode.HandleType(b) => {
+                        match (*b) {
+                            TypeNode.NamedType(bn) => { class_name = bn; }
+                            _ => { }
+                        }
+                    }
                     TypeNode.NamedType(n) => { class_name = n; }
                     _ => { }
                 }
@@ -1364,6 +1385,11 @@ class Pass2Checker {
                             "'" + className + "' expects 0 arguments, got "
                             + strings::intToStr(args.length()), 0, 0);
                     }
+                }
+                // `new` on a managed class yields a managed handle (T@); the
+                // runtime reclaims it automatically. A regular class yields T*.
+                if (class_info->isManaged) {
+                    return new TypeNode.HandleType(new TypeNode.NamedType(className));
                 }
                 return new TypeNode.PointerType(new TypeNode.NamedType(className));
             }
@@ -1738,7 +1764,7 @@ class Pass2Checker {
 
     bool declHasField(Decl* d, string field_name) {
         match (*d) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 int n = fields.length();
                 for (int i = 0; i < n; ++i) {
                     if (fields.get(i)->name == field_name) { return true; }
@@ -1751,7 +1777,7 @@ class Pass2Checker {
 
     bool declHasMethod(Decl* d, string method_name) {
         match (*d) {
-            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 int n = methods.length();
                 for (int i = 0; i < n; ++i) {
                     if (methods.get(i)->name == method_name) { return true; }
@@ -1782,6 +1808,12 @@ class Pass2Checker {
                             TypeNode* t = entry->type;
                             match (*t) {
                                 TypeNode.PointerType(b) => {
+                                    match (*b) {
+                                        TypeNode.NamedType(bn) => { return this.env->classes.getOr(bn, null); }
+                                        _ => { return null; }
+                                    }
+                                }
+                                TypeNode.HandleType(b) => {
                                     match (*b) {
                                         TypeNode.NamedType(bn) => { return this.env->classes.getOr(bn, null); }
                                         _ => { return null; }

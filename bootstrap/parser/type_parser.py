@@ -4,8 +4,8 @@ from .token_stream import TokenStream
 from lexer.token_types import TokenType
 from errors.errors import ParseError
 from .ast_nodes import (
-    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType,
-    GenericType, NullableType,
+    TypeNode, NamedType, PointerType, ManagedHandleType, ArrayType,
+    FunctionPointerType, GenericType, NullableType,
 )
 
 _TYPE_KEYWORDS = {
@@ -69,9 +69,20 @@ class TypeParser:
             star = self._s.advance()
             node = PointerType(base=node, line=star.line, col=star.col)
 
+        # Managed handle suffix: T@ . A handle is itself reference-like, so it
+        # may not be combined with a pointer suffix or made nullable.
+        if self._s.check(TokenType.AT):
+            at = self._s.advance()
+            if isinstance(node, (PointerType, FunctionPointerType)):
+                raise ParseError(
+                    "'@' managed handle cannot be applied to a pointer type",
+                    at.line, at.col,
+                )
+            node = ManagedHandleType(base=node, line=at.line, col=at.col)
+
         if self._s.check(TokenType.QUESTION):
             q = self._s.advance()
-            if isinstance(node, (PointerType, FunctionPointerType)):
+            if isinstance(node, (PointerType, FunctionPointerType, ManagedHandleType)):
                 raise ParseError(
                     "pointer types are already nullable; use 'T*' without '?'",
                     q.line, q.col,

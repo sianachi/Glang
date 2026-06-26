@@ -34,7 +34,8 @@ from parser.ast_nodes import (
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    TypeNode, NamedType, PointerType, ArrayType, FunctionPointerType, NullableType,
+    TypeNode, NamedType, PointerType, ManagedHandleType, ArrayType,
+    FunctionPointerType, NullableType,
 )
 from errors.errors import RuntimeError as GlangRuntimeError
 from analyser.symbol_table import GlobalEnv
@@ -1055,6 +1056,11 @@ class Interpreter:
         this_val = self._instantiate(expr.class_name, on_heap=True)
         args = [self._eval(a) for a in expr.args]
         self._run_constructor(expr.class_name, this_val, args)
+        info = self._env.classes.get(expr.class_name)
+        if info is not None and info.is_managed:
+            # A managed object is reached through a handle (T@); its raw value is
+            # the same heap reference, but its declared type marks it managed.
+            return Value(ManagedHandleType(NamedType(expr.class_name)), this_val.raw)
         return this_val
 
     def _eval_delete(self, expr: DeleteExpr) -> Value:
@@ -1461,6 +1467,8 @@ class Interpreter:
                 return Value(target_type, None)
             if isinstance(target_type, PointerType):
                 return Value(target_type, Pointer(None))
+            if isinstance(target_type, ManagedHandleType):
+                return Value(target_type, Pointer(None))
             if isinstance(target_type, NullableType):
                 return Value(target_type, None)
         if isinstance(target_type, NullableType):
@@ -1501,6 +1509,8 @@ class Interpreter:
         if isinstance(t, FunctionPointerType):
             return Value(t, None)
         if isinstance(t, PointerType):
+            return Value(t, Pointer(None))
+        if isinstance(t, ManagedHandleType):
             return Value(t, Pointer(None))
         if isinstance(t, ArrayType):
             return Value(t, [self._new_box(self._zero_value(t.base)) for _ in range(t.size)])

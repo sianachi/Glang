@@ -14,7 +14,7 @@ from parser.ast_nodes import (
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
     AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr, ThisExpr, SuperExpr,
-    NamedType, PointerType, FunctionPointerType, NullableType,
+    NamedType, PointerType, ManagedHandleType, FunctionPointerType, NullableType,
 )
 from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
@@ -627,6 +627,8 @@ class Pass2Checker:
                     "'this' used outside of a class or modifier",
                     expr.line, expr.col,
                 )
+            if self._current_class.is_managed:
+                return ManagedHandleType(NamedType(self._current_class.name))
             return PointerType(NamedType(self._current_class.name))
 
         if isinstance(expr, SuperExpr):
@@ -816,6 +818,9 @@ class Pass2Checker:
                         expr.line, expr.col,
                     )
                 class_t = pointer_base(obj_t)
+            elif isinstance(obj_t, ManagedHandleType) and isinstance(obj_t.base, NamedType):
+                # Managed handles use dot access like a class reference.
+                class_t = obj_t.base
             elif isinstance(obj_t, PointerType) and isinstance(obj_t.base, NamedType):
                 # Auto-deref: this.method() / super.method() via dot notation
                 class_t = obj_t.base
@@ -926,8 +931,9 @@ class Pass2Checker:
                 )
 
             obj_t = self._check_expr(expr.object)
-            # Auto-deref: `this.field` uses FieldAccessExpr with a pointer receiver
-            if isinstance(obj_t, PointerType) and isinstance(obj_t.base, NamedType):
+            # Auto-deref: `this.field` uses FieldAccessExpr with a pointer receiver;
+            # managed handles use dot access like a class reference.
+            if isinstance(obj_t, (PointerType, ManagedHandleType)) and isinstance(obj_t.base, NamedType):
                 class_t = obj_t.base
             elif isinstance(obj_t, NamedType):
                 class_t = obj_t
@@ -1043,10 +1049,20 @@ class Pass2Checker:
                         f"'{expr.class_name}' expects 0 arguments, got {len(expr.args)}",
                         expr.line, expr.col,
                     )
+            # `new` on a managed class yields a managed handle (T@), which the
+            # runtime reclaims automatically; on a regular class it yields T*.
+            if class_info.is_managed:
+                return ManagedHandleType(NamedType(expr.class_name))
             return PointerType(NamedType(expr.class_name))
 
         if isinstance(expr, DeleteExpr):
             t = self._check_expr(expr.operand)
+            if isinstance(t, ManagedHandleType):
+                raise TypeError(
+                    "'delete' cannot be used on a managed handle; managed "
+                    "objects are reclaimed automatically",
+                    expr.line, expr.col,
+                )
             if not is_pointer(t):
                 raise TypeError(
                     "'delete' requires a pointer to a class",
@@ -1620,7 +1636,7 @@ class Pass2Checker:
                 entry = self._scope._find(obj.name)
                 if entry:
                     t = entry[0]
-                    if isinstance(t, PointerType) and isinstance(t.base, NamedType):
+                    if isinstance(t, (PointerType, ManagedHandleType)) and isinstance(t.base, NamedType):
                         return self._env.classes.get(t.base.name)
                     if isinstance(t, NamedType):
                         return self._env.classes.get(t.name)

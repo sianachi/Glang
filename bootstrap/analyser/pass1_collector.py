@@ -127,6 +127,7 @@ class Pass1Collector:
             interfaces=list(decl.interfaces),
             decl=decl,
             access=decl.access,
+            is_managed=decl.is_managed,
         )
 
     def _populate_class(self, decl: ClassDecl) -> None:

@@ -220,7 +220,7 @@ class NamespaceResolver {
         match (*d) {
             Decl.ImportDecl(path) => { return ""; }
             Decl.FunctionDecl(name, params, ret, body, tps, bounds) => { return name; }
-            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd) => { return name; }
+            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd, mgd) => { return name; }
             Decl.InterfaceDecl(name, methods) => { return name; }
             Decl.EnumDecl(name, variants) => { return name; }
             Decl.UsingDecl(name, isNs) => { return name; }
@@ -236,8 +236,8 @@ class NamespaceResolver {
             Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
                 return new Decl.FunctionDecl(prefix + "::" + name, params, ret, body, tps, bounds);
             }
-            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd) => {
-                return new Decl.ClassDecl(prefix + "::" + name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd);
+            Decl.ClassDecl(name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd, mgd) => {
+                return new Decl.ClassDecl(prefix + "::" + name, f, sf, m, sup, ifc, ct, dt, acc, tps, bnd, mgd);
             }
             Decl.InterfaceDecl(name, methods) => {
                 return new Decl.InterfaceDecl(prefix + "::" + name, methods);
@@ -357,7 +357,7 @@ class NamespaceResolver {
                 this.type_params = Map<string, bool>();
                 return new Decl.FunctionDecl(name, params, nret, nbody, tps, bounds);
             }
-            Decl.ClassDecl(name, fields, sfields, methods, sup, ifaces, ctor, dtor, access, tps, bounds) => {
+            Decl.ClassDecl(name, fields, sfields, methods, sup, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 this.type_params = this.params_set(tps);
                 this.r_bounds(tps, bounds, p);
                 string nsup = sup;
@@ -394,7 +394,7 @@ class NamespaceResolver {
                 }
                 this.type_params = Map<string, bool>();
                 return new Decl.ClassDecl(name, fields, sfields, nmethods, nsup, nifaces,
-                                          nctor, ndtor, access, tps, bounds);
+                                          nctor, ndtor, access, tps, bounds, mgd);
             }
             Decl.InterfaceDecl(name, methods) => {
                 List<MethodDecl*> nmethods = List<MethodDecl*>();
@@ -505,6 +505,9 @@ class NamespaceResolver {
             }
             TypeNode.PointerType(b) => {
                 return new TypeNode.PointerType(this.r_type(b, p));
+            }
+            TypeNode.HandleType(b) => {
+                return new TypeNode.HandleType(this.r_type(b, p));
             }
             TypeNode.ArrayType(b, sz) => {
                 return new TypeNode.ArrayType(this.r_type(b, p), sz);
