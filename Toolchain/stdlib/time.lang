@@ -1,0 +1,28 @@
+// std/time.lang — time helpers in namespace `time`.
+//
+// The core operations are always-available builtins (like print / readFile):
+//   int  nowNanos()      monotonic clock in nanoseconds (for durations)
+//   int  wallMillis()    wall clock in milliseconds since the Unix epoch
+//   void sleepMs(int ms) sleep for `ms` milliseconds
+//
+// This module adds derived conveniences on top of them. Durations should be
+// measured with nowNanos() (monotonic); wallMillis() is for timestamps.
+
+namespace time {
+
+// Monotonic clock in whole milliseconds.
+int nowMillis() {
+    return nowNanos() / 1000000;
+}
+
+// Milliseconds elapsed since a monotonic `startNanos` captured from nowNanos().
+int elapsedMs(int startNanos) {
+    return (nowNanos() - startNanos) / 1000000;
+}
+
+// Microseconds elapsed since a monotonic `startNanos`.
+int elapsedUs(int startNanos) {
+    return (nowNanos() - startNanos) / 1000;
+}
+
+}

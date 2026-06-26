@@ -1,10 +1,34 @@
 #include "glang_runtime.h"
 #include <ctype.h>
+#include <time.h>
 
 /* ── Globals ──────────────────────────────────────────────────────────── */
 int    glang_argc = 0;
 char** glang_argv = NULL;
 GlangExcFrame* __glang_exc_top = NULL;
+
+/* ── Time ──────────────────────────────────────────────────────────────── */
+/* A monotonic clock in nanoseconds (for durations/benchmarks) and a wall clock
+   in milliseconds since the Unix epoch, plus a millisecond sleep. */
+int64_t glang_now_nanos(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
+int64_t glang_wall_millis(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000LL + (int64_t)ts.tv_nsec / 1000000LL;
+}
+
+void glang_sleep_ms(int64_t ms) {
+    if (ms <= 0) return;
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000);
+    ts.tv_nsec = (long)((ms % 1000) * 1000000L);
+    nanosleep(&ts, NULL);
+}
 
 /* ── Managed memory (GC) ──────────────────────────────────────────────────
    A tracked allocate-and-sweep-at-exit collector for `managed class` instances.

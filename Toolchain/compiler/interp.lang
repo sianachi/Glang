@@ -1068,6 +1068,9 @@ class Interp {
         if (name == "writeFile")  { writeFile(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1)))); return mkVoid(); }
         if (name == "fileExists") { return mkBool(fileExists(rawStr(this.eval(args.get(0))))); }
         if (name == "readStdin")  { return mkStr(readStdin()); }
+        if (name == "nowNanos")   { return mkInt(nowNanos()); }
+        if (name == "wallMillis") { return mkInt(wallMillis()); }
+        if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }
         if (name == "getArgCount") { return mkInt(0); }
         if (name == "getArg")      { throw new RtError("getArg index out of range"); }
         if (name == "bytesFromString") {

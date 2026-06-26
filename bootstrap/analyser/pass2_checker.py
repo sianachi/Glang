@@ -1204,6 +1204,9 @@ class Pass2Checker:
             "exit": ([NamedType("int")], NamedType("void")),
             "intToStr": ([NamedType("int")], NamedType("string")),
             "readStdin": ([], NamedType("string")),
+            "nowNanos": ([], NamedType("int")),
+            "wallMillis": ([], NamedType("int")),
+            "sleepMs": ([NamedType("int")], NamedType("void")),
         }
         signature = fixed.get(expr.name)
         if signature is None:

@@ -127,4 +127,9 @@ void* glang_alloc(size_t size);
 void* glang_alloc_n(size_t count, size_t size);
 void  glang_free(void* p);
 
+/* Time: monotonic nanoseconds, wall-clock milliseconds, and a millisecond sleep. */
+int64_t glang_now_nanos(void);
+int64_t glang_wall_millis(void);
+void    glang_sleep_ms(int64_t ms);
+
 #endif /* GLANG_RUNTIME_H */

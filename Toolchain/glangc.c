@@ -29,6 +29,9 @@ void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
 void* glang_alloc_n(size_t count, size_t size);
 void  glang_free(void* p);
+int64_t glang_now_nanos(void);
+int64_t glang_wall_millis(void);
+void    glang_sleep_ms(int64_t ms);
 void glang_print_int(int64_t v);
 void glang_print_float(double v);
 void glang_print_bool(int v);
@@ -8321,6 +8324,16 @@ TypeNode* check_builtin_call(char* name, List_TypeNode* arg_types, GlobalEnv* en
     if ((strcmp(name, "readStdin") == 0)) {
         return check_callable_args(name, arg_types, ps, T("string"), env);
     }
+    if ((strcmp(name, "nowNanos") == 0)) {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "wallMillis") == 0)) {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "sleepMs") == 0)) {
+        List_TypeNode__add(ps, T("int"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
+    }
     return NULL;
 }
 
@@ -14158,7 +14171,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
 }
 
 int Pass2Checker__is_builtin_name(Pass2Checker* self, char* name) {
-    return (((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0));
+    return ((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0));
 }
 
 TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
@@ -17294,6 +17307,9 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             if (((((strcmp(nm, "len") == 0) || (strcmp(nm, "parseInt") == 0)) || (strcmp(nm, "indexOf") == 0)) || (strcmp(nm, "getArgCount") == 0))) {
                 return "int";
             }
+            if (((strcmp(nm, "nowNanos") == 0) || (strcmp(nm, "wallMillis") == 0))) {
+                return "int";
+            }
             if (((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0))) {
                 return "string";
             }
@@ -17523,6 +17539,15 @@ char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args) {
     }
     if ((strcmp(name, "readStdin") == 0)) {
         return "glang_readstdin()";
+    }
+    if ((strcmp(name, "nowNanos") == 0)) {
+        return "glang_now_nanos()";
+    }
+    if ((strcmp(name, "wallMillis") == 0)) {
+        return "glang_wall_millis()";
+    }
+    if ((strcmp(name, "sleepMs") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_sleep_ms(", CEmit__emitArgs(self, args)), ")");
     }
     if ((strcmp(name, "getArgCount") == 0)) {
         return "(int64_t)(glang_argc - 1)";
@@ -18084,6 +18109,9 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");
     StringBuilder__appendLine(f, "void* glang_alloc_n(size_t count, size_t size);");
     StringBuilder__appendLine(f, "void  glang_free(void* p);");
+    StringBuilder__appendLine(f, "int64_t glang_now_nanos(void);");
+    StringBuilder__appendLine(f, "int64_t glang_wall_millis(void);");
+    StringBuilder__appendLine(f, "void    glang_sleep_ms(int64_t ms);");
     StringBuilder__appendLine(f, "void glang_print_int(int64_t v);");
     StringBuilder__appendLine(f, "void glang_print_float(double v);");
     StringBuilder__appendLine(f, "void glang_print_bool(int v);");

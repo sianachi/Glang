@@ -345,6 +345,16 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
     if (name == "readStdin") {
         return check_callable_args(name, arg_types, ps, T("string"), env);
     }
+    if (name == "nowNanos") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "wallMillis") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "sleepMs") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
+    }
 
     return null;
 }

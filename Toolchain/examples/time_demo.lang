@@ -1,0 +1,29 @@
+// Demonstrates the time builtins (nowNanos / wallMillis / sleepMs) and the
+// std/time.lang conveniences. Output is deterministic: it prints only ordering
+// facts (never raw timestamps, which vary per run).
+// Run: python3 main.py run examples/time_demo.lang
+
+import "std/time.lang";
+
+int main() {
+    int start = nowNanos();
+    sleepMs(2);                       // brief, deterministic-enough sleep
+    int after = nowNanos();
+
+    // The monotonic clock never goes backwards.
+    print(after >= start);            // true
+
+    // Elapsed time is non-negative.
+    int ms = time::elapsedMs(start);
+    print(ms >= 0);                   // true
+
+    // Wall clock is well past the epoch (sometime after year 2001).
+    print(wallMillis() > 1000000000000);  // true
+
+    // nowMillis is monotonic too.
+    int m1 = time::nowMillis();
+    int m2 = time::nowMillis();
+    print(m2 >= m1);                  // true
+
+    return 0;
+}

@@ -798,6 +798,9 @@ class Interpreter:
             "exit",
             "intToStr",
             "readStdin",
+            "nowNanos",
+            "wallMillis",
+            "sleepMs",
         }
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
@@ -922,6 +925,21 @@ class Interpreter:
         if expr.name == "readStdin":
             import sys as _sys
             return Value(NamedType("string"), _sys.stdin.read())
+
+        if expr.name == "nowNanos":
+            import time as _time
+            return Value(NamedType("int"), _time.monotonic_ns())
+
+        if expr.name == "wallMillis":
+            import time as _time
+            return Value(NamedType("int"), int(_time.time() * 1000))
+
+        if expr.name == "sleepMs":
+            import time as _time
+            ms = int(self._eval(expr.args[0]).raw)
+            if ms > 0:
+                _time.sleep(ms / 1000.0)
+            return VOID
 
         source = self._eval(expr.args[0]).raw
         needle = self._eval(expr.args[1]).raw

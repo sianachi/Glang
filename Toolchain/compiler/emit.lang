@@ -1062,6 +1062,7 @@ class CEmit {
             Expr.CastExpr(ty, x) => { return showType(ty); }
             Expr.CallExpr(nm, args, ta) => {
                 if (nm == "len" || nm == "parseInt" || nm == "indexOf" || nm == "getArgCount") { return "int"; }
+                if (nm == "nowNanos" || nm == "wallMillis") { return "int"; }
                 if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg") { return "string"; }
                 if (nm == "parseFloat") { return "float"; }
                 if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains") { return "bool"; }
@@ -1179,6 +1180,9 @@ class CEmit {
         if (name == "writeFile")  { return "glang_writefile(" + this.emitArgs(args) + ")"; }
         if (name == "fileExists") { return "glang_fileexists(" + this.emitArgs(args) + ")"; }
         if (name == "readStdin")  { return "glang_readstdin()"; }
+        if (name == "nowNanos")   { return "glang_now_nanos()"; }
+        if (name == "wallMillis") { return "glang_wall_millis()"; }
+        if (name == "sleepMs")    { return "glang_sleep_ms(" + this.emitArgs(args) + ")"; }
         if (name == "getArgCount") { return "(int64_t)(glang_argc - 1)"; }
         if (name == "getArg") {
             if (args.length() > 0) { return "glang_argv[(int)(" + this.emitExpr(args.get(0)) + ") + 1]"; }
@@ -1470,6 +1474,9 @@ class CEmit {
         f.appendLine("void* glang_alloc(size_t size);");
         f.appendLine("void* glang_alloc_n(size_t count, size_t size);");
         f.appendLine("void  glang_free(void* p);");
+        f.appendLine("int64_t glang_now_nanos(void);");
+        f.appendLine("int64_t glang_wall_millis(void);");
+        f.appendLine("void    glang_sleep_ms(int64_t ms);");
         f.appendLine("void glang_print_int(int64_t v);");
         f.appendLine("void glang_print_float(double v);");
         f.appendLine("void glang_print_bool(int v);");
