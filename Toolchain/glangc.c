@@ -26,6 +26,9 @@ int     glang_fileexists(const char* path);
 char*   glang_readstdin(void);
 void* glang_managed_alloc(size_t size);
 void  glang_managed_sweep(void);
+void* glang_alloc(size_t size);
+void* glang_alloc_n(size_t count, size_t size);
+void  glang_free(void* p);
 void glang_print_int(int64_t v);
 void glang_print_float(double v);
 void glang_print_bool(int v);
@@ -16851,9 +16854,9 @@ void CEmit__emitForeach(CEmit* self, TypeNode* varType, char* varName, Expr* ite
 char* CEmit__emitAlloc(CEmit* self, TypeNode* allocType, Expr* count) {
     char* ct = cTypeOf(showType(allocType));
     if ((count != NULL)) {
-        return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)calloc((size_t)("), CEmit__emitExpr(self, count)), "), sizeof("), ct), "))");
+        return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)glang_alloc_n((size_t)("), CEmit__emitExpr(self, count)), "), sizeof("), ct), "))");
     }
-    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)malloc(sizeof("), ct), "))");
+    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)glang_alloc(sizeof("), ct), "))");
 }
 
 char* CEmit__renderForInit(CEmit* self, Stmt* init) {
@@ -16982,12 +16985,12 @@ char* CEmit__emitExpr(CEmit* self, Expr* e) {
             if (GlobalEnv__is_class(self->env, base)) {
                 return glang_str_concat(glang_str_concat(glang_str_concat(mangleName(base), "_delete("), CEmit__emitExpr(self, o)), ")");
             }
-            return glang_str_concat(glang_str_concat("free(", CEmit__emitExpr(self, o)), ")");
+            return glang_str_concat(glang_str_concat("glang_free(", CEmit__emitExpr(self, o)), ")");
             break;
         }
         case Expr__FreeExpr: {
             Expr* o = __match__.data.as_FreeExpr.operand;
-            return glang_str_concat(glang_str_concat("free(", CEmit__emitExpr(self, o)), ")");
+            return glang_str_concat(glang_str_concat("glang_free(", CEmit__emitExpr(self, o)), ")");
             break;
         }
         case Expr__AllocExpr: {
@@ -18078,6 +18081,9 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "char*   glang_readstdin(void);");
     StringBuilder__appendLine(f, "void* glang_managed_alloc(size_t size);");
     StringBuilder__appendLine(f, "void  glang_managed_sweep(void);");
+    StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");
+    StringBuilder__appendLine(f, "void* glang_alloc_n(size_t count, size_t size);");
+    StringBuilder__appendLine(f, "void  glang_free(void* p);");
     StringBuilder__appendLine(f, "void glang_print_int(int64_t v);");
     StringBuilder__appendLine(f, "void glang_print_float(double v);");
     StringBuilder__appendLine(f, "void glang_print_bool(int v);");
@@ -18208,7 +18214,7 @@ int64_t glang_main(void) {
 void List_string__init(List_string* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (char**)calloc((size_t)(4), sizeof(char*));
+    self->data = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
 }
 
 List_string* List_string_new(void) {
@@ -18232,11 +18238,11 @@ int List_string__isEmpty(List_string* self) {
 
 void List_string___grow(List_string* self) {
     int64_t newcap = (self->cap * 2);
-    char** bigger = (char**)calloc((size_t)(newcap), sizeof(char*));
+    char** bigger = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18293,8 +18299,8 @@ Span_string* List_string__span(List_string* self) {
 void Map_string_TokenType__init(Map_string_TokenType* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (TokenType*)calloc((size_t)(4), sizeof(TokenType));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (TokenType*)glang_alloc_n((size_t)(4), sizeof(TokenType));
 }
 
 Map_string_TokenType* Map_string_TokenType_new(void) {
@@ -18331,14 +18337,14 @@ int Map_string_TokenType__has(Map_string_TokenType* self, char* key) {
 
 void Map_string_TokenType___grow(Map_string_TokenType* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    TokenType* nv = (TokenType*)calloc((size_t)(newcap), sizeof(TokenType));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    TokenType* nv = (TokenType*)glang_alloc_n((size_t)(newcap), sizeof(TokenType));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -18384,7 +18390,7 @@ void Map_string_TokenType__remove(Map_string_TokenType* self, char* key) {
 void List_Token__init(List_Token* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Token**)calloc((size_t)(4), sizeof(Token*));
+    self->data = (Token**)glang_alloc_n((size_t)(4), sizeof(Token*));
 }
 
 List_Token* List_Token_new(void) {
@@ -18408,11 +18414,11 @@ int List_Token__isEmpty(List_Token* self) {
 
 void List_Token___grow(List_Token* self) {
     int64_t newcap = (self->cap * 2);
-    Token** bigger = (Token**)calloc((size_t)(newcap), sizeof(Token*));
+    Token** bigger = (Token**)glang_alloc_n((size_t)(newcap), sizeof(Token*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18469,7 +18475,7 @@ Span_Token* List_Token__span(List_Token* self) {
 void List_TypeNode__init(List_TypeNode* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (TypeNode**)calloc((size_t)(4), sizeof(TypeNode*));
+    self->data = (TypeNode**)glang_alloc_n((size_t)(4), sizeof(TypeNode*));
 }
 
 List_TypeNode* List_TypeNode_new(void) {
@@ -18493,11 +18499,11 @@ int List_TypeNode__isEmpty(List_TypeNode* self) {
 
 void List_TypeNode___grow(List_TypeNode* self) {
     int64_t newcap = (self->cap * 2);
-    TypeNode** bigger = (TypeNode**)calloc((size_t)(newcap), sizeof(TypeNode*));
+    TypeNode** bigger = (TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(TypeNode*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18554,7 +18560,7 @@ Span_TypeNode* List_TypeNode__span(List_TypeNode* self) {
 void List_Expr__init(List_Expr* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Expr**)calloc((size_t)(4), sizeof(Expr*));
+    self->data = (Expr**)glang_alloc_n((size_t)(4), sizeof(Expr*));
 }
 
 List_Expr* List_Expr_new(void) {
@@ -18578,11 +18584,11 @@ int List_Expr__isEmpty(List_Expr* self) {
 
 void List_Expr___grow(List_Expr* self) {
     int64_t newcap = (self->cap * 2);
-    Expr** bigger = (Expr**)calloc((size_t)(newcap), sizeof(Expr*));
+    Expr** bigger = (Expr**)glang_alloc_n((size_t)(newcap), sizeof(Expr*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18639,7 +18645,7 @@ Span_Expr* List_Expr__span(List_Expr* self) {
 void List_Param__init(List_Param* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Param**)calloc((size_t)(4), sizeof(Param*));
+    self->data = (Param**)glang_alloc_n((size_t)(4), sizeof(Param*));
 }
 
 List_Param* List_Param_new(void) {
@@ -18663,11 +18669,11 @@ int List_Param__isEmpty(List_Param* self) {
 
 void List_Param___grow(List_Param* self) {
     int64_t newcap = (self->cap * 2);
-    Param** bigger = (Param**)calloc((size_t)(newcap), sizeof(Param*));
+    Param** bigger = (Param**)glang_alloc_n((size_t)(newcap), sizeof(Param*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18724,7 +18730,7 @@ Span_Param* List_Param__span(List_Param* self) {
 void List_Stmt__init(List_Stmt* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Stmt**)calloc((size_t)(4), sizeof(Stmt*));
+    self->data = (Stmt**)glang_alloc_n((size_t)(4), sizeof(Stmt*));
 }
 
 List_Stmt* List_Stmt_new(void) {
@@ -18748,11 +18754,11 @@ int List_Stmt__isEmpty(List_Stmt* self) {
 
 void List_Stmt___grow(List_Stmt* self) {
     int64_t newcap = (self->cap * 2);
-    Stmt** bigger = (Stmt**)calloc((size_t)(newcap), sizeof(Stmt*));
+    Stmt** bigger = (Stmt**)glang_alloc_n((size_t)(newcap), sizeof(Stmt*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18809,7 +18815,7 @@ Span_Stmt* List_Stmt__span(List_Stmt* self) {
 void List_CatchClause__init(List_CatchClause* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (CatchClause**)calloc((size_t)(4), sizeof(CatchClause*));
+    self->data = (CatchClause**)glang_alloc_n((size_t)(4), sizeof(CatchClause*));
 }
 
 List_CatchClause* List_CatchClause_new(void) {
@@ -18833,11 +18839,11 @@ int List_CatchClause__isEmpty(List_CatchClause* self) {
 
 void List_CatchClause___grow(List_CatchClause* self) {
     int64_t newcap = (self->cap * 2);
-    CatchClause** bigger = (CatchClause**)calloc((size_t)(newcap), sizeof(CatchClause*));
+    CatchClause** bigger = (CatchClause**)glang_alloc_n((size_t)(newcap), sizeof(CatchClause*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18894,7 +18900,7 @@ Span_CatchClause* List_CatchClause__span(List_CatchClause* self) {
 void List_MatchArm__init(List_MatchArm* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (MatchArm**)calloc((size_t)(4), sizeof(MatchArm*));
+    self->data = (MatchArm**)glang_alloc_n((size_t)(4), sizeof(MatchArm*));
 }
 
 List_MatchArm* List_MatchArm_new(void) {
@@ -18918,11 +18924,11 @@ int List_MatchArm__isEmpty(List_MatchArm* self) {
 
 void List_MatchArm___grow(List_MatchArm* self) {
     int64_t newcap = (self->cap * 2);
-    MatchArm** bigger = (MatchArm**)calloc((size_t)(newcap), sizeof(MatchArm*));
+    MatchArm** bigger = (MatchArm**)glang_alloc_n((size_t)(newcap), sizeof(MatchArm*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -18979,7 +18985,7 @@ Span_MatchArm* List_MatchArm__span(List_MatchArm* self) {
 void List_FieldDecl__init(List_FieldDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (FieldDecl**)calloc((size_t)(4), sizeof(FieldDecl*));
+    self->data = (FieldDecl**)glang_alloc_n((size_t)(4), sizeof(FieldDecl*));
 }
 
 List_FieldDecl* List_FieldDecl_new(void) {
@@ -19003,11 +19009,11 @@ int List_FieldDecl__isEmpty(List_FieldDecl* self) {
 
 void List_FieldDecl___grow(List_FieldDecl* self) {
     int64_t newcap = (self->cap * 2);
-    FieldDecl** bigger = (FieldDecl**)calloc((size_t)(newcap), sizeof(FieldDecl*));
+    FieldDecl** bigger = (FieldDecl**)glang_alloc_n((size_t)(newcap), sizeof(FieldDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19064,8 +19070,8 @@ Span_FieldDecl* List_FieldDecl__span(List_FieldDecl* self) {
 void Map_string_TypeNode__init(Map_string_TypeNode* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (TypeNode**)calloc((size_t)(4), sizeof(TypeNode*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (TypeNode**)glang_alloc_n((size_t)(4), sizeof(TypeNode*));
 }
 
 Map_string_TypeNode* Map_string_TypeNode_new(void) {
@@ -19102,14 +19108,14 @@ int Map_string_TypeNode__has(Map_string_TypeNode* self, char* key) {
 
 void Map_string_TypeNode___grow(Map_string_TypeNode* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    TypeNode** nv = (TypeNode**)calloc((size_t)(newcap), sizeof(TypeNode*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    TypeNode** nv = (TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(TypeNode*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -19155,7 +19161,7 @@ void Map_string_TypeNode__remove(Map_string_TypeNode* self, char* key) {
 void List_StaticFieldDecl__init(List_StaticFieldDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (StaticFieldDecl**)calloc((size_t)(4), sizeof(StaticFieldDecl*));
+    self->data = (StaticFieldDecl**)glang_alloc_n((size_t)(4), sizeof(StaticFieldDecl*));
 }
 
 List_StaticFieldDecl* List_StaticFieldDecl_new(void) {
@@ -19179,11 +19185,11 @@ int List_StaticFieldDecl__isEmpty(List_StaticFieldDecl* self) {
 
 void List_StaticFieldDecl___grow(List_StaticFieldDecl* self) {
     int64_t newcap = (self->cap * 2);
-    StaticFieldDecl** bigger = (StaticFieldDecl**)calloc((size_t)(newcap), sizeof(StaticFieldDecl*));
+    StaticFieldDecl** bigger = (StaticFieldDecl**)glang_alloc_n((size_t)(newcap), sizeof(StaticFieldDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19240,7 +19246,7 @@ Span_StaticFieldDecl* List_StaticFieldDecl__span(List_StaticFieldDecl* self) {
 void List_MethodDecl__init(List_MethodDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (MethodDecl**)calloc((size_t)(4), sizeof(MethodDecl*));
+    self->data = (MethodDecl**)glang_alloc_n((size_t)(4), sizeof(MethodDecl*));
 }
 
 List_MethodDecl* List_MethodDecl_new(void) {
@@ -19264,11 +19270,11 @@ int List_MethodDecl__isEmpty(List_MethodDecl* self) {
 
 void List_MethodDecl___grow(List_MethodDecl* self) {
     int64_t newcap = (self->cap * 2);
-    MethodDecl** bigger = (MethodDecl**)calloc((size_t)(newcap), sizeof(MethodDecl*));
+    MethodDecl** bigger = (MethodDecl**)glang_alloc_n((size_t)(newcap), sizeof(MethodDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19325,7 +19331,7 @@ Span_MethodDecl* List_MethodDecl__span(List_MethodDecl* self) {
 void List_EnumVariant__init(List_EnumVariant* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (EnumVariant**)calloc((size_t)(4), sizeof(EnumVariant*));
+    self->data = (EnumVariant**)glang_alloc_n((size_t)(4), sizeof(EnumVariant*));
 }
 
 List_EnumVariant* List_EnumVariant_new(void) {
@@ -19349,11 +19355,11 @@ int List_EnumVariant__isEmpty(List_EnumVariant* self) {
 
 void List_EnumVariant___grow(List_EnumVariant* self) {
     int64_t newcap = (self->cap * 2);
-    EnumVariant** bigger = (EnumVariant**)calloc((size_t)(newcap), sizeof(EnumVariant*));
+    EnumVariant** bigger = (EnumVariant**)glang_alloc_n((size_t)(newcap), sizeof(EnumVariant*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19410,7 +19416,7 @@ Span_EnumVariant* List_EnumVariant__span(List_EnumVariant* self) {
 void List_Decl__init(List_Decl* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Decl**)calloc((size_t)(4), sizeof(Decl*));
+    self->data = (Decl**)glang_alloc_n((size_t)(4), sizeof(Decl*));
 }
 
 List_Decl* List_Decl_new(void) {
@@ -19434,11 +19440,11 @@ int List_Decl__isEmpty(List_Decl* self) {
 
 void List_Decl___grow(List_Decl* self) {
     int64_t newcap = (self->cap * 2);
-    Decl** bigger = (Decl**)calloc((size_t)(newcap), sizeof(Decl*));
+    Decl** bigger = (Decl**)glang_alloc_n((size_t)(newcap), sizeof(Decl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19495,7 +19501,7 @@ Span_Decl* List_Decl__span(List_Decl* self) {
 void List_UnionVariant__init(List_UnionVariant* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (UnionVariant**)calloc((size_t)(4), sizeof(UnionVariant*));
+    self->data = (UnionVariant**)glang_alloc_n((size_t)(4), sizeof(UnionVariant*));
 }
 
 List_UnionVariant* List_UnionVariant_new(void) {
@@ -19519,11 +19525,11 @@ int List_UnionVariant__isEmpty(List_UnionVariant* self) {
 
 void List_UnionVariant___grow(List_UnionVariant* self) {
     int64_t newcap = (self->cap * 2);
-    UnionVariant** bigger = (UnionVariant**)calloc((size_t)(newcap), sizeof(UnionVariant*));
+    UnionVariant** bigger = (UnionVariant**)glang_alloc_n((size_t)(newcap), sizeof(UnionVariant*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -19580,8 +19586,8 @@ Span_UnionVariant* List_UnionVariant__span(List_UnionVariant* self) {
 void Map_string_FieldDecl__init(Map_string_FieldDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (FieldDecl**)calloc((size_t)(4), sizeof(FieldDecl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (FieldDecl**)glang_alloc_n((size_t)(4), sizeof(FieldDecl*));
 }
 
 Map_string_FieldDecl* Map_string_FieldDecl_new(void) {
@@ -19618,14 +19624,14 @@ int Map_string_FieldDecl__has(Map_string_FieldDecl* self, char* key) {
 
 void Map_string_FieldDecl___grow(Map_string_FieldDecl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    FieldDecl** nv = (FieldDecl**)calloc((size_t)(newcap), sizeof(FieldDecl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    FieldDecl** nv = (FieldDecl**)glang_alloc_n((size_t)(newcap), sizeof(FieldDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -19671,8 +19677,8 @@ void Map_string_FieldDecl__remove(Map_string_FieldDecl* self, char* key) {
 void Map_string_StaticFieldDecl__init(Map_string_StaticFieldDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (StaticFieldDecl**)calloc((size_t)(4), sizeof(StaticFieldDecl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (StaticFieldDecl**)glang_alloc_n((size_t)(4), sizeof(StaticFieldDecl*));
 }
 
 Map_string_StaticFieldDecl* Map_string_StaticFieldDecl_new(void) {
@@ -19709,14 +19715,14 @@ int Map_string_StaticFieldDecl__has(Map_string_StaticFieldDecl* self, char* key)
 
 void Map_string_StaticFieldDecl___grow(Map_string_StaticFieldDecl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    StaticFieldDecl** nv = (StaticFieldDecl**)calloc((size_t)(newcap), sizeof(StaticFieldDecl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    StaticFieldDecl** nv = (StaticFieldDecl**)glang_alloc_n((size_t)(newcap), sizeof(StaticFieldDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -19762,8 +19768,8 @@ void Map_string_StaticFieldDecl__remove(Map_string_StaticFieldDecl* self, char* 
 void Map_string_MethodDecl__init(Map_string_MethodDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (MethodDecl**)calloc((size_t)(4), sizeof(MethodDecl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (MethodDecl**)glang_alloc_n((size_t)(4), sizeof(MethodDecl*));
 }
 
 Map_string_MethodDecl* Map_string_MethodDecl_new(void) {
@@ -19800,14 +19806,14 @@ int Map_string_MethodDecl__has(Map_string_MethodDecl* self, char* key) {
 
 void Map_string_MethodDecl___grow(Map_string_MethodDecl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    MethodDecl** nv = (MethodDecl**)calloc((size_t)(newcap), sizeof(MethodDecl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    MethodDecl** nv = (MethodDecl**)glang_alloc_n((size_t)(newcap), sizeof(MethodDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -19853,8 +19859,8 @@ void Map_string_MethodDecl__remove(Map_string_MethodDecl* self, char* key) {
 void Map_string_int__init(Map_string_int* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (int64_t*)calloc((size_t)(4), sizeof(int64_t));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (int64_t*)glang_alloc_n((size_t)(4), sizeof(int64_t));
 }
 
 Map_string_int* Map_string_int_new(void) {
@@ -19891,14 +19897,14 @@ int Map_string_int__has(Map_string_int* self, char* key) {
 
 void Map_string_int___grow(Map_string_int* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    int64_t* nv = (int64_t*)calloc((size_t)(newcap), sizeof(int64_t));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    int64_t* nv = (int64_t*)glang_alloc_n((size_t)(newcap), sizeof(int64_t));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -19944,8 +19950,8 @@ void Map_string_int__remove(Map_string_int* self, char* key) {
 void Map_string_UnionVariantInfo__init(Map_string_UnionVariantInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (UnionVariantInfo**)calloc((size_t)(4), sizeof(UnionVariantInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (UnionVariantInfo**)glang_alloc_n((size_t)(4), sizeof(UnionVariantInfo*));
 }
 
 Map_string_UnionVariantInfo* Map_string_UnionVariantInfo_new(void) {
@@ -19982,14 +19988,14 @@ int Map_string_UnionVariantInfo__has(Map_string_UnionVariantInfo* self, char* ke
 
 void Map_string_UnionVariantInfo___grow(Map_string_UnionVariantInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    UnionVariantInfo** nv = (UnionVariantInfo**)calloc((size_t)(newcap), sizeof(UnionVariantInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    UnionVariantInfo** nv = (UnionVariantInfo**)glang_alloc_n((size_t)(newcap), sizeof(UnionVariantInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20035,8 +20041,8 @@ void Map_string_UnionVariantInfo__remove(Map_string_UnionVariantInfo* self, char
 void Map_string_SymEntry__init(Map_string_SymEntry* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (SymEntry**)calloc((size_t)(4), sizeof(SymEntry*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (SymEntry**)glang_alloc_n((size_t)(4), sizeof(SymEntry*));
 }
 
 Map_string_SymEntry* Map_string_SymEntry_new(void) {
@@ -20073,14 +20079,14 @@ int Map_string_SymEntry__has(Map_string_SymEntry* self, char* key) {
 
 void Map_string_SymEntry___grow(Map_string_SymEntry* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    SymEntry** nv = (SymEntry**)calloc((size_t)(newcap), sizeof(SymEntry*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    SymEntry** nv = (SymEntry**)glang_alloc_n((size_t)(newcap), sizeof(SymEntry*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20126,8 +20132,8 @@ void Map_string_SymEntry__remove(Map_string_SymEntry* self, char* key) {
 void Map_string_FunctionInfo__init(Map_string_FunctionInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (FunctionInfo**)calloc((size_t)(4), sizeof(FunctionInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (FunctionInfo**)glang_alloc_n((size_t)(4), sizeof(FunctionInfo*));
 }
 
 Map_string_FunctionInfo* Map_string_FunctionInfo_new(void) {
@@ -20164,14 +20170,14 @@ int Map_string_FunctionInfo__has(Map_string_FunctionInfo* self, char* key) {
 
 void Map_string_FunctionInfo___grow(Map_string_FunctionInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    FunctionInfo** nv = (FunctionInfo**)calloc((size_t)(newcap), sizeof(FunctionInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    FunctionInfo** nv = (FunctionInfo**)glang_alloc_n((size_t)(newcap), sizeof(FunctionInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20217,8 +20223,8 @@ void Map_string_FunctionInfo__remove(Map_string_FunctionInfo* self, char* key) {
 void Map_string_ClassInfo__init(Map_string_ClassInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (ClassInfo**)calloc((size_t)(4), sizeof(ClassInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (ClassInfo**)glang_alloc_n((size_t)(4), sizeof(ClassInfo*));
 }
 
 Map_string_ClassInfo* Map_string_ClassInfo_new(void) {
@@ -20255,14 +20261,14 @@ int Map_string_ClassInfo__has(Map_string_ClassInfo* self, char* key) {
 
 void Map_string_ClassInfo___grow(Map_string_ClassInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    ClassInfo** nv = (ClassInfo**)calloc((size_t)(newcap), sizeof(ClassInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    ClassInfo** nv = (ClassInfo**)glang_alloc_n((size_t)(newcap), sizeof(ClassInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20308,8 +20314,8 @@ void Map_string_ClassInfo__remove(Map_string_ClassInfo* self, char* key) {
 void Map_string_InterfaceInfo__init(Map_string_InterfaceInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (InterfaceInfo**)calloc((size_t)(4), sizeof(InterfaceInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (InterfaceInfo**)glang_alloc_n((size_t)(4), sizeof(InterfaceInfo*));
 }
 
 Map_string_InterfaceInfo* Map_string_InterfaceInfo_new(void) {
@@ -20346,14 +20352,14 @@ int Map_string_InterfaceInfo__has(Map_string_InterfaceInfo* self, char* key) {
 
 void Map_string_InterfaceInfo___grow(Map_string_InterfaceInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    InterfaceInfo** nv = (InterfaceInfo**)calloc((size_t)(newcap), sizeof(InterfaceInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    InterfaceInfo** nv = (InterfaceInfo**)glang_alloc_n((size_t)(newcap), sizeof(InterfaceInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20399,8 +20405,8 @@ void Map_string_InterfaceInfo__remove(Map_string_InterfaceInfo* self, char* key)
 void Map_string_EnumInfo__init(Map_string_EnumInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (EnumInfo**)calloc((size_t)(4), sizeof(EnumInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (EnumInfo**)glang_alloc_n((size_t)(4), sizeof(EnumInfo*));
 }
 
 Map_string_EnumInfo* Map_string_EnumInfo_new(void) {
@@ -20437,14 +20443,14 @@ int Map_string_EnumInfo__has(Map_string_EnumInfo* self, char* key) {
 
 void Map_string_EnumInfo___grow(Map_string_EnumInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    EnumInfo** nv = (EnumInfo**)calloc((size_t)(newcap), sizeof(EnumInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    EnumInfo** nv = (EnumInfo**)glang_alloc_n((size_t)(newcap), sizeof(EnumInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20490,8 +20496,8 @@ void Map_string_EnumInfo__remove(Map_string_EnumInfo* self, char* key) {
 void Map_string_UnionInfo__init(Map_string_UnionInfo* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (UnionInfo**)calloc((size_t)(4), sizeof(UnionInfo*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (UnionInfo**)glang_alloc_n((size_t)(4), sizeof(UnionInfo*));
 }
 
 Map_string_UnionInfo* Map_string_UnionInfo_new(void) {
@@ -20528,14 +20534,14 @@ int Map_string_UnionInfo__has(Map_string_UnionInfo* self, char* key) {
 
 void Map_string_UnionInfo___grow(Map_string_UnionInfo* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    UnionInfo** nv = (UnionInfo**)calloc((size_t)(newcap), sizeof(UnionInfo*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    UnionInfo** nv = (UnionInfo**)glang_alloc_n((size_t)(newcap), sizeof(UnionInfo*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20581,8 +20587,8 @@ void Map_string_UnionInfo__remove(Map_string_UnionInfo* self, char* key) {
 void Map_string_Map_string_MethodDecl__init(Map_string_Map_string_MethodDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (Map_string_MethodDecl**)calloc((size_t)(4), sizeof(Map_string_MethodDecl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (Map_string_MethodDecl**)glang_alloc_n((size_t)(4), sizeof(Map_string_MethodDecl*));
 }
 
 Map_string_Map_string_MethodDecl* Map_string_Map_string_MethodDecl_new(void) {
@@ -20619,14 +20625,14 @@ int Map_string_Map_string_MethodDecl__has(Map_string_Map_string_MethodDecl* self
 
 void Map_string_Map_string_MethodDecl___grow(Map_string_Map_string_MethodDecl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    Map_string_MethodDecl** nv = (Map_string_MethodDecl**)calloc((size_t)(newcap), sizeof(Map_string_MethodDecl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    Map_string_MethodDecl** nv = (Map_string_MethodDecl**)glang_alloc_n((size_t)(newcap), sizeof(Map_string_MethodDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20672,8 +20678,8 @@ void Map_string_Map_string_MethodDecl__remove(Map_string_Map_string_MethodDecl* 
 void Map_string_string__init(Map_string_string* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (char**)calloc((size_t)(4), sizeof(char*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
 }
 
 Map_string_string* Map_string_string_new(void) {
@@ -20710,14 +20716,14 @@ int Map_string_string__has(Map_string_string* self, char* key) {
 
 void Map_string_string___grow(Map_string_string* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    char** nv = (char**)calloc((size_t)(newcap), sizeof(char*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    char** nv = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20763,8 +20769,8 @@ void Map_string_string__remove(Map_string_string* self, char* key) {
 void Map_string_bool__init(Map_string_bool* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (int*)calloc((size_t)(4), sizeof(int));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (int*)glang_alloc_n((size_t)(4), sizeof(int));
 }
 
 Map_string_bool* Map_string_bool_new(void) {
@@ -20801,14 +20807,14 @@ int Map_string_bool__has(Map_string_bool* self, char* key) {
 
 void Map_string_bool___grow(Map_string_bool* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    int* nv = (int*)calloc((size_t)(newcap), sizeof(int));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    int* nv = (int*)glang_alloc_n((size_t)(newcap), sizeof(int));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -20854,7 +20860,7 @@ void Map_string_bool__remove(Map_string_bool* self, char* key) {
 void List_List_string__init(List_List_string* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (List_string**)calloc((size_t)(4), sizeof(List_string*));
+    self->data = (List_string**)glang_alloc_n((size_t)(4), sizeof(List_string*));
 }
 
 List_List_string* List_List_string_new(void) {
@@ -20878,11 +20884,11 @@ int List_List_string__isEmpty(List_List_string* self) {
 
 void List_List_string___grow(List_List_string* self) {
     int64_t newcap = (self->cap * 2);
-    List_string** bigger = (List_string**)calloc((size_t)(newcap), sizeof(List_string*));
+    List_string** bigger = (List_string**)glang_alloc_n((size_t)(newcap), sizeof(List_string*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -20939,7 +20945,7 @@ Span_List_string* List_List_string__span(List_List_string* self) {
 void List_FlatDecl__init(List_FlatDecl* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (FlatDecl**)calloc((size_t)(4), sizeof(FlatDecl*));
+    self->data = (FlatDecl**)glang_alloc_n((size_t)(4), sizeof(FlatDecl*));
 }
 
 List_FlatDecl* List_FlatDecl_new(void) {
@@ -20963,11 +20969,11 @@ int List_FlatDecl__isEmpty(List_FlatDecl* self) {
 
 void List_FlatDecl___grow(List_FlatDecl* self) {
     int64_t newcap = (self->cap * 2);
-    FlatDecl** bigger = (FlatDecl**)calloc((size_t)(newcap), sizeof(FlatDecl*));
+    FlatDecl** bigger = (FlatDecl**)glang_alloc_n((size_t)(newcap), sizeof(FlatDecl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -21024,8 +21030,8 @@ Span_FlatDecl* List_FlatDecl__span(List_FlatDecl* self) {
 void Map_string_Decl__init(Map_string_Decl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (Decl**)calloc((size_t)(4), sizeof(Decl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (Decl**)glang_alloc_n((size_t)(4), sizeof(Decl*));
 }
 
 Map_string_Decl* Map_string_Decl_new(void) {
@@ -21062,14 +21068,14 @@ int Map_string_Decl__has(Map_string_Decl* self, char* key) {
 
 void Map_string_Decl___grow(Map_string_Decl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    Decl** nv = (Decl**)calloc((size_t)(newcap), sizeof(Decl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    Decl** nv = (Decl**)glang_alloc_n((size_t)(newcap), sizeof(Decl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -21115,8 +21121,8 @@ void Map_string_Decl__remove(Map_string_Decl* self, char* key) {
 void Map_string_List_string__init(Map_string_List_string* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (List_string**)calloc((size_t)(4), sizeof(List_string*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (List_string**)glang_alloc_n((size_t)(4), sizeof(List_string*));
 }
 
 Map_string_List_string* Map_string_List_string_new(void) {
@@ -21153,14 +21159,14 @@ int Map_string_List_string__has(Map_string_List_string* self, char* key) {
 
 void Map_string_List_string___grow(Map_string_List_string* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    List_string** nv = (List_string**)calloc((size_t)(newcap), sizeof(List_string*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    List_string** nv = (List_string**)glang_alloc_n((size_t)(newcap), sizeof(List_string*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -21206,8 +21212,8 @@ void Map_string_List_string__remove(Map_string_List_string* self, char* key) {
 void Map_string_InstanceArgs__init(Map_string_InstanceArgs* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (InstanceArgs**)calloc((size_t)(4), sizeof(InstanceArgs*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (InstanceArgs**)glang_alloc_n((size_t)(4), sizeof(InstanceArgs*));
 }
 
 Map_string_InstanceArgs* Map_string_InstanceArgs_new(void) {
@@ -21244,14 +21250,14 @@ int Map_string_InstanceArgs__has(Map_string_InstanceArgs* self, char* key) {
 
 void Map_string_InstanceArgs___grow(Map_string_InstanceArgs* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    InstanceArgs** nv = (InstanceArgs**)calloc((size_t)(newcap), sizeof(InstanceArgs*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    InstanceArgs** nv = (InstanceArgs**)glang_alloc_n((size_t)(newcap), sizeof(InstanceArgs*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -21297,7 +21303,7 @@ void Map_string_InstanceArgs__remove(Map_string_InstanceArgs* self, char* key) {
 void List_Map_string_TypeNode__init(List_Map_string_TypeNode* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Map_string_TypeNode**)calloc((size_t)(4), sizeof(Map_string_TypeNode*));
+    self->data = (Map_string_TypeNode**)glang_alloc_n((size_t)(4), sizeof(Map_string_TypeNode*));
 }
 
 List_Map_string_TypeNode* List_Map_string_TypeNode_new(void) {
@@ -21321,11 +21327,11 @@ int List_Map_string_TypeNode__isEmpty(List_Map_string_TypeNode* self) {
 
 void List_Map_string_TypeNode___grow(List_Map_string_TypeNode* self) {
     int64_t newcap = (self->cap * 2);
-    Map_string_TypeNode** bigger = (Map_string_TypeNode**)calloc((size_t)(newcap), sizeof(Map_string_TypeNode*));
+    Map_string_TypeNode** bigger = (Map_string_TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(Map_string_TypeNode*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -21382,7 +21388,7 @@ Span_Map_string_TypeNode* List_Map_string_TypeNode__span(List_Map_string_TypeNod
 void List_WorkItem__init(List_WorkItem* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (WorkItem**)calloc((size_t)(4), sizeof(WorkItem*));
+    self->data = (WorkItem**)glang_alloc_n((size_t)(4), sizeof(WorkItem*));
 }
 
 List_WorkItem* List_WorkItem_new(void) {
@@ -21406,11 +21412,11 @@ int List_WorkItem__isEmpty(List_WorkItem* self) {
 
 void List_WorkItem___grow(List_WorkItem* self) {
     int64_t newcap = (self->cap * 2);
-    WorkItem** bigger = (WorkItem**)calloc((size_t)(newcap), sizeof(WorkItem*));
+    WorkItem** bigger = (WorkItem**)glang_alloc_n((size_t)(newcap), sizeof(WorkItem*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -21467,8 +21473,8 @@ Span_WorkItem* List_WorkItem__span(List_WorkItem* self) {
 void Map_string_List_Decl__init(Map_string_List_Decl* self) {
     self->cap = 4;
     self->size = 0;
-    self->keys = (char**)calloc((size_t)(4), sizeof(char*));
-    self->vals = (List_Decl**)calloc((size_t)(4), sizeof(List_Decl*));
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (List_Decl**)glang_alloc_n((size_t)(4), sizeof(List_Decl*));
 }
 
 Map_string_List_Decl* Map_string_List_Decl_new(void) {
@@ -21505,14 +21511,14 @@ int Map_string_List_Decl__has(Map_string_List_Decl* self, char* key) {
 
 void Map_string_List_Decl___grow(Map_string_List_Decl* self) {
     int64_t newcap = (self->cap * 2);
-    char** nk = (char**)calloc((size_t)(newcap), sizeof(char*));
-    List_Decl** nv = (List_Decl**)calloc((size_t)(newcap), sizeof(List_Decl*));
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    List_Decl** nv = (List_Decl**)glang_alloc_n((size_t)(newcap), sizeof(List_Decl*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
     }
-    free(self->keys);
-    free(self->vals);
+    glang_free(self->keys);
+    glang_free(self->vals);
     self->keys = nk;
     self->vals = nv;
     self->cap = newcap;
@@ -21558,7 +21564,7 @@ void Map_string_List_Decl__remove(Map_string_List_Decl* self, char* key) {
 void List_ClosureContext__init(List_ClosureContext* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (ClosureContext**)calloc((size_t)(4), sizeof(ClosureContext*));
+    self->data = (ClosureContext**)glang_alloc_n((size_t)(4), sizeof(ClosureContext*));
 }
 
 List_ClosureContext* List_ClosureContext_new(void) {
@@ -21582,11 +21588,11 @@ int List_ClosureContext__isEmpty(List_ClosureContext* self) {
 
 void List_ClosureContext___grow(List_ClosureContext* self) {
     int64_t newcap = (self->cap * 2);
-    ClosureContext** bigger = (ClosureContext**)calloc((size_t)(newcap), sizeof(ClosureContext*));
+    ClosureContext** bigger = (ClosureContext**)glang_alloc_n((size_t)(newcap), sizeof(ClosureContext*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }
@@ -21643,7 +21649,7 @@ Span_ClosureContext* List_ClosureContext__span(List_ClosureContext* self) {
 void List_Map_string_string__init(List_Map_string_string* self) {
     self->cap = 4;
     self->size = 0;
-    self->data = (Map_string_string**)calloc((size_t)(4), sizeof(Map_string_string*));
+    self->data = (Map_string_string**)glang_alloc_n((size_t)(4), sizeof(Map_string_string*));
 }
 
 List_Map_string_string* List_Map_string_string_new(void) {
@@ -21667,11 +21673,11 @@ int List_Map_string_string__isEmpty(List_Map_string_string* self) {
 
 void List_Map_string_string___grow(List_Map_string_string* self) {
     int64_t newcap = (self->cap * 2);
-    Map_string_string** bigger = (Map_string_string**)calloc((size_t)(newcap), sizeof(Map_string_string*));
+    Map_string_string** bigger = (Map_string_string**)glang_alloc_n((size_t)(newcap), sizeof(Map_string_string*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         bigger[i] = self->data[i];
     }
-    free(self->data);
+    glang_free(self->data);
     self->data = bigger;
     self->cap = newcap;
 }

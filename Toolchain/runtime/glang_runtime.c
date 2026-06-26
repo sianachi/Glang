@@ -26,6 +26,86 @@ void glang_managed_sweep(void) {
     glang_managed_cap = 0;
 }
 
+/* ── Debug allocator ──────────────────────────────────────────────────────
+   When GLANG_DEBUG_ALLOC is set (to anything but "" or "0"), raw alloc()/free()
+   are routed through these wrappers, which record every live block to detect
+   leaks (reported once at exit) and double/invalid frees. When the variable is
+   unset they passthrough to malloc/calloc/free, so normal output is unchanged.
+   This is a compiled-path diagnostic: the interpreters already reject
+   double-free and use-after-free at runtime, and never leak under host GC. */
+static int     glang_dbg_mode = -1;     /* -1 = not yet probed, 0 = off, 1 = on */
+static void**  glang_dbg_ptrs = NULL;
+static size_t  glang_dbg_count = 0;
+static size_t  glang_dbg_cap = 0;
+static long    glang_dbg_allocs = 0;
+static long    glang_dbg_frees = 0;
+static long    glang_dbg_bad_frees = 0;
+
+static void glang_dbg_report(void) {
+    if (glang_dbg_count > 0) {
+        fprintf(stderr, "glang: %zu leaked allocation(s)\n", glang_dbg_count);
+    }
+    if (glang_dbg_bad_frees > 0) {
+        fprintf(stderr, "glang: %ld invalid free(s)\n", glang_dbg_bad_frees);
+    }
+    free(glang_dbg_ptrs);
+    glang_dbg_ptrs = NULL;
+}
+
+static int glang_dbg_on(void) {
+    if (glang_dbg_mode < 0) {
+        const char* e = getenv("GLANG_DEBUG_ALLOC");
+        glang_dbg_mode = (e && e[0] != '\0' && !(e[0] == '0' && e[1] == '\0')) ? 1 : 0;
+        if (glang_dbg_mode) { atexit(glang_dbg_report); }
+    }
+    return glang_dbg_mode;
+}
+
+static void glang_dbg_track(void* p) {
+    if (!p) return;
+    if (glang_dbg_count == glang_dbg_cap) {
+        size_t ncap = glang_dbg_cap == 0 ? 64 : glang_dbg_cap * 2;
+        glang_dbg_ptrs = (void**)realloc(glang_dbg_ptrs, ncap * sizeof(void*));
+        glang_dbg_cap = ncap;
+    }
+    glang_dbg_ptrs[glang_dbg_count++] = p;
+    glang_dbg_allocs++;
+}
+
+static int glang_dbg_untrack(void* p) {
+    for (size_t i = 0; i < glang_dbg_count; ++i) {
+        if (glang_dbg_ptrs[i] == p) {
+            glang_dbg_ptrs[i] = glang_dbg_ptrs[--glang_dbg_count];
+            glang_dbg_frees++;
+            return 1;
+        }
+    }
+    return 0;  /* not a live tracked block: double or invalid free */
+}
+
+void* glang_alloc(size_t size) {
+    void* p = malloc(size);
+    if (glang_dbg_on()) { glang_dbg_track(p); }
+    return p;
+}
+
+void* glang_alloc_n(size_t count, size_t size) {
+    void* p = calloc(count, size);
+    if (glang_dbg_on()) { glang_dbg_track(p); }
+    return p;
+}
+
+void glang_free(void* p) {
+    if (glang_dbg_on() && p) {
+        if (!glang_dbg_untrack(p)) {
+            glang_dbg_bad_frees++;
+            fprintf(stderr, "glang: invalid or double free\n");
+            return;  /* don't pass a bad pointer to free() */
+        }
+    }
+    free(p);
+}
+
 void* glang_managed_alloc(size_t size) {
     if (!glang_managed_atexit_set) {
         atexit(glang_managed_sweep);

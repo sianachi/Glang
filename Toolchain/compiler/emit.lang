@@ -871,9 +871,9 @@ class CEmit {
     string emitAlloc(TypeNode* allocType, Expr* count) {
         string ct = cTypeOf(showType(allocType));
         if (count != null) {
-            return "(" + ct + "*)calloc((size_t)(" + this.emitExpr(count) + "), sizeof(" + ct + "))";
+            return "(" + ct + "*)glang_alloc_n((size_t)(" + this.emitExpr(count) + "), sizeof(" + ct + "))";
         }
-        return "(" + ct + "*)malloc(sizeof(" + ct + "))";
+        return "(" + ct + "*)glang_alloc(sizeof(" + ct + "))";
     }
 
     string renderForInit(Stmt* init) {
@@ -916,9 +916,9 @@ class CEmit {
                 string base = t;
                 if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
                 if (this.env->is_class(base)) { return mangleName(base) + "_delete(" + this.emitExpr(o) + ")"; }
-                return "free(" + this.emitExpr(o) + ")";
+                return "glang_free(" + this.emitExpr(o) + ")";
             }
-            Expr.FreeExpr(o) => { return "free(" + this.emitExpr(o) + ")"; }
+            Expr.FreeExpr(o) => { return "glang_free(" + this.emitExpr(o) + ")"; }
             Expr.AllocExpr(t, cnt) => { return this.emitAlloc(t, cnt); }
             Expr.AddressOfExpr(o) => { return "(&" + this.emitExpr(o) + ")"; }
             Expr.DerefExpr(o) => { return "(*" + this.emitExpr(o) + ")"; }
@@ -1467,6 +1467,9 @@ class CEmit {
         f.appendLine("char*   glang_readstdin(void);");
         f.appendLine("void* glang_managed_alloc(size_t size);");
         f.appendLine("void  glang_managed_sweep(void);");
+        f.appendLine("void* glang_alloc(size_t size);");
+        f.appendLine("void* glang_alloc_n(size_t count, size_t size);");
+        f.appendLine("void  glang_free(void* p);");
         f.appendLine("void glang_print_int(int64_t v);");
         f.appendLine("void glang_print_float(double v);");
         f.appendLine("void glang_print_bool(int v);");

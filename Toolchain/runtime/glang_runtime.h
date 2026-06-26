@@ -121,4 +121,10 @@ typedef struct { const char* name; const char* parent; } GlangClassEntry;
 void* glang_managed_alloc(size_t size);
 void  glang_managed_sweep(void);
 
+/* Debug allocator wrappers for raw alloc()/free(); GLANG_DEBUG_ALLOC-gated
+   leak + double/invalid-free detection (passthrough when the var is unset). */
+void* glang_alloc(size_t size);
+void* glang_alloc_n(size_t count, size_t size);
+void  glang_free(void* p);
+
 #endif /* GLANG_RUNTIME_H */
