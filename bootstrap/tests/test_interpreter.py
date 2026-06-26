@@ -22,14 +22,23 @@ def _build(src: str):
     return prog, Interpreter(env)
 
 
+_GLANG_BACKEND = os.environ.get("GLANG_INTERP_BACKEND")
+
+
 def run(src: str) -> int:
     """Lex -> parse -> analyse -> interpret; return main()'s exit code."""
+    if _GLANG_BACKEND:
+        from tests.glang_interp_backend import gi_run
+        return gi_run(src)[0]
     prog, interp = _build(src)
     return interp.run(prog)
 
 
 def run_out(src: str):
     """Like run(), but also return the captured print() output lines."""
+    if _GLANG_BACKEND:
+        from tests.glang_interp_backend import gi_run
+        return gi_run(src)
     prog, interp = _build(src)
     code = interp.run(prog)
     return code, interp.output
