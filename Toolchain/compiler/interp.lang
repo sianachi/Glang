@@ -1,0 +1,1409 @@
+// Toolchain/compiler/interp.lang — a tree-walking interpreter for Glang, in Glang.
+//
+// Port of bootstrap/interpreter/interpreter.py. Consumes the typed AST (ast.lang)
+// + the analysed GlobalEnv (symtab.lang) and evaluates it directly. Built
+// incrementally and validated against test_interpreter.py via the glang-interp
+// backend.
+//
+// Value model (mirrors the Python Value/Box/ObjectInstance):
+//   RtVal  = a static TypeNode + a raw RtValue (the representation union).
+//   Box    = a mutable cell that pointers point at (locals, fields, elements).
+//   Control flow (break/continue/return/throw/exit) uses Glang exceptions.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "ast.lang";
+import "symtab.lang";
+
+// ── Runtime representation ──────────────────────────────────────────────────
+
+union RtValue {
+    IntV { int n; }          // int and byte (byte is masked 0..255; type distinguishes)
+    FloatV { float f; }
+    BoolV { bool b; }
+    CharV { char c; }
+    StrV { string s; }
+    Void { }
+    NullV { }                // null pointer / null nullable
+    Ptr { Box* box; }        // non-null pointer to a cell
+    Obj { ObjInstance* o; }
+    Variant { VariantInst* v; }
+    Fn { Callable* callee; }
+    Arr { List<Box*> elems; }  // a heap array block (alloc(T, n))
+}
+
+class RtVal {
+    TypeNode* type;
+    RtValue* raw;
+    RtVal(TypeNode* t, RtValue* r) { this.type = t; this.raw = r; }
+}
+
+class Box {
+    RtVal* value;
+    int addr;
+    bool onHeap;
+    bool freed;
+    Box(RtVal* v, int a, bool heap) { this.value = v; this.addr = a; this.onHeap = heap; this.freed = false; }
+}
+
+class ObjInstance {
+    string className;
+    Map<string, Box*> fields;
+    ObjInstance(string cn) { this.className = cn; this.fields = Map<string, Box*>(); }
+}
+
+class VariantInst {
+    string unionName;
+    string variantName;
+    List<string> fieldNames;
+    Map<string, Box*> fields;
+    VariantInst(string un, string vn) {
+        this.unionName = un; this.variantName = vn;
+        this.fieldNames = List<string>(); this.fields = Map<string, Box*>();
+    }
+}
+
+class Callable {
+    bool isClosure;
+    List<Param*> params;
+    TypeNode* returnType;
+    Stmt* body;
+    Map<string, Box*> captures;
+    // function / method identity (for non-closures)
+    string funcName;       // "" if a method/closure
+    string definingClass;  // "" if a free function/closure
+    RtVal* thisVal;        // null unless a bound method
+    Callable() {
+        this.isClosure = false; this.params = List<Param*>(); this.returnType = null;
+        this.body = null; this.captures = Map<string, Box*>();
+        this.funcName = ""; this.definingClass = ""; this.thisVal = null;
+    }
+}
+
+class MethodHit { MethodDecl* method; string defining; MethodHit(MethodDecl* m, string d) { this.method = m; this.defining = d; } }
+class Receiver { ObjInstance* obj; RtVal* thisVal; Receiver(ObjInstance* o, RtVal* t) { this.obj = o; this.thisVal = t; } }
+
+// ── Control-flow signals (Glang exceptions) ─────────────────────────────────
+
+class BreakSig extends Exception { BreakSig() : super("break") {} }
+class ContinueSig extends Exception { ContinueSig() : super("continue") {} }
+class ReturnSig extends Exception { RtVal* value; ReturnSig(RtVal* v) : super("return") { this.value = v; } }
+class ExitSig extends Exception { int code; ExitSig(int c) : super("exit") { this.code = c; } }
+class ThrowSig extends Exception { RtVal* value; ThrowSig(RtVal* v) : super("throw") { this.value = v; } }
+class RtError extends Exception { RtError(string m) : super(m) {} }
+
+// ── Value constructors ──────────────────────────────────────────────────────
+
+TypeNode* named(string n) { return new TypeNode.NamedType(n); }
+RtVal* mkInt(int n)    { return new RtVal(named("int"),   new RtValue.IntV(n)); }
+RtVal* mkByte(int n)   { return new RtVal(named("byte"),  new RtValue.IntV(n & 255)); }
+RtVal* mkFloat(float f){ return new RtVal(named("float"), new RtValue.FloatV(f)); }
+RtVal* mkBool(bool b)  { return new RtVal(named("bool"),  new RtValue.BoolV(b)); }
+RtVal* mkChar(char c)  { return new RtVal(named("char"),  new RtValue.CharV(c)); }
+RtVal* mkStr(string s) { return new RtVal(named("string"),new RtValue.StrV(s)); }
+RtVal* mkVoid()        { return new RtVal(named("void"),  new RtValue.Void()); }
+RtVal* mkNull()        { return new RtVal(named("null"),  new RtValue.NullV()); }
+
+// raw accessors (interpreter invariants guarantee the variant)
+int rawInt(RtVal* v)     { match (*(v->raw)) { RtValue.IntV(n) => { return n; } _ => { return 0; } } }
+float rawFloat(RtVal* v) { match (*(v->raw)) { RtValue.FloatV(f) => { return f; } RtValue.IntV(n) => { return (float)n; } _ => { return 0.0; } } }
+bool rawBool(RtVal* v)   { match (*(v->raw)) { RtValue.BoolV(b) => { return b; } _ => { return false; } } }
+char rawChar(RtVal* v)   { match (*(v->raw)) { RtValue.CharV(c) => { return c; } _ => { return ' '; } } }
+string rawStr(RtVal* v)  { match (*(v->raw)) { RtValue.StrV(s) => { return s; } _ => { return ""; } } }
+
+bool isName(RtVal* v, string n) {
+    match (*(v->type)) {
+        TypeNode.NamedType(nm) => { return nm == n; }
+        _ => { return false; }
+    }
+}
+bool truthy(RtVal* v) {
+    match (*(v->raw)) {
+        RtValue.BoolV(b) => { return b; }
+        RtValue.IntV(n) => { return n != 0; }
+        _ => { return false; }
+    }
+}
+
+// ── string / parse helpers (substring search, validated parsing) ────────────
+
+int subIndex(string s, string needle) {
+    int sl = len(s); int nl = len(needle);
+    if (nl == 0) { return 0; }
+    for (int i = 0; i + nl <= sl; ++i) {
+        if (substr(s, i, i + nl) == needle) { return i; }
+    }
+    return -1;
+}
+bool startsW(string s, string p) {
+    int pl = len(p);
+    if (pl > len(s)) { return false; }
+    return substr(s, 0, pl) == p;
+}
+bool endsW(string s, string suf) {
+    int sl = len(s); int fl = len(suf);
+    if (fl > sl) { return false; }
+    return substr(s, sl - fl, sl) == suf;
+}
+
+// parseInt with 0x/0b/decimal + sign; throws RtError on invalid (matches int(text,0)).
+int parseIntStr(string t) {
+    int n = len(t);
+    if (n == 0) { throw new RtError("parseInt invalid integer '" + t + "'"); }
+    int i = 0;
+    bool neg = false;
+    int c0 = (int)(t[0]);
+    if (c0 == 45) { neg = true; i = 1; } else if (c0 == 43) { i = 1; }
+    int base = 10;
+    if (i + 1 < n && (int)(t[i]) == 48) {
+        int c1 = (int)(t[i + 1]);
+        if (c1 == 120 || c1 == 88) { base = 16; i = i + 2; }
+        else if (c1 == 98 || c1 == 66) { base = 2; i = i + 2; }
+    }
+    if (i >= n) { throw new RtError("parseInt invalid integer '" + t + "'"); }
+    int val = 0;
+    while (i < n) {
+        int c = (int)(t[i]);
+        int d = -1;
+        if (c >= 48 && c <= 57) { d = c - 48; }
+        else if (c >= 97 && c <= 102) { d = c - 97 + 10; }
+        else if (c >= 65 && c <= 70) { d = c - 65 + 10; }
+        if (d < 0 || d >= base) { throw new RtError("parseInt invalid integer '" + t + "'"); }
+        val = val * base + d;
+        i = i + 1;
+    }
+    if (neg) { val = 0 - val; }
+    return val;
+}
+
+float parseFloatStr(string t) {
+    int n = len(t);
+    bool hasDigit = false;
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(t[i]);
+        bool digit = c >= 48 && c <= 57;
+        bool ok = digit || c == 46 || c == 43 || c == 45 || c == 101 || c == 69;
+        if (digit) { hasDigit = true; }
+        if (!ok) { throw new RtError("parseFloat invalid float '" + t + "'"); }
+    }
+    if (!hasDigit) { throw new RtError("parseFloat invalid float '" + t + "'"); }
+    return parseFloat(t);
+}
+
+// ── free-variable analysis for closures (Pass2 can't write captures to the
+//    immutable ClosureExpr node, so the interpreter computes them) ────────────
+void collectArgIdents(List<Expr*> args, List<string> used) {
+    int n = args.length();
+    for (int i = 0; i < n; ++i) { collectUsedIdents(args.get(i), used); }
+}
+void collectUsedIdents(Expr* e, List<string> used) {
+    match (*e) {
+        Expr.IdentifierExpr(n) => { used.add(n); }
+        Expr.UnaryExpr(op, o) => { collectUsedIdents(o, used); }
+        Expr.BinaryExpr(l, op, r) => { collectUsedIdents(l, used); collectUsedIdents(r, used); }
+        Expr.CastExpr(t, x) => { collectUsedIdents(x, used); }
+        Expr.CallExpr(nm, args, ta) => { used.add(nm); collectArgIdents(args, used); }
+        Expr.IndirectCallExpr(c, args) => { collectUsedIdents(c, used); collectArgIdents(args, used); }
+        Expr.MethodCallExpr(obj, m, args, arrow) => { collectUsedIdents(obj, used); collectArgIdents(args, used); }
+        Expr.NewExpr(cn, args, ta) => { collectArgIdents(args, used); }
+        Expr.FieldAccessExpr(obj, f) => { collectUsedIdents(obj, used); }
+        Expr.ArrowAccessExpr(p, f) => { collectUsedIdents(p, used); }
+        Expr.IndexExpr(a, i) => { collectUsedIdents(a, used); collectUsedIdents(i, used); }
+        Expr.AddressOfExpr(o) => { collectUsedIdents(o, used); }
+        Expr.DerefExpr(o) => { collectUsedIdents(o, used); }
+        Expr.DeleteExpr(o) => { collectUsedIdents(o, used); }
+        Expr.FreeExpr(o) => { collectUsedIdents(o, used); }
+        Expr.AllocExpr(t, cnt) => { if (cnt != null) { collectUsedIdents(cnt, used); } }
+        Expr.ClosureExpr(ps, rt, body, caps) => { collectStmtIdents(body, used, List<string>()); }
+        _ => { }
+    }
+}
+void collectStmtIdents(Stmt* s, List<string> used, List<string> declared) {
+    match (*s) {
+        Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { collectStmtIdents(stmts.get(i), used, declared); } }
+        Stmt.ExprStmt(e) => { collectUsedIdents(e, used); }
+        Stmt.VarDecl(nm, ty, init, c) => { collectUsedIdents(init, used); declared.add(nm); }
+        Stmt.AssignStmt(t, op, v) => { collectUsedIdents(t, used); collectUsedIdents(v, used); }
+        Stmt.IfStmt(cond, th, el) => { collectUsedIdents(cond, used); collectStmtIdents(th, used, declared); if (el != null) { collectStmtIdents(el, used, declared); } }
+        Stmt.WhileStmt(cond, body) => { collectUsedIdents(cond, used); collectStmtIdents(body, used, declared); }
+        Stmt.DoWhileStmt(body, cond) => { collectStmtIdents(body, used, declared); collectUsedIdents(cond, used); }
+        Stmt.ForStmt(init, cond, post, body) => { collectStmtIdents(init, used, declared); collectUsedIdents(cond, used); collectStmtIdents(post, used, declared); collectStmtIdents(body, used, declared); }
+        Stmt.ForeachStmt(vt, vn, it, body, c) => { collectUsedIdents(it, used); declared.add(vn); collectStmtIdents(body, used, declared); }
+        Stmt.ReturnStmt(v) => { if (v != null) { collectUsedIdents(v, used); } }
+        Stmt.ThrowStmt(v) => { collectUsedIdents(v, used); }
+        Stmt.UsingStmt(decl, body) => { collectStmtIdents(decl, used, declared); collectStmtIdents(body, used, declared); }
+        Stmt.TryCatchStmt(body, catches) => {
+            collectStmtIdents(body, used, declared);
+            int n = catches.length();
+            for (int i = 0; i < n; ++i) { CatchClause* cc = catches.get(i); declared.add(cc->varName); collectStmtIdents(cc->body, used, declared); }
+        }
+        Stmt.MatchStmt(scrut, arms) => {
+            collectUsedIdents(scrut, used);
+            int n = arms.length();
+            for (int i = 0; i < n; ++i) {
+                MatchArm* arm = arms.get(i);
+                Pattern* p = arm->pattern;
+                match (*p) {
+                    Pattern.VariantPattern(un, vn, binds) => { int bn = binds.length(); for (int j = 0; j < bn; ++j) { declared.add(binds.get(j)); } }
+                    _ => { }
+                }
+                collectStmtIdents(arm->body, used, declared);
+            }
+        }
+        _ => { }
+    }
+}
+bool sListHas(List<string> xs, string v) {
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) { if (xs.get(i) == v) { return true; } }
+    return false;
+}
+
+// ── The interpreter ─────────────────────────────────────────────────────────
+
+class Frame {
+    List<Map<string, Box*>*> scopes;
+    RtVal* thisVal;          // null if none
+    string currentClass;     // "" if none
+    Frame(RtVal* tv, string cc) {
+        this.scopes = List<Map<string, Box*>*>();
+        this.scopes.add(Map<string, Box*>());
+        this.thisVal = tv; this.currentClass = cc;
+    }
+    void pushScope() { this.scopes.add(Map<string, Box*>()); }
+    void popScope() { this.scopes.removeAt(this.scopes.length() - 1); }
+    void define(string name, Box* b) { this.scopes.get(this.scopes.length() - 1).set(name, b); }
+    Box* lookup(string name) {
+        int i = this.scopes.length() - 1;
+        while (i >= 0) {
+            Map<string, Box*>* sc = this.scopes.get(i);
+            if (sc.has(name)) { return sc.getOr(name, null); }
+            i = i - 1;
+        }
+        return null;
+    }
+}
+
+class Interp {
+    GlobalEnv* env;
+    List<Frame*> frames;
+    List<string> output;
+    List<string> errOutput;
+    Map<string, Box*> statics;   // key: Class + "::" + field
+    int stackAddr;
+    int heapAddr;
+    List<int> live;              // live heap addrs (for free validation)
+
+    Interp(GlobalEnv* e) {
+        this.env = e;
+        this.frames = List<Frame*>();
+        this.output = List<string>();
+        this.errOutput = List<string>();
+        this.statics = Map<string, Box*>();
+        this.stackAddr = -1;
+        this.heapAddr = 1;
+        this.live = List<int>();
+    }
+
+    Frame* cur() { return this.frames.get(this.frames.length() - 1); }
+
+    Box* newBox(RtVal* v) {
+        Box* b = new Box(v, this.stackAddr, false);
+        this.stackAddr = this.stackAddr - 1;
+        return b;
+    }
+    Box* heapBox(RtVal* v) {
+        Box* b = new Box(v, this.heapAddr, true);
+        this.live.add(this.heapAddr);
+        this.heapAddr = this.heapAddr + 1;
+        return b;
+    }
+
+    // ── public entry ────────────────────────────────────────────────────
+    int run(Program* program) {
+        this.initStatics(program);
+        FunctionInfo* mainInfo = this.env->functions.getOr("main", null);
+        if (mainInfo == null) { throw new RtError("no 'main' function"); }
+        try {
+            List<RtVal*> noArgs = List<RtVal*>();
+            RtVal* result = this.callFunctionDecl(mainInfo->decl, noArgs);
+            match (*(result->raw)) {
+                RtValue.IntV(n) => { return n; }
+                _ => { return 0; }
+            }
+        } catch (ExitSig* e) {
+            return e->code;
+        } catch (ThrowSig* t) {
+            this.errOutput.add("Unhandled exception");
+            return 1;
+        }
+    }
+
+    void initStatics(Program* program) {
+        Frame* f = new Frame(null, "");
+        this.frames.add(f);
+        List<Decl*> decls = program->declarations;
+        int n = decls.length();
+        for (int i = 0; i < n; ++i) {
+            match (*(decls.get(i))) {
+                Decl.ClassDecl(nm, fields, sfields, methods, sup, ifc, ct, dt, acc, tps, bn) => {
+                    int sn = sfields.length();
+                    for (int j = 0; j < sn; ++j) {
+                        StaticFieldDecl* sf = sfields.get(j);
+                        RtVal* val = this.coerce(this.eval(sf->initializer), sf->fieldType);
+                        this.statics.set(nm + "::" + sf->name, this.newBox(val));
+                    }
+                }
+                _ => { }
+            }
+        }
+        this.frames.removeAt(this.frames.length() - 1);
+    }
+
+    // ── calls ────────────────────────────────────────────────────────────
+    RtVal* callFunctionDecl(Decl* d, List<RtVal*> args) {
+        match (*d) {
+            Decl.FunctionDecl(name, params, ret, body, tps, bounds) => {
+                Frame* f = new Frame(null, "");
+                this.bindParams(f, params, args);
+                return this.runBody(f, body, ret);
+            }
+            _ => { throw new RtError("not a function"); }
+        }
+    }
+
+    void bindParams(Frame* f, List<Param*> params, List<RtVal*> args) {
+        int n = params.length();
+        for (int i = 0; i < n; ++i) {
+            Param* p = params.get(i);
+            RtVal* a = mkVoid();
+            if (i < args.length()) { a = args.get(i); }
+            f.define(p->name, this.newBox(this.coerce(a, p->type)));
+        }
+    }
+
+    RtVal* runBody(Frame* f, Stmt* body, TypeNode* retType) {
+        this.frames.add(f);
+        RtVal* result = mkVoid();
+        bool returned = false;
+        try {
+            match (*body) {
+                Stmt.Block(stmts) => {
+                    int n = stmts.length();
+                    for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); }
+                }
+                _ => { this.execStmt(body); }
+            }
+        } catch (ReturnSig* r) {
+            result = this.coerce(r->value, retType);
+            returned = true;
+        }
+        this.frames.removeAt(this.frames.length() - 1);
+        if (returned) { return result; }
+        return mkVoid();
+    }
+
+    // ── statements ────────────────────────────────────────────────────────
+    void execBlock(Stmt* block) {
+        this.cur().pushScope();
+        try {
+            match (*block) {
+                Stmt.Block(stmts) => {
+                    int n = stmts.length();
+                    for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); }
+                }
+                _ => { this.execStmt(block); }
+            }
+        } catch (BreakSig* b) { this.cur().popScope(); throw b; }
+        catch (ContinueSig* c) { this.cur().popScope(); throw c; }
+        catch (ReturnSig* r) { this.cur().popScope(); throw r; }
+        this.cur().popScope();
+    }
+
+    void execStmt(Stmt* s) {
+        match (*s) {
+            Stmt.Block(stmts) => { this.execBlock(s); }
+            Stmt.ExprStmt(e) => { this.eval(e); }
+            Stmt.VarDecl(nm, ty, init, c) => {
+                RtVal* v = this.coerce(this.eval(init), ty);
+                this.cur().define(nm, this.newBox(v));
+            }
+            Stmt.AssignStmt(target, op, val) => { this.execAssign(target, op, val); }
+            Stmt.ReturnStmt(v) => {
+                if (v == null) { throw new ReturnSig(mkVoid()); }
+                throw new ReturnSig(this.eval(v));
+            }
+            Stmt.IfStmt(cond, th, el) => {
+                if (truthy(this.eval(cond))) { this.execBlock(th); }
+                else if (el != null) { this.execBlock(el); }
+            }
+            Stmt.WhileStmt(cond, body) => {
+                while (truthy(this.eval(cond))) {
+                    try { this.execBlock(body); }
+                    catch (BreakSig* b) { return; }
+                    catch (ContinueSig* c) { }
+                }
+            }
+            Stmt.DoWhileStmt(body, cond) => {
+                bool go = true;
+                while (go) {
+                    try { this.execBlock(body); }
+                    catch (BreakSig* b) { return; }
+                    catch (ContinueSig* c) { }
+                    go = truthy(this.eval(cond));
+                }
+            }
+            Stmt.ForStmt(init, cond, post, body) => { this.execFor(init, cond, post, body); }
+            Stmt.ForeachStmt(vt, vn, iterEx, body, c) => { this.execForeach(vt, vn, iterEx, body); }
+            Stmt.BreakStmt() => { throw new BreakSig(); }
+            Stmt.ContinueStmt() => { throw new ContinueSig(); }
+            Stmt.ThrowStmt(v) => { throw new ThrowSig(this.eval(v)); }
+            Stmt.MatchStmt(scrut, arms) => { this.execMatch(scrut, arms); }
+            Stmt.TryCatchStmt(body, catches) => { this.execTryCatch(body, catches); }
+            Stmt.UsingStmt(decl, body) => { this.execUsing(decl, body); }
+            _ => { throw new RtError("unsupported statement"); }
+        }
+    }
+
+    void execFor(Stmt* init, Expr* cond, Stmt* post, Stmt* body) {
+        this.cur().pushScope();
+        if (init != null) { this.execStmt(init); }
+        while (cond == null || truthy(this.eval(cond))) {
+            try { this.execBlock(body); }
+            catch (BreakSig* b) { this.cur().popScope(); return; }
+            catch (ContinueSig* c) { }
+            if (post != null) { this.execStmt(post); }
+        }
+        this.cur().popScope();
+    }
+
+    void execForeach(TypeNode* vt, string vn, Expr* iterEx, Stmt* body) {
+        RtVal* iterable = this.eval(iterEx);
+        this.cur().pushScope();
+        Box* box = this.newBox(this.zeroValue(vt));
+        this.cur().define(vn, box);
+        bool brk = false;
+        match (*(iterable->raw)) {
+            RtValue.StrV(s) => {
+                int n = len(s);
+                for (int i = 0; i < n && !brk; ++i) {
+                    box->value = this.coerce(mkChar(s[i]), box->value->type);
+                    try { this.execBlock(body); } catch (BreakSig* b) { brk = true; } catch (ContinueSig* cc) { }
+                }
+            }
+            RtValue.Arr(es) => {
+                int n = es.length();
+                for (int i = 0; i < n && !brk; ++i) {
+                    box->value = this.coerce(es.get(i)->value, box->value->type);
+                    try { this.execBlock(body); } catch (BreakSig* b) { brk = true; } catch (ContinueSig* cc) { }
+                }
+            }
+            _ => {
+                RtVal* lenv = this.callInstanceMethod(iterable, "length", List<RtVal*>());
+                int n = rawInt(lenv);
+                for (int i = 0; i < n && !brk; ++i) {
+                    List<RtVal*> ga = List<RtVal*>(); ga.add(mkInt(i));
+                    RtVal* item = this.callInstanceMethod(iterable, "get", ga);
+                    box->value = this.coerce(item, box->value->type);
+                    try { this.execBlock(body); } catch (BreakSig* b) { brk = true; } catch (ContinueSig* cc) { }
+                }
+            }
+        }
+        this.cur().popScope();
+    }
+
+    void execMatch(Expr* scrut, List<MatchArm*> arms) {
+        RtVal* val = this.eval(scrut);
+        match (*(val->raw)) { RtValue.Ptr(box) => { val = this.derefBox(val)->value; } _ => { } }
+        VariantInst* inst = null;
+        match (*(val->raw)) {
+            RtValue.Variant(v) => { inst = v; }
+            _ => { throw new RtError("match scrutinee is not a union value"); }
+        }
+        int n = arms.length();
+        for (int i = 0; i < n; ++i) {
+            MatchArm* arm = arms.get(i);
+            match (*(arm->pattern)) {
+                Pattern.WildcardPattern() => { this.execBlock(arm->body); return; }
+                Pattern.VariantPattern(un, vn, binds) => {
+                    if (vn == inst->variantName) {
+                        this.cur().pushScope();
+                        int bn = binds.length();
+                        int fn2 = inst->fieldNames.length();
+                        for (int j = 0; j < bn && j < fn2; ++j) {
+                            this.cur().define(binds.get(j), inst->fields.getOr(inst->fieldNames.get(j), null));
+                        }
+                        this.execBlock(arm->body);
+                        this.cur().popScope();
+                        return;
+                    }
+                }
+            }
+        }
+        throw new RtError("non-exhaustive match: no arm matched '" + inst->variantName + "'");
+    }
+
+    string excClass(RtVal* v) {
+        match (*(v->raw)) {
+            RtValue.Ptr(box) => { match (*(box->value->raw)) { RtValue.Obj(o) => { return o->className; } _ => { } } }
+            RtValue.Obj(o) => { return o->className; }
+            _ => { }
+        }
+        return "Exception";
+    }
+    string catchClassName(TypeNode* ct) {
+        match (*ct) {
+            TypeNode.PointerType(b) => { match (*b) { TypeNode.NamedType(nm) => { return nm; } _ => { } } }
+            TypeNode.NamedType(nm) => { return nm; }
+            _ => { }
+        }
+        return "";
+    }
+
+    void execTryCatch(Stmt* body, List<CatchClause*> catches) {
+        try { this.execBlock(body); }
+        catch (ThrowSig* ex) {
+            string thrown = this.excClass(ex->value);
+            List<string> chain = superclass_chain(thrown, this.env);
+            int n = catches.length();
+            for (int i = 0; i < n; ++i) {
+                CatchClause* cc = catches.get(i);
+                if (sListHas(chain, this.catchClassName(cc->catchType))) {
+                    this.cur().pushScope();
+                    this.cur().define(cc->varName, this.newBox(ex->value));
+                    this.execBlock(cc->body);
+                    this.cur().popScope();
+                    return;
+                }
+            }
+            throw ex;
+        }
+    }
+
+    void execUsing(Stmt* decl, Stmt* body) {
+        this.cur().pushScope();
+        string vname = "";
+        match (*decl) {
+            Stmt.VarDecl(nm, ty, init, c) => {
+                vname = nm;
+                this.cur().define(nm, this.newBox(this.coerce(this.eval(init), ty)));
+            }
+            _ => { }
+        }
+        try { this.execBody(body); }
+        catch (ReturnSig* r) { this.disposeResource(vname); this.cur().popScope(); throw r; }
+        catch (BreakSig* b) { this.disposeResource(vname); this.cur().popScope(); throw b; }
+        catch (ContinueSig* c) { this.disposeResource(vname); this.cur().popScope(); throw c; }
+        this.disposeResource(vname);
+        this.cur().popScope();
+    }
+    void disposeResource(string vname) {
+        Box* b = this.cur().lookup(vname);
+        if (b == null) { return; }
+        RtVal* v = b->value;
+        match (*(v->raw)) {
+            RtValue.Ptr(box) => {
+                if (box->freed) { return; }
+                match (*(box->value->raw)) {
+                    RtValue.Obj(o) => { this.deleteObject(v, box); }
+                    _ => { box->freed = true; }
+                }
+            }
+            RtValue.Obj(o) => { this.callInstanceMethod(v, "dispose", List<RtVal*>()); }
+            _ => { }
+        }
+    }
+
+    void execAssign(Expr* target, string op, Expr* val) {
+        Box* b = this.resolveLvalue(target);
+        RtVal* rhs = mkVoid();
+        if (op == "=") {
+            rhs = this.eval(val);
+        } else {
+            // compound: x op= y  ->  x = x <op> y
+            string binop = substr(op, 0, len(op) - 1);
+            rhs = this.applyBinary(binop, b->value, this.eval(val));
+        }
+        b->value = this.coerce(rhs, b->value->type);
+    }
+
+    // ── lvalues ──────────────────────────────────────────────────────────
+    Box* resolveLvalue(Expr* e) {
+        match (*e) {
+            Expr.IdentifierExpr(n) => {
+                Box* b = this.cur().lookup(n);
+                if (b != null) { return b; }
+                throw new RtError("undefined variable '" + n + "'");
+            }
+            Expr.DerefExpr(o) => { return this.derefBox(this.eval(o)); }
+            Expr.ArrowAccessExpr(p, fld) => {
+                Box* b = this.derefBox(this.eval(p));
+                match (*(b->value->raw)) {
+                    RtValue.Obj(o) => { return this.fieldBox(o, fld); }
+                    _ => { throw new RtError("no field '" + fld + "'"); }
+                }
+            }
+            Expr.FieldAccessExpr(ob, fld) => {
+                match (*ob) {
+                    Expr.IdentifierExpr(bn) => {
+                        if (this.cur().lookup(bn) == null) {
+                            if (this.env->is_union(bn)) {
+                                VariantInst* vi = new VariantInst(bn, fld);
+                                return this.newBox(new RtVal(named(bn), new RtValue.Variant(vi)));
+                            }
+                            if (this.env->is_enum(bn)) {
+                                EnumInfo* ei = this.env->enums.getOr(bn, null);
+                                int val = ei->variants.getOr(fld, 0);
+                                return this.newBox(new RtVal(named(bn), new RtValue.IntV(val)));
+                            }
+                            if (this.env->is_class(bn)) { return this.staticBox(bn, fld); }
+                        }
+                    }
+                    _ => { }
+                }
+                RtVal* obj = this.eval(ob);
+                match (*(obj->raw)) {
+                    RtValue.Ptr(box) => { obj = this.derefBox(obj)->value; }
+                    _ => { }
+                }
+                match (*(obj->raw)) {
+                    RtValue.Obj(o) => { return this.fieldBox(o, fld); }
+                    RtValue.Variant(vi) => { return this.fieldBox2(vi, fld); }
+                    _ => { throw new RtError("no field '" + fld + "'"); }
+                }
+            }
+            Expr.IndexExpr(a, i) => {
+                RtVal* container = this.eval(a);
+                int idx = rawInt(this.eval(i));
+                return this.blockElement(container, idx);
+            }
+            _ => { throw new RtError("invalid assignment target"); }
+        }
+    }
+
+    Box* fieldBox2(VariantInst* vi, string name) {
+        if (!(vi->fields.has(name))) { throw new RtError("no field '" + name + "'"); }
+        return vi->fields.getOr(name, null);
+    }
+
+    Box* derefBox(RtVal* v) {
+        match (*(v->raw)) {
+            RtValue.Ptr(box) => {
+                if (box->freed) { throw new RtError("dereference of freed pointer"); }
+                return box;
+            }
+            RtValue.NullV() => { throw new RtError("null pointer dereference"); }
+            _ => { throw new RtError("dereference of non-pointer"); }
+        }
+    }
+
+    // ── expressions ────────────────────────────────────────────────────────
+    RtVal* eval(Expr* e) {
+        match (*e) {
+            Expr.LiteralExpr(k, v) => { return this.evalLiteral(k, v); }
+            Expr.NullExpr() => { return mkNull(); }
+            Expr.IdentifierExpr(n) => {
+                Box* b = this.cur().lookup(n);
+                if (b != null) { return b->value; }
+                if (this.env->functions.has(n)) { return this.makeFunctionValue(n); }
+                throw new RtError("undefined variable '" + n + "'");
+            }
+            Expr.ThisExpr() => {
+                RtVal* t = this.cur().thisVal;
+                if (t == null) { throw new RtError("'this' outside method"); }
+                return t;
+            }
+            Expr.BinaryExpr(l, op, r) => { return this.evalBinary(l, op, r); }
+            Expr.UnaryExpr(op, o) => { return this.evalUnary(op, o); }
+            Expr.CastExpr(ty, x) => { return this.evalCast(ty, x); }
+            Expr.AddressOfExpr(o) => {
+                Box* b = this.resolveLvalue(o);
+                return new RtVal(new TypeNode.PointerType(b->value->type), new RtValue.Ptr(b));
+            }
+            Expr.DerefExpr(o) => { return this.derefBox(this.eval(o))->value; }
+            Expr.CallExpr(nm, args, ta) => { return this.evalCall(nm, args); }
+            Expr.NewExpr(cn, args, ta) => { return this.evalNew(cn, args); }
+            Expr.MethodCallExpr(ob, m, args, arrow) => { return this.evalMethodCall(ob, m, args, arrow); }
+            Expr.DeleteExpr(o) => { return this.evalDelete(o); }
+            Expr.FreeExpr(o) => {
+                RtVal* fv = this.eval(o);
+                match (*(fv->raw)) {
+                    RtValue.Ptr(box) => {
+                        if (!(box->onHeap)) { throw new RtError("free of a non-heap pointer"); }
+                        if (box->freed) { throw new RtError("double free"); }
+                        box->freed = true;
+                    }
+                    _ => { }
+                }
+                return mkVoid();
+            }
+            Expr.AllocExpr(t, cnt) => {
+                if (cnt != null) {
+                    int an = rawInt(this.eval(cnt));
+                    if (an < 0) { throw new RtError("alloc count must be non-negative"); }
+                    List<Box*> elems = List<Box*>();
+                    for (int i = 0; i < an; ++i) { elems.add(this.newBox(this.zeroValue(t))); }
+                    RtVal* block = new RtVal(new TypeNode.ArrayType(t, an), new RtValue.Arr(elems));
+                    Box* box = this.heapBox(block);
+                    return new RtVal(new TypeNode.PointerType(t), new RtValue.Ptr(box));
+                }
+                Box* box = this.heapBox(this.zeroValue(t));
+                return new RtVal(new TypeNode.PointerType(t), new RtValue.Ptr(box));
+            }
+            Expr.FieldAccessExpr(ob, fld) => {
+                RtVal* mref = this.staticMethodRef(ob, fld);
+                if (mref != null) { return mref; }
+                return this.resolveLvalue(e)->value;
+            }
+            Expr.ArrowAccessExpr(p, fld) => { return this.resolveLvalue(e)->value; }
+            Expr.ClosureExpr(ps, rt, body, caps) => { return this.evalClosure(ps, rt, body); }
+            Expr.IndirectCallExpr(callee, args) => { return this.callCallable(this.eval(callee), this.evalArgs(args)); }
+            Expr.IndexExpr(a, i) => {
+                RtVal* container = this.eval(a);
+                RtVal* idxv = this.eval(i);
+                string cn = this.classValueName(container);
+                if (cn != "" && this.hasInstanceMethod(cn, "operator[]")) {
+                    List<RtVal*> ar = List<RtVal*>(); ar.add(idxv);
+                    return this.callInstanceMethod(container, "operator[]", ar);
+                }
+                int idx = rawInt(idxv);
+                match (*(container->raw)) {
+                    RtValue.StrV(s) => {
+                        if (idx < 0 || idx >= len(s)) { throw new RtError("string index out of bounds"); }
+                        return mkChar(s[idx]);
+                    }
+                    _ => { return this.blockElement(container, idx)->value; }
+                }
+            }
+            _ => { throw new RtError("cannot evaluate expression"); }
+        }
+    }
+
+    RtVal* evalLiteral(string kind, string value) {
+        if (kind == "int")    { return mkInt(parseInt(value)); }
+        if (kind == "float")  { return mkFloat(parseFloat(value)); }
+        if (kind == "bool")   { if (value == "true") { return mkBool(true); } return mkBool(false); }
+        if (kind == "char")   { if (len(value) > 0) { return mkChar(value[0]); } return mkChar(' '); }
+        if (kind == "string") { return mkStr(value); }
+        return mkVoid();
+    }
+
+    RtVal* evalUnary(string op, Expr* o) {
+        if (op == "!") { return mkBool(!(truthy(this.eval(o)))); }
+        if (op == "-" || op == "unary-") {
+            RtVal* v = this.eval(o);
+            if (isName(v, "float")) { return mkFloat(0.0 - rawFloat(v)); }
+            return mkInt(0 - rawInt(v));
+        }
+        if (op == "+" || op == "unary+") { return this.eval(o); }
+        if (op == "~") { return mkInt(~(rawInt(this.eval(o)))); }
+        if (op == "++" || op == "--") {
+            Box* b = this.resolveLvalue(o);
+            int delta = 1;
+            if (op == "--") { delta = -1; }
+            RtVal* nv = mkInt(rawInt(b->value) + delta);
+            b->value = this.coerce(nv, b->value->type);
+            return b->value;
+        }
+        throw new RtError("unknown unary operator '" + op + "'");
+    }
+
+    RtVal* evalCast(TypeNode* ty, Expr* x) {
+        RtVal* v = this.eval(x);
+        string t = showType(ty);
+        if (t == "int")    { if (isName(v, "float")) { return mkInt((int)(rawFloat(v))); } if (isName(v, "char")) { return mkInt((int)(rawChar(v))); } return mkInt(rawInt(v)); }
+        if (t == "float")  { if (isName(v, "int") || isName(v, "byte")) { return mkFloat((float)(rawInt(v))); } return mkFloat(rawFloat(v)); }
+        if (t == "byte")   { return mkByte(rawInt(v)); }
+        if (t == "char")   { if (isName(v, "int") || isName(v, "byte")) { return mkChar((char)(rawInt(v))); } return v; }
+        // pointer / object casts: keep the raw, retype
+        return new RtVal(ty, v->raw);
+    }
+
+    RtVal* evalBinary(Expr* le, string op, Expr* re) {
+        if (op == "&&") {
+            if (!(truthy(this.eval(le)))) { return mkBool(false); }
+            return mkBool(truthy(this.eval(re)));
+        }
+        if (op == "||") {
+            if (truthy(this.eval(le))) { return mkBool(true); }
+            return mkBool(truthy(this.eval(re)));
+        }
+        if (op == "??") {
+            RtVal* l = this.eval(le);
+            match (*(l->raw)) { RtValue.NullV() => { return this.eval(re); } _ => { return l; } }
+        }
+        return this.applyBinary(op, this.eval(le), this.eval(re));
+    }
+
+    RtVal* applyBinary(string op, RtVal* left, RtVal* right) {
+        RtVal* over = this.tryBinaryOverload(op, left, right);
+        if (over != null) { return over; }
+        if (op == "==" || op == "!=") {
+            bool eq = this.valuesEqual(left, right);
+            if (op == "!=") { eq = !eq; }
+            return mkBool(eq);
+        }
+        // string + string
+        if (op == "+" && isName(left, "string")) { return mkStr(rawStr(left) + rawStr(right)); }
+
+        bool lInt = isName(left, "int");  bool rInt = isName(right, "int");
+        bool lByte = isName(left, "byte"); bool rByte = isName(right, "byte");
+        bool byteOp = (lByte || rByte) && (lByte || lInt) && (rByte || rInt);
+        bool bothInt = lInt && rInt;
+        bool floaty = isName(left, "float") || isName(right, "float");
+
+        if (op == "<" || op == ">" || op == "<=" || op == ">=") {
+            return mkBool(this.compare(op, left, right, floaty));
+        }
+        if (floaty && (op == "+" || op == "-" || op == "*" || op == "/")) {
+            float a = rawFloat(left); float b = rawFloat(right);
+            if (op == "+") { return mkFloat(a + b); }
+            if (op == "-") { return mkFloat(a - b); }
+            if (op == "*") { return mkFloat(a * b); }
+            return mkFloat(a / b);
+        }
+        int l = rawInt(left); int r = rawInt(right);
+        int res = 0;
+        if (op == "+") { res = l + r; }
+        else if (op == "-") { res = l - r; }
+        else if (op == "*") { res = l * r; }
+        else if (op == "/") { if (r == 0) { throw new RtError("division by zero"); } res = this.cdiv(l, r); }
+        else if (op == "%") { if (r == 0) { throw new RtError("modulo by zero"); } res = l - (this.cdiv(l, r) * r); }
+        else if (op == "&") { res = l & r; }
+        else if (op == "|") { res = l | r; }
+        else if (op == "^") { res = l ^ r; }
+        else if (op == "<<") { res = l << r; }
+        else if (op == ">>") { res = l >> r; }
+        else { throw new RtError("unknown operator '" + op + "'"); }
+        if (byteOp) { return mkByte(res); }
+        return mkInt(res);
+    }
+
+    // C-style division truncating toward zero
+    int cdiv(int a, int b) {
+        int q = a / b;
+        // Glang int division already truncates toward zero (matches C); keep as-is.
+        return q;
+    }
+
+    bool compare(string op, RtVal* left, RtVal* right, bool floaty) {
+        if (floaty) {
+            float a = rawFloat(left); float b = rawFloat(right);
+            if (op == "<") { return a < b; } if (op == ">") { return a > b; }
+            if (op == "<=") { return a <= b; } return a >= b;
+        }
+        if (isName(left, "char")) {
+            int a = (int)(rawChar(left)); int b = (int)(rawChar(right));
+            if (op == "<") { return a < b; } if (op == ">") { return a > b; }
+            if (op == "<=") { return a <= b; } return a >= b;
+        }
+        int a = rawInt(left); int b = rawInt(right);
+        if (op == "<") { return a < b; } if (op == ">") { return a > b; }
+        if (op == "<=") { return a <= b; } return a >= b;
+    }
+
+    bool valuesEqual(RtVal* left, RtVal* right) {
+        match (*(left->raw)) {
+            RtValue.IntV(a)   => { return a == rawInt(right); }
+            RtValue.FloatV(a) => { return a == rawFloat(right); }
+            RtValue.BoolV(a)  => { return a == rawBool(right); }
+            RtValue.CharV(a)  => { return a == rawChar(right); }
+            RtValue.StrV(a)   => { return a == rawStr(right); }
+            RtValue.NullV()   => { match (*(right->raw)) { RtValue.NullV() => { return true; } _ => { return false; } } }
+            RtValue.Ptr(ba)   => { match (*(right->raw)) { RtValue.Ptr(bb) => { return ba == bb; } _ => { return false; } } }
+            _ => { return false; }
+        }
+    }
+
+    // ── calls / builtins ───────────────────────────────────────────────────
+    RtVal* evalCall(string name, List<Expr*> args) {
+        // local fn-pointer variable holding a callable
+        Box* vb = this.cur().lookup(name);
+        if (vb != null) { return this.callCallable(vb->value, this.evalArgs(args)); }
+        // user function
+        FunctionInfo* fi = this.env->functions.getOr(name, null);
+        if (fi != null) { return this.callFunctionDecl(fi->decl, this.evalArgs(args)); }
+        // stack/value constructor call: ClassName(args) -> object value
+        if (this.env->is_class(name)) {
+            RtVal* thisVal = this.instantiate(name);
+            List<RtVal*> av = this.evalArgs(args);
+            this.runConstructor(name, thisVal, av);
+            return this.derefBox(thisVal)->value;
+        }
+        return this.callBuiltin(name, args);
+    }
+
+    // Call a fn-pointer / closure / function / static-method value.
+    RtVal* callCallable(RtVal* fnVal, List<RtVal*> args) {
+        match (*(fnVal->raw)) {
+            RtValue.NullV() => { throw new RtError("null function pointer call"); }
+            RtValue.Fn(c) => {
+                Frame* f = new Frame(c->thisVal, c->definingClass);
+                int ck = c->captures.size;
+                for (int i = 0; i < ck; ++i) {
+                    string k = c->captures.keys[i];
+                    f.define(k, c->captures.getOr(k, null));
+                }
+                this.bindParams(f, c->params, args);
+                return this.runBody(f, c->body, c->returnType);
+            }
+            _ => { throw new RtError("call of a non-function value"); }
+        }
+    }
+
+    TypeNode* fnTypeOf(List<Param*> params, TypeNode* ret) {
+        List<TypeNode*> pts = List<TypeNode*>();
+        int n = params.length();
+        for (int i = 0; i < n; ++i) { pts.add(params.get(i)->type); }
+        return new TypeNode.FunctionPointerType(pts, ret);
+    }
+
+    RtVal* makeFunctionValue(string name) {
+        FunctionInfo* fi = this.env->functions.getOr(name, null);
+        match (*(fi->decl)) {
+            Decl.FunctionDecl(nm, params, ret, body, tps, bounds) => {
+                Callable* c = new Callable();
+                c->params = params; c->returnType = ret; c->body = body;
+                return new RtVal(this.fnTypeOf(params, ret), new RtValue.Fn(c));
+            }
+            _ => { throw new RtError("not a function"); }
+        }
+    }
+
+    RtVal* makeStaticMethodValue(string cls, MethodDecl* m) {
+        Callable* c = new Callable();
+        c->params = m->params; c->returnType = m->returnType; c->body = m->body;
+        c->definingClass = cls;
+        return new RtVal(this.fnTypeOf(m->params, m->returnType), new RtValue.Fn(c));
+    }
+
+    RtVal* evalClosure(List<Param*> params, TypeNode* ret, Stmt* body) {
+        List<string> used = List<string>();
+        List<string> declared = List<string>();
+        int pn = params.length();
+        for (int i = 0; i < pn; ++i) { declared.add(params.get(i)->name); }
+        collectStmtIdents(body, used, declared);
+        Callable* c = new Callable();
+        c->isClosure = true; c->params = params; c->returnType = ret; c->body = body;
+        c->thisVal = this.cur().thisVal; c->definingClass = this.cur().currentClass;
+        int un = used.length();
+        for (int i = 0; i < un; ++i) {
+            string u = used.get(i);
+            if (!(sListHas(declared, u)) && !(c->captures.has(u))) {
+                Box* ob = this.cur().lookup(u);
+                if (ob != null) {
+                    // snapshot by value (own box, shared across calls to this closure)
+                    c->captures.set(u, this.newBox(new RtVal(ob->value->type, ob->value->raw)));
+                }
+            }
+        }
+        return new RtVal(this.fnTypeOf(params, ret), new RtValue.Fn(c));
+    }
+
+    // ClassName.method used as a value (static-method reference)?
+    RtVal* staticMethodRef(Expr* obj, string fld) {
+        match (*obj) {
+            Expr.IdentifierExpr(bn) => {
+                if (this.env->is_class(bn) && this.cur().lookup(bn) == null) {
+                    ClassInfo* info = this.env->classes.getOr(bn, null);
+                    if (info != null && !(info->static_fields.has(fld)) && info->static_methods.has(fld)) {
+                        return this.makeStaticMethodValue(bn, info->static_methods.getOr(fld, null));
+                    }
+                }
+            }
+            _ => { }
+        }
+        return null;
+    }
+
+    RtVal* callBuiltin(string name, List<Expr*> args) {
+        if (name == "print" || name == "printErr") {
+            string s = "";
+            if (args.length() > 0) { s = this.display(this.eval(args.get(0))); }
+            if (name == "print") { this.output.add(s); } else { this.errOutput.add(s); }
+            return mkVoid();
+        }
+        if (name == "len") {
+            RtVal* a = this.eval(args.get(0));
+            match (*(a->raw)) {
+                RtValue.StrV(s) => { return mkInt(len(s)); }
+                RtValue.Arr(es) => { return mkInt(es.length()); }
+                RtValue.Ptr(box) => {
+                    match (*(box->value->raw)) { RtValue.Arr(es) => { return mkInt(es.length()); } _ => { return mkInt(0); } }
+                }
+                _ => { return mkInt(0); }
+            }
+        }
+        if (name == "substr") {
+            string s = rawStr(this.eval(args.get(0)));
+            int a = rawInt(this.eval(args.get(1)));
+            int b = rawInt(this.eval(args.get(2)));
+            if (a < 0 || b < a || b > len(s)) { throw new RtError("substring range out of bounds"); }
+            return mkStr(substr(s, a, b));
+        }
+        if (name == "toString") { return mkStr(this.display(this.eval(args.get(0)))); }
+        if (name == "intToStr") { return mkStr(toString(rawInt(this.eval(args.get(0))))); }
+        if (name == "parseInt") { return mkInt(parseIntStr(rawStr(this.eval(args.get(0))))); }
+        if (name == "parseFloat") { return mkFloat(parseFloatStr(rawStr(this.eval(args.get(0))))); }
+        if (name == "startsWith") { return mkBool(startsW(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1))))); }
+        if (name == "endsWith")   { return mkBool(endsW(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1))))); }
+        if (name == "contains")   { return mkBool(subIndex(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1)))) >= 0); }
+        if (name == "indexOf")    { return mkInt(subIndex(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1))))); }
+        if (name == "readFile")   { return mkStr(readFile(rawStr(this.eval(args.get(0))))); }
+        if (name == "writeFile")  { writeFile(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1)))); return mkVoid(); }
+        if (name == "fileExists") { return mkBool(fileExists(rawStr(this.eval(args.get(0))))); }
+        if (name == "readStdin")  { return mkStr(readStdin()); }
+        if (name == "getArgCount") { return mkInt(0); }
+        if (name == "getArg")      { throw new RtError("getArg index out of range"); }
+        if (name == "bytesFromString") {
+            string s = rawStr(this.eval(args.get(0)));
+            List<Box*> elems = List<Box*>();
+            int n = len(s);
+            for (int i = 0; i < n; ++i) { elems.add(this.newBox(mkByte((int)(s[i])))); }
+            RtVal* block = new RtVal(new TypeNode.ArrayType(named("byte"), n), new RtValue.Arr(elems));
+            Box* box = this.heapBox(block);
+            return new RtVal(new TypeNode.PointerType(named("byte")), new RtValue.Ptr(box));
+        }
+        if (name == "stringFromBytes") {
+            RtVal* data = this.eval(args.get(0));
+            int n = rawInt(this.eval(args.get(1)));
+            if (n < 0) { throw new RtError("stringFromBytes length must be non-negative"); }
+            List<Box*> elems = this.arrElems(data);
+            if (n > elems.length()) { throw new RtError("stringFromBytes length out of bounds"); }
+            StringBuilder sb = StringBuilder();
+            for (int i = 0; i < n; ++i) { sb.appendChar((char)(rawInt(elems.get(i)->value) & 255)); }
+            return mkStr(sb.build());
+        }
+        if (name == "exit") {
+            int code = 0;
+            if (args.length() > 0) { code = rawInt(this.eval(args.get(0))); }
+            throw new ExitSig(code);
+        }
+        throw new RtError("unknown function '" + name + "'");
+    }
+
+    // display a value the way print/toString does
+    string display(RtVal* v) {
+        match (*(v->raw)) {
+            RtValue.IntV(n)   => { return toString(n); }
+            RtValue.FloatV(f) => { return toString(f); }
+            RtValue.BoolV(b)  => { if (b) { return "true"; } return "false"; }
+            RtValue.CharV(c)  => { StringBuilder sb = StringBuilder(); sb.appendChar(c); return sb.build(); }
+            RtValue.StrV(s)   => { return s; }
+            RtValue.NullV()   => { return "null"; }
+            _ => { return ""; }
+        }
+    }
+
+    // ── objects / classes ─────────────────────────────────────────────────
+    string typeName(RtVal* v) {
+        match (*(v->type)) { TypeNode.NamedType(nm) => { return nm; } _ => { return ""; } }
+    }
+    string classValueName(RtVal* v) {
+        string n = this.typeName(v);
+        if (n != "" && this.env->is_class(n)) { return n; }
+        return "";
+    }
+    bool sameNamedClass(RtVal* l, RtVal* r) {
+        string a = this.classValueName(l);
+        return a != "" && a == this.classValueName(r);
+    }
+    bool hasInstanceMethod(string cls, string method) {
+        ClassInfo* ci = this.env->classes.getOr(cls, null);
+        if (ci == null) { return false; }
+        return ci->instance_methods.has(method);
+    }
+
+    List<RtVal*> evalArgs(List<Expr*> args) {
+        List<RtVal*> av = List<RtVal*>();
+        int n = args.length();
+        for (int i = 0; i < n; ++i) { av.add(this.eval(args.get(i))); }
+        return av;
+    }
+
+    RtVal* zeroValue(TypeNode* t) {
+        match (*t) {
+            TypeNode.NullableType(b) => { return new RtVal(t, new RtValue.NullV()); }
+            TypeNode.FunctionPointerType(ps, r) => { return new RtVal(t, new RtValue.NullV()); }
+            TypeNode.PointerType(b) => { return new RtVal(t, new RtValue.NullV()); }
+            TypeNode.ArrayType(b, sz) => {
+                List<Box*> elems = List<Box*>();
+                for (int i = 0; i < sz; ++i) { elems.add(this.newBox(this.zeroValue(b))); }
+                return new RtVal(t, new RtValue.Arr(elems));
+            }
+            TypeNode.NamedType(nm) => {
+                if (nm == "int")    { return mkInt(0); }
+                if (nm == "float")  { return mkFloat(0.0); }
+                if (nm == "bool")   { return mkBool(false); }
+                if (nm == "char")   { return mkChar((char)0); }
+                if (nm == "byte")   { return mkByte(0); }
+                if (nm == "string") { return mkStr(""); }
+                if (this.env->is_enum(nm)) { return new RtVal(t, new RtValue.IntV(0)); }
+                return new RtVal(t, new RtValue.NullV());   // class-bare / union: null reference
+            }
+            _ => { return mkNull(); }
+        }
+    }
+
+    RtVal* instantiate(string className) {
+        ObjInstance* inst = new ObjInstance(className);
+        List<string> chain = superclass_chain(className, this.env);
+        int n = chain.length();
+        for (int ci = n - 1; ci >= 0; ci = ci - 1) {
+            ClassInfo* info = this.env->classes.getOr(chain.get(ci), null);
+            if (info != null) {
+                int fcount = info->fields.size;
+                for (int j = 0; j < fcount; ++j) {
+                    string fname = info->fields.keys[j];
+                    FieldDecl* fd = info->fields.getOr(fname, null);
+                    inst->fields.set(fname, this.newBox(this.zeroValue(fd->fieldType)));
+                }
+            }
+        }
+        RtVal* objVal = new RtVal(named(className), new RtValue.Obj(inst));
+        Box* box = this.heapBox(objVal);
+        return new RtVal(new TypeNode.PointerType(named(className)), new RtValue.Ptr(box));
+    }
+
+    void runConstructor(string className, RtVal* thisVal, List<RtVal*> args) {
+        ClassInfo* info = this.env->classes.getOr(className, null);
+        ConstructorDecl* ctor = info->constructor;
+        Frame* f = new Frame(thisVal, className);
+        if (ctor != null) { this.bindParams(f, ctor->params, args); }
+        this.frames.add(f);
+        if (ctor != null && ctor->hasSuper) {
+            List<RtVal*> superArgs = List<RtVal*>();
+            int sn = ctor->superArgs.length();
+            for (int i = 0; i < sn; ++i) { superArgs.add(this.eval(ctor->superArgs.get(i))); }
+            this.runConstructor(info->superclass, thisVal, superArgs);
+        } else if (info->superclass != "") {
+            this.runConstructor(info->superclass, thisVal, List<RtVal*>());
+        }
+        if (ctor != null) {
+            try { this.execBody(ctor->body); } catch (ReturnSig* r) { }
+        }
+        this.frames.removeAt(this.frames.length() - 1);
+    }
+
+    void execBody(Stmt* body) {
+        match (*body) {
+            Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); } }
+            _ => { this.execStmt(body); }
+        }
+    }
+
+    MethodHit* resolveVirtual(string className, string method) {
+        List<string> chain = superclass_chain(className, this.env);
+        int n = chain.length();
+        for (int i = 0; i < n; ++i) {
+            ClassInfo* info = this.env->classes.getOr(chain.get(i), null);
+            if (info != null && info->instance_methods.has(method)) {
+                return new MethodHit(info->instance_methods.getOr(method, null), chain.get(i));
+            }
+        }
+        Map<string, MethodDecl*>* mod = this.env->modifier_methods.getOr(className, null);
+        if (mod != null && mod->has(method)) { return new MethodHit(mod->getOr(method, null), className); }
+        throw new RtError("'" + className + "' has no method '" + method + "'");
+    }
+
+    RtVal* callMethod(MethodDecl* m, string definingClass, RtVal* thisVal, List<RtVal*> args) {
+        Frame* f = new Frame(thisVal, definingClass);
+        this.bindParams(f, m->params, args);
+        return this.runBody(f, m->body, m->returnType);
+    }
+
+    Receiver* receiver(RtVal* v) {
+        match (*(v->raw)) {
+            RtValue.Ptr(box) => {
+                if (box->freed) { throw new RtError("dereference of freed pointer"); }
+                match (*(box->value->raw)) {
+                    RtValue.Obj(o) => { return new Receiver(o, v); }
+                    _ => { throw new RtError("receiver is not an object"); }
+                }
+            }
+            RtValue.Obj(o) => {
+                Box* box = this.newBox(v);
+                RtVal* tv = new RtVal(new TypeNode.PointerType(named(o->className)), new RtValue.Ptr(box));
+                return new Receiver(o, tv);
+            }
+            RtValue.NullV() => { throw new RtError("null pointer dereference"); }
+            _ => { throw new RtError("receiver is not an object"); }
+        }
+    }
+
+    RtVal* callInstanceMethod(RtVal* recv, string method, List<RtVal*> args) {
+        Receiver* r = this.receiver(recv);
+        MethodHit* hit = this.resolveVirtual(r->obj->className, method);
+        return this.callMethod(hit->method, hit->defining, r->thisVal, args);
+    }
+
+    RtVal* makeVariant(string un, string vn, List<Expr*> args, bool onHeap) {
+        UnionInfo* ui = this.env->unions.getOr(un, null);
+        UnionVariantInfo* vi = ui->variants.getOr(vn, null);
+        VariantInst* inst = new VariantInst(un, vn);
+        int an = args.length();
+        int fn2 = vi->fields.length();
+        for (int i = 0; i < an && i < fn2; ++i) {
+            FieldDecl* fd = vi->fields.get(i);
+            inst->fieldNames.add(fd->name);
+            inst->fields.set(fd->name, this.newBox(this.coerce(this.eval(args.get(i)), fd->fieldType)));
+        }
+        RtVal* val = new RtVal(named(un), new RtValue.Variant(inst));
+        if (onHeap) {
+            Box* box = this.heapBox(val);
+            return new RtVal(new TypeNode.PointerType(named(un)), new RtValue.Ptr(box));
+        }
+        return val;
+    }
+
+    RtVal* evalNew(string cls, List<Expr*> args) {
+        int dot = strings::indexOf(cls, '.');
+        if (dot >= 0) {
+            return this.makeVariant(substr(cls, 0, dot), substr(cls, dot + 1, len(cls)), args, true);
+        }
+        RtVal* thisVal = this.instantiate(cls);
+        List<RtVal*> av = this.evalArgs(args);
+        this.runConstructor(cls, thisVal, av);
+        return thisVal;
+    }
+
+    RtVal* evalMethodCall(Expr* obj, string method, List<Expr*> args, bool isArrow) {
+        match (*obj) {
+            Expr.IdentifierExpr(bn) => {
+                if (!isArrow && this.cur().lookup(bn) == null) {
+                    if (this.env->is_union(bn)) { return this.makeVariant(bn, method, args, false); }
+                    if (this.env->is_class(bn)) {
+                        ClassInfo* info = this.env->classes.getOr(bn, null);
+                        MethodDecl* sm = info->static_methods.getOr(method, null);
+                        if (sm != null) { return this.callMethod(sm, bn, null, this.evalArgs(args)); }
+                    }
+                }
+            }
+            _ => { }
+        }
+        List<RtVal*> av = this.evalArgs(args);
+        match (*obj) {
+            Expr.SuperExpr() => {
+                ClassInfo* info = this.env->classes.getOr(this.cur().currentClass, null);
+                MethodHit* hit = this.resolveVirtual(info->superclass, method);
+                return this.callMethod(hit->method, hit->defining, this.cur().thisVal, av);
+            }
+            _ => { }
+        }
+        RtVal* recv = this.eval(obj);
+        match (*(recv->raw)) {
+            RtValue.Obj(o) => { }
+            RtValue.Ptr(b) => { }
+            _ => {
+                string tn = this.typeName(recv);
+                Map<string, MethodDecl*>* mod = this.env->modifier_methods.getOr(tn, null);
+                if (mod != null && mod->has(method)) { return this.callMethod(mod->getOr(method, null), tn, recv, av); }
+            }
+        }
+        Receiver* r = this.receiver(recv);
+        MethodHit* hit = this.resolveVirtual(r->obj->className, method);
+        return this.callMethod(hit->method, hit->defining, r->thisVal, av);
+    }
+
+    RtVal* evalDelete(Expr* o) {
+        RtVal* v = this.eval(o);
+        match (*(v->raw)) {
+            RtValue.Ptr(box) => {
+                if (box->freed) { throw new RtError("delete of a freed pointer"); }
+                this.deleteObject(v, box);
+            }
+            _ => { }
+        }
+        return mkVoid();
+    }
+
+    void deleteObject(RtVal* v, Box* box) {
+        match (*(box->value->raw)) {
+            RtValue.Obj(o) => {
+                List<string> chain = superclass_chain(o->className, this.env);
+                int n = chain.length();
+                for (int i = 0; i < n; ++i) {
+                    ClassInfo* info = this.env->classes.getOr(chain.get(i), null);
+                    if (info != null && info->destructor != null) {
+                        Frame* f = new Frame(v, chain.get(i));
+                        this.frames.add(f);
+                        try { this.execBody(info->destructor->body); } catch (ReturnSig* r) { }
+                        this.frames.removeAt(this.frames.length() - 1);
+                    }
+                }
+            }
+            _ => { }
+        }
+        box->freed = true;
+    }
+
+    Box* fieldBox(ObjInstance* o, string name) {
+        if (!(o->fields.has(name))) { throw new RtError("no field '" + name + "'"); }
+        return o->fields.getOr(name, null);
+    }
+    Box* staticBox(string cls, string name) {
+        List<string> chain = superclass_chain(cls, this.env);
+        int n = chain.length();
+        for (int i = 0; i < n; ++i) {
+            string key = chain.get(i) + "::" + name;
+            if (this.statics.has(key)) { return this.statics.getOr(key, null); }
+        }
+        throw new RtError("'" + cls + "' has no static field '" + name + "'");
+    }
+    List<Box*> arrElems(RtVal* container) {
+        match (*(container->raw)) {
+            RtValue.Arr(es) => { return es; }
+            RtValue.Ptr(box) => {
+                if (box->freed) { throw new RtError("use after free"); }
+                match (*(box->value->raw)) {
+                    RtValue.Arr(es) => { return es; }
+                    _ => { throw new RtError("cannot index a non-array value"); }
+                }
+            }
+            _ => { throw new RtError("cannot index a non-array value"); }
+        }
+    }
+    Box* blockElement(RtVal* container, int idx) {
+        List<Box*> elems = this.arrElems(container);
+        if (idx < 0 || idx >= elems.length()) { throw new RtError("array index out of bounds"); }
+        return elems.get(idx);
+    }
+
+    bool isOverloadable(string op) {
+        return op == "+" || op == "-" || op == "*" || op == "/" || op == "%"
+            || op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=";
+    }
+    RtVal* tryBinaryOverload(string op, RtVal* left, RtVal* right) {
+        if (!(this.isOverloadable(op))) { return null; }
+        string cn = this.classValueName(left);
+        if (cn == "" || !(this.sameNamedClass(left, right))) { return null; }
+        string mname = "operator" + op;
+        bool invert = false;
+        if (!(this.hasInstanceMethod(cn, mname))) {
+            if (op == "!=" && this.hasInstanceMethod(cn, "operator==")) { mname = "operator=="; invert = true; }
+            else { return null; }
+        }
+        List<RtVal*> ar = List<RtVal*>(); ar.add(right);
+        RtVal* res = this.callInstanceMethod(left, mname, ar);
+        if (invert) { return mkBool(!(rawBool(res))); }
+        return res;
+    }
+
+    // coercion on store / param-bind / return
+    RtVal* coerce(RtVal* v, TypeNode* targetType) {
+        string t = showType(targetType);
+        if (isName(v, "null")) {
+            match (*targetType) {
+                TypeNode.PointerType(b) => { return new RtVal(targetType, new RtValue.NullV()); }
+                TypeNode.NullableType(b) => { return new RtVal(targetType, new RtValue.NullV()); }
+                TypeNode.FunctionPointerType(p, r) => { return new RtVal(targetType, new RtValue.NullV()); }
+                _ => { }
+            }
+        }
+        if (t == "byte") { return mkByte(rawInt(v)); }
+        if (t == "float" && (isName(v, "int") || isName(v, "byte"))) { return mkFloat((float)(rawInt(v))); }
+        return v;
+    }
+}

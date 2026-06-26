@@ -1,0 +1,119 @@
+// Toolchain/compiler/interp_dump.lang — differential-test driver for interp.lang.
+//
+// Reads a Glang program from stdin, runs the full front-end pipeline (exactly like
+// analyse_dump.lang), then interprets main() with interp.lang and frames the result
+// so tests/glang_interp_backend.py can reconstruct (exit_code, output_lines) and
+// runtime errors:
+//
+//   OUT\t<percent-encoded print line>      (zero or more, in order)
+//   ERR\t<percent-encoded printErr line>    (zero or more)
+//   EXIT\t<int>                             (normal exit)
+//   RTERR\t<percent-encoded message>        (runtime error — maps to GlangRuntimeError)
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "token.lang";
+import "glexer.lang";
+import "token_stream.lang";
+import "ast.lang";
+import "type_parser.lang";
+import "expr_parser.lang";
+import "stmt_parser.lang";
+import "decl_parser.lang";
+import "symtab.lang";
+import "tu_core.lang";
+import "tu_env.lang";
+import "pass2_support.lang";
+import "retcheck.lang";
+import "namespace.lang";
+import "mono.lang";
+import "pass1.lang";
+import "pass2.lang";
+import "interp.lang";
+
+Decl* make_exception_decl() {
+    List<FieldDecl*> fields = List<FieldDecl*>();
+    fields.add(new FieldDecl("message", new TypeNode.NamedType("string"), false, "public"));
+    List<StaticFieldDecl*> sfields = List<StaticFieldDecl*>();
+    List<MethodDecl*> methods = List<MethodDecl*>();
+    Expr* target = new Expr.FieldAccessExpr(new Expr.ThisExpr(), "message");
+    Stmt* assign = new Stmt.AssignStmt(target, "=", new Expr.IdentifierExpr("msg"));
+    List<Stmt*> ctorStmts = List<Stmt*>();
+    ctorStmts.add(assign);
+    List<Param*> ctorParams = List<Param*>();
+    ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));
+    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, new Stmt.Block(ctorStmts), false, List<Expr*>());
+    List<string> ifaces = List<string>();
+    List<string> typeParams = List<string>();
+    Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+    return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
+                              ctor, null, "public", typeParams, bounds);
+}
+
+string enc(string s) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        if (c == '%') { sb.append("%25"); }
+        else if (c == '\t') { sb.append("%09"); }
+        else if (c == '\n') { sb.append("%0A"); }
+        else if (c == '\r') { sb.append("%0D"); }
+        else { sb.appendChar(c); }
+    }
+    return sb.build();
+}
+
+void emitOutputs(Interp ip) {
+    int on = ip.output.length();
+    for (int i = 0; i < on; ++i) { print("OUT\t" + enc(ip.output.get(i))); }
+    int en = ip.errOutput.length();
+    for (int i = 0; i < en; ++i) { print("ERR\t" + enc(ip.errOutput.get(i))); }
+}
+
+int main() {
+    string source = readStdin();
+    GLexer lex = GLexer(source);
+    try {
+        List<Token*> tokens = lex.tokenize();
+        Parser* p = new Parser(tokens);
+        Program* prog = p->parse();
+
+        List<Decl*> decls = prog->declarations;
+        List<Decl*> withExc = List<Decl*>();
+        withExc.add(make_exception_decl());
+        int dn = decls.length();
+        for (int i = 0; i < dn; ++i) { withExc.add(decls.get(i)); }
+        Program* prog2 = new Program(prog->imports, withExc);
+
+        Program* resolved = namespace_resolve(prog2);
+        Program* mono = monomorphize(resolved);
+        GlobalEnv* env = new GlobalEnv();
+        pass1_collect(env, mono);
+        Pass2Checker checker = Pass2Checker(env);
+        checker.check_program(mono);
+
+        Interp ip = Interp(env);
+        try {
+            int code = ip.run(mono);
+            emitOutputs(ip);
+            print("EXIT\t" + toString(code));
+        } catch (RtError* re) {
+            emitOutputs(ip);
+            print("RTERR\t" + enc(re->message));
+            return 1;
+        }
+    } catch (AnalyzeError* ae) {
+        print("TYPEERROR\t" + enc(ae->message));
+        return 1;
+    } catch (ParseError* pe) {
+        print("PARSEERROR\t" + enc(pe->message));
+        return 1;
+    } catch (LexError* le) {
+        print("LEXERROR\t" + enc(le->message));
+        return 1;
+    }
+    return 0;
+}
