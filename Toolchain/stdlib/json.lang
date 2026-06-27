@@ -1,0 +1,486 @@
+// std/json.lang — a JSON parser and serializer for Glang.
+//
+// JSON values are modelled as a heap-allocated ADT (`Json*`), built and
+// consumed via `match`.  Two numeric variants are kept distinct — JsonInt and
+// JsonFloat — so that integers (JSON-RPC ids, LSP line/character positions)
+// round-trip as `42` rather than `42.0`.
+//
+//   Json* v = jsonParse("{\"line\":3,\"ok\":true}");
+//   int line = jsonAsInt(jsonGet(v, "line"));        // 3
+//   string s = jsonStringify(v);                     // compact, re-emittable
+//
+// Build values fluently (jsonSet / jsonPush return their container):
+//
+//   Json* o = jsonSet(jsonSet(jsonObject(),
+//                 "jsonrpc", jsonStr("2.0")),
+//                 "id",      jsonInt(1));
+//
+// Strings are decoded/encoded as UTF-8: \uXXXX escapes (including surrogate
+// pairs) are expanded to UTF-8 bytes on parse, and control bytes are escaped on
+// serialize.  Bytes >= 0x80 are passed through verbatim, so raw UTF-8 input is
+// preserved without needing escapes.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The JSON value type
+// ═══════════════════════════════════════════════════════════════════════════
+
+union Json {
+    JsonNull  { }
+    JsonBool  { bool value; }
+    JsonInt   { int value; }
+    JsonFloat { float value; }
+    JsonStr   { string value; }
+    JsonArr   { List<Json*> items; }
+    JsonObj   { List<string> keys; List<Json*> vals; }
+}
+
+// ─── Constructors ───────────────────────────────────────────────────────────
+
+Json* jsonNull() { return new Json.JsonNull(); }
+Json* jsonBool(bool b) { return new Json.JsonBool(b); }
+Json* jsonInt(int i) { return new Json.JsonInt(i); }
+Json* jsonFloat(float f) { return new Json.JsonFloat(f); }
+Json* jsonStr(string s) { return new Json.JsonStr(s); }
+Json* jsonArray() { return new Json.JsonArr(List<Json*>()); }
+Json* jsonObject() { return new Json.JsonObj(List<string>(), List<Json*>()); }
+
+// Append a member to an object; returns the object (chainable). Duplicate keys
+// are appended, not replaced — last one wins on lookup.
+Json* jsonSet(Json* o, string key, Json* v) {
+    match (*o) {
+        Json.JsonObj(keys, vals) => { keys.add(key); vals.add(v); }
+        _ => { throw new Exception("jsonSet: not an object"); }
+    }
+    return o;
+}
+
+// Append an element to an array; returns the array (chainable).
+Json* jsonPush(Json* a, Json* v) {
+    match (*a) {
+        Json.JsonArr(items) => { items.add(v); }
+        _ => { throw new Exception("jsonPush: not an array"); }
+    }
+    return a;
+}
+
+// ─── Type tests ──────────────────────────────────────────────────────────────
+
+bool jsonIsNull(Json* j) {
+    match (*j) {
+        Json.JsonNull() => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool jsonIsObject(Json* j) {
+    match (*j) {
+        Json.JsonObj(keys, vals) => { return true; }
+        _ => { return false; }
+    }
+}
+
+bool jsonIsArray(Json* j) {
+    match (*j) {
+        Json.JsonArr(items) => { return true; }
+        _ => { return false; }
+    }
+}
+
+// ─── Scalar accessors (throw on type mismatch) ───────────────────────────────
+
+bool jsonAsBool(Json* j) {
+    match (*j) {
+        Json.JsonBool(b) => { return b; }
+        _ => { throw new Exception("json: value is not a bool"); }
+    }
+}
+
+// Integers read as-is; floats are truncated toward zero.
+int jsonAsInt(Json* j) {
+    match (*j) {
+        Json.JsonInt(i) => { return i; }
+        Json.JsonFloat(f) => { return (int) f; }
+        _ => { throw new Exception("json: value is not a number"); }
+    }
+}
+
+float jsonAsFloat(Json* j) {
+    match (*j) {
+        Json.JsonFloat(f) => { return f; }
+        Json.JsonInt(i) => { return (float) i; }
+        _ => { throw new Exception("json: value is not a number"); }
+    }
+}
+
+string jsonAsStr(Json* j) {
+    match (*j) {
+        Json.JsonStr(s) => { return s; }
+        _ => { throw new Exception("json: value is not a string"); }
+    }
+}
+
+// ─── Array accessors ─────────────────────────────────────────────────────────
+
+List<Json*> jsonItems(Json* j) {
+    match (*j) {
+        Json.JsonArr(items) => { return items; }
+        _ => { throw new Exception("json: value is not an array"); }
+    }
+}
+
+int jsonLen(Json* j) { return jsonItems(j).length(); }
+
+Json* jsonAt(Json* j, int index) { return jsonItems(j).get(index); }
+
+// ─── Object accessors ────────────────────────────────────────────────────────
+
+bool jsonHas(Json* o, string key) {
+    match (*o) {
+        Json.JsonObj(keys, vals) => {
+            int n = keys.length();
+            for (int i = 0; i < n; ++i) {
+                if (keys.get(i) == key) { return true; }
+            }
+            return false;
+        }
+        _ => { throw new Exception("json: value is not an object"); }
+    }
+}
+
+// The value for `key`, or throw if absent. On duplicate keys, the last wins.
+Json* jsonGet(Json* o, string key) {
+    match (*o) {
+        Json.JsonObj(keys, vals) => {
+            int n = keys.length();
+            int found = -1;
+            for (int i = 0; i < n; ++i) {
+                if (keys.get(i) == key) { found = i; }
+            }
+            if (found < 0) { throw new Exception("json: key not found: " + key); }
+            return vals.get(found);
+        }
+        _ => { throw new Exception("json: value is not an object"); }
+    }
+}
+
+// The value for `key`, or `fallback` if absent.
+Json* jsonGetOr(Json* o, string key, Json* fallback) {
+    if (jsonHas(o, key)) { return jsonGet(o, key); }
+    return fallback;
+}
+
+// The object's keys, in insertion order.
+List<string> jsonKeys(Json* o) {
+    match (*o) {
+        Json.JsonObj(keys, vals) => { return keys; }
+        _ => { throw new Exception("json: value is not an object"); }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Serialize
+// ═══════════════════════════════════════════════════════════════════════════
+
+string jsonStringify(Json* j) {
+    StringBuilder sb = StringBuilder();
+    jsonWrite(sb, j);
+    return sb.build();
+}
+
+void jsonWrite(StringBuilder sb, Json* j) {
+    match (*j) {
+        Json.JsonNull() => { sb.append("null"); }
+        Json.JsonBool(b) => {
+            if (b) { sb.append("true"); } else { sb.append("false"); }
+        }
+        Json.JsonInt(i) => { sb.append(toString(i)); }
+        Json.JsonFloat(f) => { sb.append(toString(f)); }
+        Json.JsonStr(s) => { jsonWriteString(sb, s); }
+        Json.JsonArr(items) => {
+            sb.appendChar('[');
+            int n = items.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(','); }
+                jsonWrite(sb, items.get(i));
+            }
+            sb.appendChar(']');
+        }
+        Json.JsonObj(keys, vals) => {
+            sb.appendChar('{');
+            int n = keys.length();
+            for (int i = 0; i < n; ++i) {
+                if (i > 0) { sb.appendChar(','); }
+                jsonWriteString(sb, keys.get(i));
+                sb.appendChar(':');
+                jsonWrite(sb, vals.get(i));
+            }
+            sb.appendChar('}');
+        }
+    }
+}
+
+// Write `s` as a quoted, escaped JSON string. Control bytes (< 0x20) use the
+// short escapes where defined and \uXXXX otherwise; bytes >= 0x80 (UTF-8
+// continuation/lead bytes) are emitted verbatim.
+void jsonWriteString(StringBuilder sb, string s) {
+    sb.appendChar('"');
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        int code = (int) c;
+        if (code < 0) { code = code + 256; }
+        if (c == '"') { sb.append("\\\""); }
+        else if (c == '\\') { sb.append("\\\\"); }
+        else if (code == 8) { sb.append("\\b"); }
+        else if (code == 9) { sb.append("\\t"); }
+        else if (code == 10) { sb.append("\\n"); }
+        else if (code == 12) { sb.append("\\f"); }
+        else if (code == 13) { sb.append("\\r"); }
+        else if (code < 32) { sb.append("\\u"); sb.append(jsonHex4(code)); }
+        else { sb.appendChar(c); }
+    }
+    sb.appendChar('"');
+}
+
+// A 4-digit lowercase hex string for a value in 0..0xFFFF.
+string jsonHex4(int v) {
+    string digits = "0123456789abcdef";
+    string out = "";
+    out = out + toString(digits[(v / 4096) % 16]);
+    out = out + toString(digits[(v / 256) % 16]);
+    out = out + toString(digits[(v / 16) % 16]);
+    out = out + toString(digits[v % 16]);
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Parse
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Parse one JSON value from `src`. Throws an Exception on malformed input or on
+// trailing non-whitespace characters.
+Json* jsonParse(string src) {
+    JsonParser p = JsonParser(src);
+    p.skipWs();
+    Json* v = p.parseValue();
+    p.skipWs();
+    if (p.pos < p.n) { throw new Exception("json: trailing characters after value"); }
+    return v;
+}
+
+class JsonParser {
+    string src;
+    int pos;
+    int n;
+
+    JsonParser(string src) {
+        this.src = src;
+        this.pos = 0;
+        this.n = len(src);
+    }
+
+    void skipWs() {
+        while (this.pos < this.n) {
+            char c = this.src[this.pos];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                this.pos = this.pos + 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    char peekc() {
+        if (this.pos >= this.n) { throw new Exception("json: unexpected end of input"); }
+        return this.src[this.pos];
+    }
+
+    Json* parseValue() {
+        this.skipWs();
+        char c = this.peekc();
+        if (c == '{') { return this.parseObject(); }
+        if (c == '[') { return this.parseArray(); }
+        if (c == '"') { return new Json.JsonStr(this.parseString()); }
+        if (c == 't') { this.parseLiteral("true"); return new Json.JsonBool(true); }
+        if (c == 'f') { this.parseLiteral("false"); return new Json.JsonBool(false); }
+        if (c == 'n') { this.parseLiteral("null"); return new Json.JsonNull(); }
+        int code = (int) c;
+        if (c == '-' || (code >= 48 && code <= 57)) { return this.parseNumber(); }
+        throw new Exception("json: unexpected character '" + toString(c) + "'");
+    }
+
+    void parseLiteral(string word) {
+        int wn = len(word);
+        for (int i = 0; i < wn; ++i) {
+            if (this.pos >= this.n || this.src[this.pos] != word[i]) {
+                throw new Exception("json: invalid literal, expected '" + word + "'");
+            }
+            this.pos = this.pos + 1;
+        }
+    }
+
+    Json* parseNumber() {
+        int start = this.pos;
+        bool isFloat = false;
+        if (this.pos < this.n && this.src[this.pos] == '-') { this.pos = this.pos + 1; }
+        while (this.pos < this.n) {
+            char c = this.src[this.pos];
+            int code = (int) c;
+            if (code >= 48 && code <= 57) {
+                this.pos = this.pos + 1;
+            } else if (c == '.' || c == 'e' || c == 'E') {
+                isFloat = true;
+                this.pos = this.pos + 1;
+            } else if (c == '+' || c == '-') {
+                this.pos = this.pos + 1;
+            } else {
+                break;
+            }
+        }
+        string tok = substr(this.src, start, this.pos);
+        if (isFloat) { return new Json.JsonFloat(parseFloat(tok)); }
+        return new Json.JsonInt(parseInt(tok));
+    }
+
+    // Parse a string literal (current char must be the opening quote) and return
+    // the decoded contents.
+    string parseString() {
+        this.pos = this.pos + 1; // consume opening quote
+        StringBuilder sb = StringBuilder();
+        while (true) {
+            if (this.pos >= this.n) { throw new Exception("json: unterminated string"); }
+            char c = this.src[this.pos];
+            this.pos = this.pos + 1;
+            if (c == '"') { break; }
+            if (c == '\\') {
+                if (this.pos >= this.n) { throw new Exception("json: unterminated escape"); }
+                char e = this.src[this.pos];
+                this.pos = this.pos + 1;
+                if (e == '"') { sb.appendChar('"'); }
+                else if (e == '\\') { sb.appendChar('\\'); }
+                else if (e == '/') { sb.appendChar('/'); }
+                else if (e == 'b') { sb.appendChar((char) 8); }
+                else if (e == 'f') { sb.appendChar((char) 12); }
+                else if (e == 'n') { sb.appendChar('\n'); }
+                else if (e == 'r') { sb.appendChar('\r'); }
+                else if (e == 't') { sb.appendChar('\t'); }
+                else if (e == 'u') {
+                    int cp = this.parseHex4();
+                    if (cp >= 55296 && cp <= 56319) {
+                        // high surrogate: consume the paired low surrogate
+                        if (this.pos + 1 < this.n
+                                && this.src[this.pos] == '\\'
+                                && this.src[this.pos + 1] == 'u') {
+                            this.pos = this.pos + 2;
+                            int lo = this.parseHex4();
+                            cp = 65536 + ((cp - 55296) * 1024) + (lo - 56320);
+                        }
+                    }
+                    jsonAppendUtf8(sb, cp);
+                }
+                else { throw new Exception("json: invalid escape character"); }
+            } else {
+                sb.appendChar(c);
+            }
+        }
+        return sb.build();
+    }
+
+    int parseHex4() {
+        int v = 0;
+        for (int i = 0; i < 4; ++i) {
+            if (this.pos >= this.n) { throw new Exception("json: truncated \\u escape"); }
+            v = v * 16 + jsonHexDigit(this.src[this.pos]);
+            this.pos = this.pos + 1;
+        }
+        return v;
+    }
+
+    Json* parseArray() {
+        this.pos = this.pos + 1; // consume '['
+        List<Json*> items = List<Json*>();
+        this.skipWs();
+        if (this.pos < this.n && this.src[this.pos] == ']') {
+            this.pos = this.pos + 1;
+            return new Json.JsonArr(items);
+        }
+        while (true) {
+            this.skipWs();
+            items.add(this.parseValue());
+            this.skipWs();
+            if (this.pos >= this.n) { throw new Exception("json: unterminated array"); }
+            char c = this.src[this.pos];
+            this.pos = this.pos + 1;
+            if (c == ']') { break; }
+            if (c != ',') { throw new Exception("json: expected ',' or ']' in array"); }
+        }
+        return new Json.JsonArr(items);
+    }
+
+    Json* parseObject() {
+        this.pos = this.pos + 1; // consume '{'
+        List<string> keys = List<string>();
+        List<Json*> vals = List<Json*>();
+        this.skipWs();
+        if (this.pos < this.n && this.src[this.pos] == '}') {
+            this.pos = this.pos + 1;
+            return new Json.JsonObj(keys, vals);
+        }
+        while (true) {
+            this.skipWs();
+            if (this.pos >= this.n || this.src[this.pos] != '"') {
+                throw new Exception("json: expected string key in object");
+            }
+            string k = this.parseString();
+            this.skipWs();
+            if (this.pos >= this.n || this.src[this.pos] != ':') {
+                throw new Exception("json: expected ':' after key");
+            }
+            this.pos = this.pos + 1;
+            Json* v = this.parseValue();
+            keys.add(k);
+            vals.add(v);
+            this.skipWs();
+            if (this.pos >= this.n) { throw new Exception("json: unterminated object"); }
+            char c = this.src[this.pos];
+            this.pos = this.pos + 1;
+            if (c == '}') { break; }
+            if (c != ',') { throw new Exception("json: expected ',' or '}' in object"); }
+        }
+        return new Json.JsonObj(keys, vals);
+    }
+}
+
+// ─── Free helpers shared by parse and serialize ──────────────────────────────
+
+// The numeric value of a hex digit, or throw if not one.
+int jsonHexDigit(char c) {
+    int code = (int) c;
+    if (code >= 48 && code <= 57) { return code - 48; }   // 0-9
+    if (code >= 97 && code <= 102) { return code - 87; }  // a-f
+    if (code >= 65 && code <= 70) { return code - 55; }   // A-F
+    throw new Exception("json: invalid hex digit");
+}
+
+// Append the UTF-8 encoding of a Unicode code point to `sb`.
+void jsonAppendUtf8(StringBuilder sb, int cp) {
+    if (cp < 128) {
+        sb.appendChar((char) cp);
+    } else if (cp < 2048) {
+        sb.appendChar((char) (192 + (cp / 64)));
+        sb.appendChar((char) (128 + (cp % 64)));
+    } else if (cp < 65536) {
+        sb.appendChar((char) (224 + (cp / 4096)));
+        sb.appendChar((char) (128 + ((cp / 64) % 64)));
+        sb.appendChar((char) (128 + (cp % 64)));
+    } else {
+        sb.appendChar((char) (240 + (cp / 262144)));
+        sb.appendChar((char) (128 + ((cp / 4096) % 64)));
+        sb.appendChar((char) (128 + ((cp / 64) % 64)));
+        sb.appendChar((char) (128 + (cp % 64)));
+    }
+}
