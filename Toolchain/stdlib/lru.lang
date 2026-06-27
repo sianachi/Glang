@@ -1,0 +1,56 @@
+// std/lru.lang — a string-keyed LRU (least-recently-used) cache.
+//
+// Holds up to `capacity` entries; reading or writing a key marks it most-recent,
+// and inserting beyond capacity evicts the least-recently-used key. Values are
+// generic. Recency is a List<string> (oldest first); fine for modest capacities.
+
+import "std/map.lang";
+import "std/list.lang";
+
+class LruCache<V> {
+    int capacity;
+    Map<string, V> map;
+    List<string> order;   // oldest .. newest
+
+    LruCache(int capacity) {
+        int c = capacity;
+        if (c < 1) { c = 1; }
+        this.capacity = c;
+        this.map = Map<string, V>();
+        this.order = List<string>();
+    }
+
+    int size()           { return this.map.size; }
+    bool has(string key) { return this.map.has(key); }
+
+    void _touch(string key) {
+        int idx = this.order.indexOf(key);
+        if (idx >= 0) { this.order.removeAt(idx); }
+        this.order.add(key);   // newest at the back
+    }
+
+    // Read a key (marks it most-recent); returns fallback if absent.
+    V getOr(string key, V fallback) {
+        if (!(this.map.has(key))) { return fallback; }
+        this._touch(key);
+        return this.map.getOr(key, fallback);
+    }
+
+    // Insert/update a key (marks it most-recent), evicting the LRU key if over
+    // capacity.
+    void put(string key, V value) {
+        this.map.set(key, value);
+        this._touch(key);
+        while (this.order.length() > this.capacity) {
+            string oldest = this.order.get(0);
+            this.order.removeAt(0);
+            this.map.remove(oldest);
+        }
+    }
+
+    // The least-recently-used key ("" if empty) — handy for tests/inspection.
+    string lruKey() {
+        if (this.order.length() == 0) { return ""; }
+        return this.order.get(0);
+    }
+}

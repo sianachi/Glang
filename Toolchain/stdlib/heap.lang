@@ -1,0 +1,58 @@
+// std/heap.lang — a binary min-heap / priority queue of ints.
+//
+// Smallest value comes out first via pop(). Backed by a List<int> with the usual
+// sift-up / sift-down. For a max-heap or keyed priorities, negate or pack the
+// key into the int.
+
+import "std/list.lang";
+
+class MinHeap {
+    List<int> data;
+
+    MinHeap() { this.data = List<int>(); }
+
+    int size()     { return this.data.length(); }
+    bool isEmpty() { return this.data.length() == 0; }
+
+    // Smallest element without removing it (caller checks isEmpty first).
+    int peek() { return this.data.get(0); }
+
+    void push(int v) {
+        this.data.add(v);
+        int i = this.data.length() - 1;
+        while (i > 0) {
+            int parent = (i - 1) / 2;
+            if (this.data.get(parent) <= this.data.get(i)) { return; }
+            int tmp = this.data.get(parent);
+            this.data.set(parent, this.data.get(i));
+            this.data.set(i, tmp);
+            i = parent;
+        }
+    }
+
+    // Remove and return the smallest element.
+    int pop() {
+        int n = this.data.length();
+        int top = this.data.get(0);
+        int last = this.data.get(n - 1);
+        this.data.removeAt(n - 1);
+        n = n - 1;
+        if (n > 0) {
+            this.data.set(0, last);
+            int i = 0;
+            while (true) {
+                int l = 2 * i + 1;
+                int r = 2 * i + 2;
+                int small = i;
+                if (l < n && this.data.get(l) < this.data.get(small)) { small = l; }
+                if (r < n && this.data.get(r) < this.data.get(small)) { small = r; }
+                if (small == i) { return top; }
+                int tmp = this.data.get(small);
+                this.data.set(small, this.data.get(i));
+                this.data.set(i, tmp);
+                i = small;
+            }
+        }
+        return top;
+    }
+}

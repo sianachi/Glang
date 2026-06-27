@@ -1,0 +1,78 @@
+// std/bitset.lang — a fixed-size set of bits backed by a byte buffer.
+//
+// Compact membership for a known integer range: 8 flags per byte. Out-of-range
+// indices throw. Supports the usual set/clear/get/flip plus population count and
+// in-place union/intersection with another same-sized BitSet.
+
+class BitSet {
+    byte* bits;
+    int nbits;
+    int nbytes;
+
+    BitSet(int nbits) {
+        int nb = (nbits + 7) / 8;
+        if (nb < 1) { nb = 1; }
+        this.nbits = nbits;
+        this.nbytes = nb;
+        this.bits = alloc(byte, nb);
+        for (int i = 0; i < nb; ++i) { this.bits[i] = (byte)0; }
+    }
+
+    ~BitSet() { free(this.bits); }
+
+    void _check(int i) {
+        if (i < 0 || i >= this.nbits) {
+            throw new Exception("BitSet: index out of range");
+        }
+    }
+
+    void set(int i) {
+        this._check(i);
+        int idx = i >> 3;
+        this.bits[idx] = (byte)((int)(this.bits[idx]) | (1 << (i & 7)));
+    }
+
+    void clear(int i) {
+        this._check(i);
+        int idx = i >> 3;
+        this.bits[idx] = (byte)((int)(this.bits[idx]) & (255 - (1 << (i & 7))));
+    }
+
+    void flip(int i) {
+        if (this.get(i)) { this.clear(i); } else { this.set(i); }
+    }
+
+    bool get(int i) {
+        this._check(i);
+        int idx = i >> 3;
+        return (((int)(this.bits[idx]) >> (i & 7)) & 1) == 1;
+    }
+
+    // Number of set bits.
+    int count() {
+        int total = 0;
+        for (int b = 0; b < this.nbytes; ++b) {
+            int v = (int)(this.bits[b]);
+            for (int k = 0; k < 8; ++k) {
+                if (((v >> k) & 1) == 1) { total = total + 1; }
+            }
+        }
+        return total;
+    }
+
+    void unionWith(BitSet* other) {
+        int n = this.nbytes;
+        if (other->nbytes < n) { n = other->nbytes; }
+        for (int b = 0; b < n; ++b) {
+            this.bits[b] = (byte)((int)(this.bits[b]) | (int)(other->bits[b]));
+        }
+    }
+
+    void intersectWith(BitSet* other) {
+        int n = this.nbytes;
+        if (other->nbytes < n) { n = other->nbytes; }
+        for (int b = 0; b < n; ++b) {
+            this.bits[b] = (byte)((int)(this.bits[b]) & (int)(other->bits[b]));
+        }
+    }
+}

@@ -1,0 +1,68 @@
+// std/deque.lang — a double-ended queue of ints with O(1) push/pop at both ends.
+//
+// Backed by a growable ring buffer. Reading an empty deque is the caller's
+// responsibility (check isEmpty first). Use as a stack, a queue, or both.
+
+class Deque {
+    int* buf;
+    int cap;
+    int head;    // index of the front element
+    int count;
+
+    Deque() {
+        this.cap = 8;
+        this.buf = alloc(int, 8);
+        this.head = 0;
+        this.count = 0;
+    }
+
+    ~Deque() { free(this.buf); }
+
+    int size()     { return this.count; }
+    bool isEmpty() { return this.count == 0; }
+
+    void _grow() {
+        int ncap = this.cap * 2;
+        int* nbuf = alloc(int, ncap);
+        for (int i = 0; i < this.count; ++i) {
+            nbuf[i] = this.buf[(this.head + i) % this.cap];
+        }
+        free(this.buf);
+        this.buf = nbuf;
+        this.cap = ncap;
+        this.head = 0;
+    }
+
+    void pushBack(int v) {
+        if (this.count == this.cap) { this._grow(); }
+        int idx = (this.head + this.count) % this.cap;
+        this.buf[idx] = v;
+        this.count = this.count + 1;
+    }
+
+    void pushFront(int v) {
+        if (this.count == this.cap) { this._grow(); }
+        this.head = (this.head - 1 + this.cap) % this.cap;
+        this.buf[this.head] = v;
+        this.count = this.count + 1;
+    }
+
+    int popFront() {
+        int v = this.buf[this.head];
+        this.head = (this.head + 1) % this.cap;
+        this.count = this.count - 1;
+        return v;
+    }
+
+    int popBack() {
+        int idx = (this.head + this.count - 1) % this.cap;
+        this.count = this.count - 1;
+        return this.buf[idx];
+    }
+
+    int front() { return this.buf[this.head]; }
+    int back()  { return this.buf[(this.head + this.count - 1) % this.cap]; }
+
+    // Element at logical position i in [0, size).
+    int get(int i) { return this.buf[(this.head + i) % this.cap]; }
+}
