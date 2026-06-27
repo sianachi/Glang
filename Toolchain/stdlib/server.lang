@@ -1,0 +1,406 @@
+// std/server.lang — a single-threaded, non-blocking, event-loop HTTP/1.1 server
+// with an integrated streaming reverse proxy.
+//
+// One thread, one poll() loop, many connections. Every socket is non-blocking;
+// the loop never stalls on a slow client. Each connection holds an inbound and
+// an outbound buffer and is driven purely by readiness events:
+//
+//   * a client connection accumulates bytes, parses complete requests with
+//     std/http.lang, and either dispatches to a Router (local routes) or, when
+//     the path matches a proxy mount, opens an upstream and streams the response
+//     back through the same loop.
+//   * keep-alive is honoured for local responses; pipelined requests are parsed
+//     back-to-back from one buffer.
+//
+// Robustness: SIGPIPE is ignored in the runtime, so a peer that hangs up returns
+// an error rather than killing the process; oversized request heads get a 413;
+// a failed upstream gets a 502. The reverse proxy buffers each request fully
+// (bounded by maxRequestBytes) and forces Connection: close upstream, reading the
+// response to EOF — so responses of any size or content type stream correctly.
+//
+// This file needs real sockets, so it runs via the native compiler; the pure
+// pieces it builds on (http/router/html) run on every backend.
+
+import "std/net.lang";
+import "std/http.lang";
+import "std/router.lang";
+import "std/map.lang";
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+int serverMaxRequestBytes() { return 1048576; }   // 1 MiB head+body cap per request
+
+// ── Connection state ─────────────────────────────────────────────────────────
+
+class Conn {
+    int fd;
+    bool isUpstream;       // false = client (HTTP), true = proxy upstream
+    Bytes* inbuf;          // bytes read, not yet processed
+    Bytes* outbuf;         // bytes to write (consumed from the front as they go)
+    bool wantClose;        // close once outbuf is drained
+    bool gotEof;           // peer closed its write side
+    int peerFd;            // paired connection fd (proxy), or -1
+    bool connecting;       // upstream: non-blocking connect still in progress
+    bool awaitingUpstream; // client: a proxied response is being produced
+
+    Conn(int fd) {
+        this.fd = fd;
+        this.isUpstream = false;
+        this.inbuf = new Bytes(2048);
+        this.outbuf = new Bytes(2048);
+        this.wantClose = false;
+        this.gotEof = false;
+        this.peerFd = -1;
+        this.connecting = false;
+        this.awaitingUpstream = false;
+    }
+}
+
+class ProxyMount {
+    string prefix;
+    string host;
+    int port;
+    ProxyMount(string prefix, string host, int port) {
+        this.prefix = prefix;
+        this.host = host;
+        this.port = port;
+    }
+}
+
+// ── Reverse-proxy request rewriting ──────────────────────────────────────────
+
+bool isHopByHop(string lowerName) {
+    return lowerName == "connection" || lowerName == "keep-alive"
+        || lowerName == "proxy-authenticate" || lowerName == "proxy-authorization"
+        || lowerName == "te" || lowerName == "trailer"
+        || lowerName == "transfer-encoding" || lowerName == "upgrade"
+        || lowerName == "host" || lowerName == "proxy-connection";
+}
+
+// Authority for the Host header: "host" for the default port 80, else
+// "host:port".
+string hostAuthority(string host, int port) {
+    if (port == 80) { return host; }
+    return host + ":" + intToStr(port);
+}
+
+// Reconstruct the request to send upstream: original method/target/version, the
+// end-to-end headers, an overridden Host, a Via marker, and Connection: close so
+// the response is delimited by EOF.
+Bytes* renderUpstreamRequest(HttpRequest* req, string host, int port) {
+    StringBuilder sb = StringBuilder();
+    sb.append(req->method);
+    sb.appendChar((char)32);
+    sb.append(req->target);
+    sb.append(" HTTP/1.1\r\n");
+
+    int hc = req->headers->count();
+    for (int i = 0; i < hc; ++i) {
+        string name = req->headers->nameAt(i);
+        if (isHopByHop(strings::toLowerStr(name))) { continue; }
+        sb.append(name);
+        sb.append(": ");
+        sb.append(req->headers->valueAt(i));
+        sb.append("\r\n");
+    }
+    sb.append("Host: ");
+    sb.append(hostAuthority(host, port));
+    sb.append("\r\n");
+    sb.append("Via: 1.1 glang\r\n");
+    sb.append("Connection: close\r\n");
+    sb.append("\r\n");
+
+    Bytes* out = new Bytes(len(sb.build()) + req->body->length() + 1);
+    bytesAppendStr(out, sb.build());
+    bytesAppendBytes(out, req->body);
+    return out;
+}
+
+// ── The server ───────────────────────────────────────────────────────────────
+
+class HttpServer {
+    int listenFd;
+    Router* router;
+    List<ProxyMount*> mounts;
+    Map<int, Conn*> conns;
+    bool running;
+
+    HttpServer(int port) {
+        this.listenFd = netListen(port);
+        if (this.listenFd < 0) {
+            throw new Exception("HttpServer: listen failed");
+        }
+        netSetNonBlocking(this.listenFd);
+        this.router = new Router();
+        this.mounts = List<ProxyMount*>();
+        this.conns = Map<int, Conn*>();
+        this.running = true;
+    }
+
+    int port() { return netLocalPort(this.listenFd); }
+
+    // Route registration (delegates to the embedded Router).
+    void get(string path, fn(HttpRequest*) -> HttpResponse* h)  { this.router->get(path, h); }
+    void post(string path, fn(HttpRequest*) -> HttpResponse* h) { this.router->post(path, h); }
+    void any(string path, fn(HttpRequest*) -> HttpResponse* h)  { this.router->any(path, h); }
+    void setFallback(fn(HttpRequest*) -> HttpResponse* h)       { this.router->setFallback(h); }
+
+    // Mount a reverse-proxy upstream on a path prefix.
+    void proxy(string prefix, string host, int upstreamPort) {
+        this.mounts.add(new ProxyMount(prefix, host, upstreamPort));
+    }
+
+    ProxyMount* matchMount(HttpRequest* req) {
+        int n = this.mounts.length();
+        for (int i = 0; i < n; ++i) {
+            ProxyMount* m = this.mounts.get(i);
+            if (startsWith(req->path, m->prefix)) { return m; }
+        }
+        return null;
+    }
+
+    void stop() { this.running = false; }
+
+    // Run until stop() (e.g. from a handler) — blocks the calling thread.
+    void serveForever() {
+        while (this.running) { this.tick(250); }
+        this.shutdown();
+    }
+
+    // Run a bounded number of poll ticks — handy for tests and embedding.
+    void serveTicks(int ticks, int timeoutMs) {
+        for (int i = 0; i < ticks && this.running; ++i) { this.tick(timeoutMs); }
+    }
+
+    void shutdown() {
+        int n = this.conns.size;
+        for (int i = 0; i < n; ++i) { netClose(this.conns.keys[i]); }
+        netClose(this.listenFd);
+    }
+
+    // One event-loop iteration: build the interest set, poll, service ready fds,
+    // then reap finished connections.
+    void tick(int timeoutMs) {
+        Poller p = Poller();
+        p.addRead(this.listenFd);
+        int cn = this.conns.size;
+        for (int i = 0; i < cn; ++i) {
+            int fd = this.conns.keys[i];
+            Conn* c = this.conns.vals[i];
+            int want = 0;
+            if (c->connecting) {
+                want = 2;                                   // wait for connect to finish
+            } else {
+                if (c->outbuf->length() > 0) { want = want | 2; }
+                if (!(c->gotEof)) { want = want | 1; }
+            }
+            if (want != 0) { p.add(fd, want); }
+        }
+
+        int ready = p.wait(timeoutMs);
+        if (ready <= 0) { this.reap(); return; }
+
+        int rc = p.count();
+        for (int i = 0; i < rc; ++i) {
+            int fd = p.fdAt(i);
+            int rev = p.revAt(i);
+            if (rev == 0) { continue; }
+            if (fd == this.listenFd) {
+                if (pollReadable(rev)) { this.acceptNew(); }
+                continue;
+            }
+            Conn* c = this.conns.getOr(fd, null);
+            if (c == null) { continue; }
+            if (c->connecting) { this.onConnecting(c, rev); continue; }
+            if (pollReadable(rev) || pollError(rev)) { this.onReadable(c); }
+            c = this.conns.getOr(fd, null);
+            if (c == null) { continue; }
+            if (pollWritable(rev)) { this.onWritable(c); }
+        }
+        this.reap();
+    }
+
+    void acceptNew() {
+        // Drain the accept backlog (level/edge-safe): accept until would-block.
+        while (true) {
+            int cfd = netAccept(this.listenFd);
+            if (cfd < 0) { return; }                         // would-block or error
+            netSetNonBlocking(cfd);
+            netSetNoDelay(cfd);
+            this.conns.set(cfd, new Conn(cfd));
+        }
+    }
+
+    // Finish a non-blocking upstream connect.
+    void onConnecting(Conn* c, int rev) {
+        int err = netSockError(c->fd);
+        if (err != 0 || pollError(rev)) {
+            this.failUpstream(c, "502 Bad Gateway\n");
+            return;
+        }
+        c->connecting = false;
+        if (c->outbuf->length() > 0) { this.onWritable(c); }   // send the buffered request
+    }
+
+    void failUpstream(Conn* up, string message) {
+        Conn* client = this.conns.getOr(up->peerFd, null);
+        if (client != null) {
+            HttpResponse* e = httpText(502, message);
+            bytesAppendBytes(client->outbuf, renderResponse(e, false));
+            client->awaitingUpstream = false;
+            client->wantClose = true;
+            client->peerFd = -1;
+        }
+        up->peerFd = -1;
+        this.closeNow(up->fd);
+    }
+
+    void onReadable(Conn* c) {
+        byte* rb = alloc(byte, 8192);
+        bool more = true;
+        while (more) {
+            int n = netRecv(c->fd, rb, 8192);
+            if (n > 0) {
+                for (int i = 0; i < n; ++i) { c->inbuf->append(rb[i]); }
+                if (n < 8192) { more = false; }
+            } else if (n == 0) {
+                c->gotEof = true;
+                more = false;
+            } else {
+                more = false;                                // would-block or error
+                if (!(netWouldBlock())) { c->gotEof = true; }
+            }
+        }
+        free(rb);
+
+        if (c->isUpstream) { this.pumpUpstream(c); }
+        else { this.processClient(c); }
+    }
+
+    // Forward whatever an upstream produced into the paired client's outbuf.
+    void pumpUpstream(Conn* up) {
+        Conn* client = this.conns.getOr(up->peerFd, null);
+        if (client != null && up->inbuf->length() > 0) {
+            bytesAppendBytes(client->outbuf, up->inbuf);
+            up->inbuf->clear();
+        }
+        if (up->gotEof) {
+            if (client != null) {
+                client->awaitingUpstream = false;
+                client->wantClose = true;                    // response framed by EOF
+                client->peerFd = -1;
+            }
+            up->peerFd = -1;
+            this.closeNow(up->fd);
+        }
+    }
+
+    // Parse and act on every complete request buffered for a client.
+    void processClient(Conn* c) {
+        bool keepParsing = true;
+        while (keepParsing) {
+            if (c->awaitingUpstream) { return; }             // one proxied request at a time
+            HttpParseResult* pr = tryParseRequest(c->inbuf);
+            if (pr->error) {
+                HttpResponse* e = httpText(400, "400 Bad Request\n");
+                bytesAppendBytes(c->outbuf, renderResponse(e, false));
+                c->wantClose = true;
+                c->inbuf->clear();
+                return;
+            }
+            if (!(pr->complete)) {
+                if (c->inbuf->length() > serverMaxRequestBytes()) {
+                    HttpResponse* e = httpText(413, "413 Payload Too Large\n");
+                    bytesAppendBytes(c->outbuf, renderResponse(e, false));
+                    c->wantClose = true;
+                    c->inbuf->clear();
+                }
+                return;                                       // need more bytes
+            }
+
+            HttpRequest* req = pr->request;
+            bytesDropFront(c->inbuf, pr->consumed);
+
+            ProxyMount* m = this.matchMount(req);
+            if (m != null) {
+                this.startProxy(c, req, m);
+                return;                                       // await the upstream
+            }
+
+            HttpResponse* resp = this.router->dispatch(req);
+            bool ka = req->keepAlive();
+            bytesAppendBytes(c->outbuf, renderResponse(resp, ka));
+            if (!ka) { c->wantClose = true; keepParsing = false; }
+        }
+    }
+
+    void startProxy(Conn* client, HttpRequest* req, ProxyMount* m) {
+        int ufd = tcpConnectNonBlocking(m->host, m->port);
+        if (ufd < 0) {
+            HttpResponse* e = httpText(502, "502 Bad Gateway\n");
+            bytesAppendBytes(client->outbuf, renderResponse(e, false));
+            client->wantClose = true;
+            return;
+        }
+        netSetNonBlocking(ufd);
+        netSetNoDelay(ufd);
+        Conn* up = new Conn(ufd);
+        up->isUpstream = true;
+        up->connecting = true;
+        up->peerFd = client->fd;
+        bytesAppendBytes(up->outbuf, renderUpstreamRequest(req, m->host, m->port));
+        client->peerFd = ufd;
+        client->awaitingUpstream = true;
+        this.conns.set(ufd, up);
+    }
+
+    void onWritable(Conn* c) {
+        if (c->outbuf->length() == 0) { return; }
+        int n = netSend(c->fd, c->outbuf->data, c->outbuf->length());
+        if (n > 0) {
+            bytesDropFront(c->outbuf, n);
+        } else if (n < 0 && !(netWouldBlock())) {
+            this.closeNow(c->fd);                            // broken pipe
+        }
+    }
+
+    // Close connections that are finished (drained + closing, or EOF + idle).
+    void reap() {
+        List<int> dead = List<int>();
+        int n = this.conns.size;
+        for (int i = 0; i < n; ++i) {
+            int fd = this.conns.keys[i];
+            Conn* c = this.conns.vals[i];
+            if (this.shouldClose(c)) { dead.add(fd); }
+        }
+        int dn = dead.length();
+        for (int i = 0; i < dn; ++i) { this.closeNow(dead.get(i)); }
+    }
+
+    bool shouldClose(Conn* c) {
+        if (c->awaitingUpstream) { return false; }
+        if (c->connecting) { return false; }
+        bool outEmpty = c->outbuf->length() == 0;
+        if (c->wantClose && outEmpty) { return true; }
+        if (c->gotEof && outEmpty && c->inbuf->length() == 0) { return true; }
+        return false;
+    }
+
+    // Close one fd now and schedule its proxy peer (if any) to finish/close.
+    void closeNow(int fd) {
+        Conn* c = this.conns.getOr(fd, null);
+        if (c == null) { return; }
+        int peer = c->peerFd;
+        netClose(fd);
+        this.conns.remove(fd);
+        if (peer >= 0) {
+            Conn* pc = this.conns.getOr(peer, null);
+            if (pc != null && pc->peerFd == fd) {
+                pc->peerFd = -1;
+                pc->awaitingUpstream = false;
+                pc->wantClose = true;
+            }
+        }
+    }
+}
