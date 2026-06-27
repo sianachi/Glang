@@ -11,14 +11,14 @@ in-order traversal:
 contains 7:
 true
 contains 2:
-false
+true
 min:
 1
 max:
 14
 count:
-9
+10
 height:
 4
 sum:
-66
+68
