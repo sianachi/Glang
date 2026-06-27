@@ -1,6 +1,16 @@
 #include "glang_runtime.h"
 #include <ctype.h>
 #include <time.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
 
 /* ── Globals ──────────────────────────────────────────────────────────── */
 int    glang_argc = 0;
@@ -28,6 +38,202 @@ void glang_sleep_ms(int64_t ms) {
     ts.tv_sec = (time_t)(ms / 1000);
     ts.tv_nsec = (long)((ms % 1000) * 1000000L);
     nanosleep(&ts, NULL);
+}
+
+/* ── TCP sockets ───────────────────────────────────────────────────────────
+   BSD sockets for an event-loop HTTP server / reverse proxy. File descriptors
+   are plain ints. Calls return -1 on error; the errno is stashed in
+   glang_net_errno so callers can distinguish would-block from a real failure
+   (glang_net_would_block). Sockets can be made non-blocking and multiplexed
+   with glang_net_poll. The interpreters back the same builtins with a
+   deterministic in-memory loopback instead of real networking. */
+
+int glang_net_errno = 0;   /* errno from the most recent net call */
+
+/* SIGPIPE would kill the process when writing to a peer that hung up. Ignore it
+   once, lazily, so a closed connection surfaces as an EPIPE return instead. */
+static void glang_net_ignore_sigpipe(void) {
+    static int done = 0;
+    if (!done) { signal(SIGPIPE, SIG_IGN); done = 1; }
+}
+
+/* MSG_NOSIGNAL (Linux) suppresses SIGPIPE per-send; macOS lacks it and relies on
+   the SO_NOSIGPIPE socket option set at creation plus the global ignore above. */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
+static void glang_net_set_nosigpipe(int fd) {
+#ifdef SO_NOSIGPIPE
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+#else
+    (void)fd;
+#endif
+}
+
+int64_t glang_net_listen(int64_t port) {
+    glang_net_ignore_sigpipe();
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) { glang_net_errno = errno; return -1; }
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons((unsigned short)port);
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { glang_net_errno = errno; close(fd); return -1; }
+    if (listen(fd, 128) < 0) { glang_net_errno = errno; close(fd); return -1; }
+    return fd;
+}
+
+int64_t glang_net_local_port(int64_t fd) {
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+    if (getsockname((int)fd, (struct sockaddr*)&addr, &len) < 0) { glang_net_errno = errno; return -1; }
+    return (int64_t)ntohs(addr.sin_port);
+}
+
+int64_t glang_net_accept(int64_t fd) {
+    int c = accept((int)fd, NULL, NULL);
+    if (c < 0) { glang_net_errno = errno; return -1; }
+    glang_net_set_nosigpipe(c);
+    return (int64_t)c;
+}
+
+/* Resolve host:port and return a connected socket, or one whose connect is in
+   progress when `nonblock` is set (check completion with glang_net_sock_error
+   once the fd reports writable). */
+static int64_t glang_net_connect_impl(const char* host, int64_t port, int nonblock) {
+    glang_net_ignore_sigpipe();
+    char portstr[16];
+    snprintf(portstr, sizeof(portstr), "%d", (int)port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    int gai = getaddrinfo(host ? host : "127.0.0.1", portstr, &hints, &res);
+    if (gai != 0) { glang_net_errno = errno ? errno : EHOSTUNREACH; return -1; }
+    int fd = -1;
+    for (struct addrinfo* ai = res; ai != NULL; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) { glang_net_errno = errno; continue; }
+        glang_net_set_nosigpipe(fd);
+        if (nonblock) {
+            int fl = fcntl(fd, F_GETFL, 0);
+            fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+            int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+            if (rc == 0 || errno == EINPROGRESS) break;   /* connecting */
+            glang_net_errno = errno; close(fd); fd = -1;
+        } else {
+            if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
+            glang_net_errno = errno; close(fd); fd = -1;
+        }
+    }
+    freeaddrinfo(res);
+    return (int64_t)fd;
+}
+
+int64_t glang_net_connect(const char* host, int64_t port) {
+    return glang_net_connect_impl(host, port, 0);
+}
+
+int64_t glang_net_connect_nb(const char* host, int64_t port) {
+    return glang_net_connect_impl(host, port, 1);
+}
+
+/* Receive up to `max` bytes into `buf`; returns bytes read (0 = peer closed,
+   -1 = error/would-block — inspect glang_net_would_block). */
+int64_t glang_net_recv(int64_t fd, uint8_t* buf, int64_t max) {
+    if (max <= 0) return 0;
+    ssize_t n = recv((int)fd, buf, (size_t)max, 0);
+    if (n < 0) { glang_net_errno = errno; return -1; }
+    return (int64_t)n;
+}
+
+/* Send up to `len` bytes from `buf`; returns bytes written (may be < len on a
+   non-blocking socket), or -1 (would-block / broken pipe — see errno). */
+int64_t glang_net_send(int64_t fd, uint8_t* buf, int64_t len) {
+    if (len <= 0) return 0;
+    ssize_t n = send((int)fd, buf, (size_t)len, MSG_NOSIGNAL);
+    if (n < 0) { glang_net_errno = errno; return -1; }
+    return (int64_t)n;
+}
+
+void glang_net_close(int64_t fd) {
+    close((int)fd);
+}
+
+/* Put a socket into non-blocking mode (0 ok, -1 error). */
+int64_t glang_net_set_nonblocking(int64_t fd) {
+    int fl = fcntl((int)fd, F_GETFL, 0);
+    if (fl < 0) { glang_net_errno = errno; return -1; }
+    if (fcntl((int)fd, F_SETFL, fl | O_NONBLOCK) < 0) { glang_net_errno = errno; return -1; }
+    return 0;
+}
+
+/* Disable Nagle's algorithm for lower latency (0 ok, -1 error). */
+int64_t glang_net_set_nodelay(int64_t fd) {
+    int yes = 1;
+    if (setsockopt((int)fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) < 0) {
+        glang_net_errno = errno; return -1;
+    }
+    return 0;
+}
+
+/* Half-close: how 0=read, 1=write, 2=both (0 ok, -1 error). */
+int64_t glang_net_shutdown(int64_t fd, int64_t how) {
+    int h = how == 0 ? SHUT_RD : (how == 1 ? SHUT_WR : SHUT_RDWR);
+    if (shutdown((int)fd, h) < 0) { glang_net_errno = errno; return -1; }
+    return 0;
+}
+
+/* Pending socket error via SO_ERROR (0 = connected/clean), used to finish a
+   non-blocking connect once the fd reports writable. */
+int64_t glang_net_sock_error(int64_t fd) {
+    int err = 0; socklen_t len = sizeof(err);
+    if (getsockopt((int)fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) { glang_net_errno = errno; return -1; }
+    return (int64_t)err;
+}
+
+int64_t glang_net_last_errno(void) { return (int64_t)glang_net_errno; }
+
+/* Was the last net call a would-block (the socket is non-blocking and has no
+   data / cannot send right now)? */
+int64_t glang_net_would_block(void) {
+    return (glang_net_errno == EAGAIN || glang_net_errno == EWOULDBLOCK
+            || glang_net_errno == EINPROGRESS) ? 1 : 0;
+}
+
+/* Multiplex `count` fds. events[i]/revents[i] are bitmasks: 1=read, 2=write,
+   4=error. Waits up to timeoutMs (-1 = forever). Returns the number of fds with
+   a non-zero revents, or -1 on error. */
+int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents,
+                       int64_t count, int64_t timeout_ms) {
+    if (count <= 0) return 0;
+    struct pollfd* pfds = (struct pollfd*)calloc((size_t)count, sizeof(struct pollfd));
+    if (!pfds) { glang_net_errno = ENOMEM; return -1; }
+    for (int64_t i = 0; i < count; ++i) {
+        pfds[i].fd = (int)fds[i];
+        short ev = 0;
+        if (events[i] & 1) ev |= POLLIN;
+        if (events[i] & 2) ev |= POLLOUT;
+        pfds[i].events = ev;
+    }
+    int rc = poll(pfds, (nfds_t)count, (int)timeout_ms);
+    if (rc < 0) { glang_net_errno = errno; free(pfds); return -1; }
+    int64_t ready = 0;
+    for (int64_t i = 0; i < count; ++i) {
+        int64_t r = 0;
+        if (pfds[i].revents & POLLIN)  r |= 1;
+        if (pfds[i].revents & POLLOUT) r |= 2;
+        if (pfds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) r |= 4;
+        revents[i] = r;
+        if (r) ready++;
+    }
+    free(pfds);
+    return ready;
 }
 
 /* ── Managed memory (GC) ──────────────────────────────────────────────────

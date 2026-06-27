@@ -1207,6 +1207,36 @@ class Pass2Checker:
             "nowNanos": ([], NamedType("int")),
             "wallMillis": ([], NamedType("int")),
             "sleepMs": ([NamedType("int")], NamedType("void")),
+            "netListen": ([NamedType("int")], NamedType("int")),
+            "netLocalPort": ([NamedType("int")], NamedType("int")),
+            "netAccept": ([NamedType("int")], NamedType("int")),
+            "netConnect": ([NamedType("string"), NamedType("int")], NamedType("int")),
+            "netRecv": (
+                [NamedType("int"), PointerType(NamedType("byte")), NamedType("int")],
+                NamedType("int"),
+            ),
+            "netSend": (
+                [NamedType("int"), PointerType(NamedType("byte")), NamedType("int")],
+                NamedType("int"),
+            ),
+            "netClose": ([NamedType("int")], NamedType("void")),
+            "netConnectNb": ([NamedType("string"), NamedType("int")], NamedType("int")),
+            "netSetNonBlocking": ([NamedType("int")], NamedType("int")),
+            "netSetNoDelay": ([NamedType("int")], NamedType("int")),
+            "netShutdown": ([NamedType("int"), NamedType("int")], NamedType("int")),
+            "netSockError": ([NamedType("int")], NamedType("int")),
+            "netErrno": ([], NamedType("int")),
+            "netWouldBlock": ([], NamedType("bool")),
+            "netPoll": (
+                [
+                    PointerType(NamedType("int")),
+                    PointerType(NamedType("int")),
+                    PointerType(NamedType("int")),
+                    NamedType("int"),
+                    NamedType("int"),
+                ],
+                NamedType("int"),
+            ),
         }
         signature = fixed.get(expr.name)
         if signature is None:

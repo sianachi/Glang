@@ -1063,9 +1063,14 @@ class CEmit {
             Expr.CallExpr(nm, args, ta) => {
                 if (nm == "len" || nm == "parseInt" || nm == "indexOf" || nm == "getArgCount") { return "int"; }
                 if (nm == "nowNanos" || nm == "wallMillis") { return "int"; }
+                if (nm == "netListen" || nm == "netLocalPort" || nm == "netAccept"
+                    || nm == "netConnect" || nm == "netRecv" || nm == "netSend") { return "int"; }
+                if (nm == "netConnectNb" || nm == "netSetNonBlocking" || nm == "netSetNoDelay"
+                    || nm == "netShutdown" || nm == "netSockError" || nm == "netErrno"
+                    || nm == "netPoll") { return "int"; }
                 if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg") { return "string"; }
                 if (nm == "parseFloat") { return "float"; }
-                if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains") { return "bool"; }
+                if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains" || nm == "netWouldBlock") { return "bool"; }
                 if (this.env->functions.has(nm)) {
                     FunctionInfo* fi = this.env->functions.getOr(nm, null);
                     if (fi != null) { return showType(fi->return_type); }
@@ -1183,6 +1188,21 @@ class CEmit {
         if (name == "nowNanos")   { return "glang_now_nanos()"; }
         if (name == "wallMillis") { return "glang_wall_millis()"; }
         if (name == "sleepMs")    { return "glang_sleep_ms(" + this.emitArgs(args) + ")"; }
+        if (name == "netListen")    { return "glang_net_listen(" + this.emitArgs(args) + ")"; }
+        if (name == "netLocalPort") { return "glang_net_local_port(" + this.emitArgs(args) + ")"; }
+        if (name == "netAccept")    { return "glang_net_accept(" + this.emitArgs(args) + ")"; }
+        if (name == "netConnect")   { return "glang_net_connect(" + this.emitArgs(args) + ")"; }
+        if (name == "netRecv")      { return "glang_net_recv(" + this.emitArgs(args) + ")"; }
+        if (name == "netSend")      { return "glang_net_send(" + this.emitArgs(args) + ")"; }
+        if (name == "netClose")     { return "glang_net_close(" + this.emitArgs(args) + ")"; }
+        if (name == "netConnectNb")      { return "glang_net_connect_nb(" + this.emitArgs(args) + ")"; }
+        if (name == "netSetNonBlocking") { return "glang_net_set_nonblocking(" + this.emitArgs(args) + ")"; }
+        if (name == "netSetNoDelay")     { return "glang_net_set_nodelay(" + this.emitArgs(args) + ")"; }
+        if (name == "netShutdown")       { return "glang_net_shutdown(" + this.emitArgs(args) + ")"; }
+        if (name == "netSockError")      { return "glang_net_sock_error(" + this.emitArgs(args) + ")"; }
+        if (name == "netErrno")          { return "glang_net_last_errno()"; }
+        if (name == "netWouldBlock")     { return "glang_net_would_block()"; }
+        if (name == "netPoll")           { return "glang_net_poll(" + this.emitArgs(args) + ")"; }
         if (name == "getArgCount") { return "(int64_t)(glang_argc - 1)"; }
         if (name == "getArg") {
             if (args.length() > 0) { return "glang_argv[(int)(" + this.emitExpr(args.get(0)) + ") + 1]"; }
@@ -1477,6 +1497,21 @@ class CEmit {
         f.appendLine("int64_t glang_now_nanos(void);");
         f.appendLine("int64_t glang_wall_millis(void);");
         f.appendLine("void    glang_sleep_ms(int64_t ms);");
+        f.appendLine("int64_t glang_net_listen(int64_t port);");
+        f.appendLine("int64_t glang_net_local_port(int64_t fd);");
+        f.appendLine("int64_t glang_net_accept(int64_t fd);");
+        f.appendLine("int64_t glang_net_connect(const char* host, int64_t port);");
+        f.appendLine("int64_t glang_net_recv(int64_t fd, uint8_t* buf, int64_t max);");
+        f.appendLine("int64_t glang_net_send(int64_t fd, uint8_t* buf, int64_t len);");
+        f.appendLine("void    glang_net_close(int64_t fd);");
+        f.appendLine("int64_t glang_net_connect_nb(const char* host, int64_t port);");
+        f.appendLine("int64_t glang_net_set_nonblocking(int64_t fd);");
+        f.appendLine("int64_t glang_net_set_nodelay(int64_t fd);");
+        f.appendLine("int64_t glang_net_shutdown(int64_t fd, int64_t how);");
+        f.appendLine("int64_t glang_net_sock_error(int64_t fd);");
+        f.appendLine("int64_t glang_net_last_errno(void);");
+        f.appendLine("int64_t glang_net_would_block(void);");
+        f.appendLine("int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents, int64_t count, int64_t timeout_ms);");
         f.appendLine("void glang_print_int(int64_t v);");
         f.appendLine("void glang_print_float(double v);");
         f.appendLine("void glang_print_bool(int v);");

@@ -355,6 +355,75 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
         ps.add(T("int"));
         return check_callable_args(name, arg_types, ps, T("void"), env);
     }
+    if (name == "netListen") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netLocalPort") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netAccept") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netConnect") {
+        ps.add(T("string"));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netRecv") {
+        ps.add(T("int"));
+        ps.add(new TypeNode.PointerType(T("byte")));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netSend") {
+        ps.add(T("int"));
+        ps.add(new TypeNode.PointerType(T("byte")));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netClose") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
+    }
+    if (name == "netConnectNb") {
+        ps.add(T("string"));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netSetNonBlocking") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netSetNoDelay") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netShutdown") {
+        ps.add(T("int"));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netSockError") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netErrno") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "netWouldBlock") {
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "netPoll") {
+        ps.add(new TypeNode.PointerType(T("int")));
+        ps.add(new TypeNode.PointerType(T("int")));
+        ps.add(new TypeNode.PointerType(T("int")));
+        ps.add(T("int"));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
 
     return null;
 }

@@ -1034,7 +1034,12 @@ class Pass2Checker {
             || name == "writeFile" || name == "fileExists" || name == "bytesFromString"
             || name == "stringFromBytes" || name == "getArgCount" || name == "getArg"
             || name == "exit" || name == "intToStr" || name == "readStdin"
-            || name == "nowNanos" || name == "wallMillis" || name == "sleepMs";
+            || name == "nowNanos" || name == "wallMillis" || name == "sleepMs"
+            || name == "netListen" || name == "netLocalPort" || name == "netAccept"
+            || name == "netConnect" || name == "netRecv" || name == "netSend"
+            || name == "netClose" || name == "netConnectNb" || name == "netSetNonBlocking"
+            || name == "netSetNoDelay" || name == "netShutdown" || name == "netSockError"
+            || name == "netErrno" || name == "netWouldBlock" || name == "netPoll";
     }
 
     TypeNode* check_method_call(Expr* expr) {

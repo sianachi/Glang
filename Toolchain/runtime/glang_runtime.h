@@ -132,4 +132,22 @@ int64_t glang_now_nanos(void);
 int64_t glang_wall_millis(void);
 void    glang_sleep_ms(int64_t ms);
 
+/* TCP sockets (fds as int; -1 on error, errno stashed in glang_net_errno). */
+int64_t glang_net_listen(int64_t port);
+int64_t glang_net_local_port(int64_t fd);
+int64_t glang_net_accept(int64_t fd);
+int64_t glang_net_connect(const char* host, int64_t port);
+int64_t glang_net_connect_nb(const char* host, int64_t port);
+int64_t glang_net_recv(int64_t fd, uint8_t* buf, int64_t max);
+int64_t glang_net_send(int64_t fd, uint8_t* buf, int64_t len);
+void    glang_net_close(int64_t fd);
+int64_t glang_net_set_nonblocking(int64_t fd);
+int64_t glang_net_set_nodelay(int64_t fd);
+int64_t glang_net_shutdown(int64_t fd, int64_t how);
+int64_t glang_net_sock_error(int64_t fd);
+int64_t glang_net_last_errno(void);
+int64_t glang_net_would_block(void);
+int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents,
+                       int64_t count, int64_t timeout_ms);
+
 #endif /* GLANG_RUNTIME_H */
