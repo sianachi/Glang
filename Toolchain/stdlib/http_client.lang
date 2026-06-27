@@ -1,0 +1,156 @@
+// std/http_client.lang — a small blocking HTTP/1.1 client.
+//
+// buildRequestBytes and parseResponse are pure (testable on every backend);
+// httpGet/httpPost/httpRequest open a real socket (compiled path). The client
+// sends `Connection: close` and reads the response to EOF, so it handles any
+// response size and content type. Reuses the parsing/byte helpers in
+// std/http.lang.
+
+import "std/net.lang";
+import "std/http.lang";
+import "std/bytes.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/list.lang";
+
+class HttpClientResponse {
+    int status;
+    string reason;
+    HttpHeaders* headers;
+    Bytes* body;
+
+    HttpClientResponse() {
+        this.status = 0;
+        this.reason = "";
+        this.headers = new HttpHeaders();
+        this.body = new Bytes(1);
+    }
+}
+
+// Pure: serialize a request to bytes (Host + Connection: close, Content-Length
+// and Content-Type when there is a body).
+Bytes* buildRequestBytes(string method, string host, string path,
+                         Bytes* body, string contentType) {
+    StringBuilder sb = StringBuilder();
+    sb.append(method);
+    sb.appendChar((char)32);
+    sb.append(path);
+    sb.append(" HTTP/1.1\r\n");
+    sb.append("Host: ");
+    sb.append(host);
+    sb.append("\r\n");
+    sb.append("Connection: close\r\n");
+    if (body->length() > 0) {
+        sb.append("Content-Length: ");
+        sb.appendInt(body->length());
+        sb.append("\r\n");
+        if (len(contentType) > 0) {
+            sb.append("Content-Type: ");
+            sb.append(contentType);
+            sb.append("\r\n");
+        }
+    }
+    sb.append("\r\n");
+    Bytes* out = new Bytes(len(sb.build()) + body->length() + 1);
+    bytesAppendStr(out, sb.build());
+    bytesAppendBytes(out, body);
+    return out;
+}
+
+// Pure: parse a raw response buffer into status/headers/body.
+HttpClientResponse* parseResponse(Bytes* resp) {
+    HttpClientResponse* r = new HttpClientResponse();
+    int he = findHeaderEnd(resp);
+    if (he < 0) { return r; }                         // malformed -> status 0
+    string head = bytesRangeToStr(resp, 0, he);
+    List<string> lines = strings::split(head, (char)10);
+    if (lines.length() == 0) { return r; }
+
+    List<string> parts = strings::split(stripCR(lines.get(0)), (char)32);
+    if (parts.length() >= 2) { r->status = parseInt(parts.get(1)); }
+    if (parts.length() >= 3) {
+        StringBuilder rs = StringBuilder();
+        for (int i = 2; i < parts.length(); ++i) {
+            if (i > 2) { rs.appendChar((char)32); }
+            rs.append(parts.get(i));
+        }
+        r->reason = rs.build();
+    }
+
+    int nlines = lines.length();
+    for (int i = 1; i < nlines; ++i) {
+        string line = stripCR(lines.get(i));
+        if (len(line) == 0) { continue; }
+        int colon = indexOf(line, ":");
+        if (colon < 0) { continue; }
+        r->headers->add(strings::trim(substr(line, 0, colon)),
+                        strings::trim(substr(line, colon + 1, len(line))));
+    }
+
+    int bodyStart = he + 4;
+    int total = resp->length();
+    int end = total;
+    int clen = r->headers->contentLength();
+    if (clen >= 0 && bodyStart + clen <= total) { end = bodyStart + clen; }
+    if (bodyStart < total) { r->body = bytesSlice(resp, bodyStart, end); }
+    return r;
+}
+
+// ── Socket I/O (compiled path) ───────────────────────────────────────────────
+
+bool clientSendAll(int fd, Bytes* data) {
+    Bytes* work = bytesSlice(data, 0, data->length());
+    bool okSend = true;
+    while (work->length() > 0) {
+        int n = netSend(fd, work->data, work->length());
+        if (n < 0) {
+            if (netWouldBlock()) { continue; }
+            okSend = false;
+            work->size = 0;
+        } else if (n > 0) {
+            bytesDropFront(work, n);
+        }
+    }
+    delete work;
+    return okSend;
+}
+
+Bytes* clientReadAll(int fd) {
+    Bytes* resp = new Bytes(4096);
+    byte* buf = alloc(byte, 4096);
+    bool go = true;
+    while (go) {
+        int n = netRecv(fd, buf, 4096);
+        if (n > 0) {
+            for (int i = 0; i < n; ++i) { resp->append(buf[i]); }
+        } else if (n == 0) {
+            go = false;
+        } else {
+            if (netWouldBlock()) { continue; }
+            go = false;
+        }
+    }
+    free(buf);
+    return resp;
+}
+
+// Send a request and return the parsed response, or null on connect failure.
+HttpClientResponse* httpRequest(string host, int port, string method, string path,
+                                Bytes* body, string contentType) {
+    int fd = netConnect(host, port);
+    if (fd < 0) { return null; }
+    Bytes* req = buildRequestBytes(method, host, path, body, contentType);
+    if (!(clientSendAll(fd, req))) { netClose(fd); return null; }
+    Bytes* resp = clientReadAll(fd);
+    netClose(fd);
+    return parseResponse(resp);
+}
+
+HttpClientResponse* httpGet(string host, int port, string path) {
+    return httpRequest(host, port, "GET", path, new Bytes(1), "");
+}
+
+HttpClientResponse* httpPost(string host, int port, string path,
+                             Bytes* body, string contentType) {
+    return httpRequest(host, port, "POST", path, body, contentType);
+}

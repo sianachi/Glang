@@ -1,0 +1,125 @@
+// std/multipart.lang — a parser for multipart/form-data request bodies.
+//
+// Lets the server accept real browser <form enctype="multipart/form-data">
+// uploads (multiple fields + files in one body). Pure byte work over Bytes, so
+// it runs on every backend. Give it the raw body and the boundary (from the
+// Content-Type header); it returns the parts, each with its field name, optional
+// filename, content type, and raw content bytes.
+
+import "std/bytes.lang";
+import "std/http.lang";       // bytesRangeToStr, bytesSlice, stripCR
+import "std/string.lang";
+import "std/list.lang";
+
+class MultipartPart {
+    string name;          // form field name
+    string filename;      // "" unless this part is a file
+    string contentType;   // "" unless set on the part
+    Bytes* content;
+
+    MultipartPart() {
+        this.name = "";
+        this.filename = "";
+        this.contentType = "";
+        this.content = new Bytes(1);
+    }
+
+    bool isFile() { return len(this.filename) > 0; }
+}
+
+// Index of `needle` (as bytes) in `hay` at or after `from`; -1 if absent.
+int bytesIndexOf(Bytes* hay, int from, string needle) {
+    int hn = hay->length();
+    int nn = len(needle);
+    if (nn == 0) { return from; }
+    for (int i = from; i + nn <= hn; ++i) {
+        bool match = true;
+        for (int j = 0; j < nn; ++j) {
+            if ((int)(hay->get(i + j)) != (int)(needle[j])) { match = false; break; }
+        }
+        if (match) { return i; }
+    }
+    return -1;
+}
+
+bool bytesMatchAt(Bytes* hay, int pos, string needle) {
+    int nn = len(needle);
+    if (pos + nn > hay->length()) { return false; }
+    for (int j = 0; j < nn; ++j) {
+        if ((int)(hay->get(pos + j)) != (int)(needle[j])) { return false; }
+    }
+    return true;
+}
+
+// Read a quoted parameter value: mpParam("...; name=\"x\"", "name") -> "x".
+string mpParam(string s, string key) {
+    string needle = key + "=\"";
+    int idx = indexOf(s, needle);
+    if (idx < 0) { return ""; }
+    int start = idx + len(needle);
+    int n = len(s);
+    int end = start;
+    while (end < n && (int)(s[end]) != 34) { end = end + 1; }   // until '"'
+    return substr(s, start, end);
+}
+
+MultipartPart* mpParsePart(Bytes* p) {
+    MultipartPart* mp = new MultipartPart();
+    int he = bytesIndexOf(p, 0, "\r\n\r\n");
+    string head = "";
+    int contentStart = 0;
+    if (he >= 0) {
+        head = bytesRangeToStr(p, 0, he);
+        contentStart = he + 4;
+    }
+    List<string> lines = strings::split(head, (char)10);
+    int nl = lines.length();
+    for (int i = 0; i < nl; ++i) {
+        string line = stripCR(lines.get(i));
+        int colon = indexOf(line, ":");
+        if (colon < 0) { continue; }
+        string nameLower = strings::toLowerStr(strings::trim(substr(line, 0, colon)));
+        string value = strings::trim(substr(line, colon + 1, len(line)));
+        if (nameLower == "content-disposition") {
+            mp->name = mpParam(value, "name");
+            mp->filename = mpParam(value, "filename");
+        } else if (nameLower == "content-type") {
+            mp->contentType = value;
+        }
+    }
+    if (contentStart <= p->length()) {
+        mp->content = bytesSlice(p, contentStart, p->length());
+    }
+    return mp;
+}
+
+// Parse a multipart/form-data body delimited by `boundary`.
+List<MultipartPart*>* parseMultipart(Bytes* body, string boundary) {
+    List<MultipartPart*>* parts = new List<MultipartPart*>();
+    string delim = "--" + boundary;
+    int pos = bytesIndexOf(body, 0, delim);
+    if (pos < 0) { return parts; }
+    pos = pos + len(delim);
+    string sep = "\r\n" + delim;
+    bool go = true;
+    while (go) {
+        if (bytesMatchAt(body, pos, "--")) { go = false; continue; }   // final boundary
+        if (bytesMatchAt(body, pos, "\r\n")) { pos = pos + 2; }        // end of boundary line
+        int next = bytesIndexOf(body, pos, sep);
+        if (next < 0) { go = false; continue; }
+        Bytes* partBytes = bytesSlice(body, pos, next);
+        parts->add(mpParsePart(partBytes));
+        pos = next + len(sep);
+    }
+    return parts;
+}
+
+// Find a part by field name, or null.
+MultipartPart* multipartField(List<MultipartPart*>* parts, string name) {
+    int n = parts->length();
+    for (int i = 0; i < n; ++i) {
+        MultipartPart* p = parts->get(i);
+        if (p->name == name) { return p; }
+    }
+    return null;
+}
