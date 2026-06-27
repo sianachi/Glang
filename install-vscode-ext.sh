@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXT_SRC="$SCRIPT_DIR/vscode-glang"
-EXT_NAME="glang-0.1.0"
+EXT_NAME="glang-0.3.0"
 
 # --- sanity check -----------------------------------------------------------
 
@@ -39,6 +39,28 @@ case "$OS" in
 esac
 
 echo "Platform : $PLATFORM"
+
+# --- build the language server + install client deps ------------------------
+# Best-effort: the syntax-highlighting half of the extension works even if the
+# language server can't be built (e.g. no compiler toolchain present).
+
+echo ""
+echo "Building the Glang language server ..."
+if bash "$EXT_SRC/build-server.sh"; then
+  echo "  Language server built."
+else
+  echo "  warning: could not build glang-lsp — diagnostics/hover/completion will" >&2
+  echo "  be unavailable. Syntax highlighting + snippets still work." >&2
+fi
+
+if command -v npm >/dev/null 2>&1; then
+  echo "Installing client dependencies (vscode-languageclient) ..."
+  ( cd "$EXT_SRC" && npm install --no-fund --no-audit --loglevel=error ) \
+    || echo "  warning: npm install failed — the language client may not load." >&2
+else
+  echo "warning: npm not found — skipping client dependency install." >&2
+  echo "  Install Node.js + npm, then run 'npm install' in $EXT_SRC." >&2
+fi
 
 # --- locate extensions directory --------------------------------------------
 # Both macOS and Linux store extensions under ~/.vscode/extensions.

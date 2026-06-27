@@ -1,12 +1,20 @@
 {
   "name": "glang",
   "displayName": "Glang",
-  "description": "Syntax highlighting and snippets for the Glang / GScript language",
-  "version": "0.2.0",
+  "description": "Language support for the Glang / GScript language: syntax highlighting, snippets, and a Language Server (diagnostics, hover, completion, go-to-definition, symbols).",
+  "version": "0.3.0",
   "publisher": "glang",
   "engines": { "vscode": "^1.75.0" },
   "categories": ["Programming Languages"],
   "keywords": ["glang", "gscript", "lang"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "scripts": {
+    "build-server": "bash ./build-server.sh"
+  },
   "contributes": {
     "languages": [
       {
@@ -28,6 +36,32 @@
         "language": "glang",
         "path": "./snippets/glang.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Glang",
+      "properties": {
+        "glang.lsp.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the glang-lsp server binary. Leave empty to use the binary bundled with the extension (server/glang-lsp)."
+        },
+        "glang.lsp.transport": {
+          "type": "string",
+          "enum": ["stdio", "tcp"],
+          "default": "stdio",
+          "description": "How the editor talks to the language server. 'stdio' launches the binary directly; 'tcp' spawns it with --tcp and connects over a socket."
+        },
+        "glang.lsp.port": {
+          "type": "number",
+          "default": 6789,
+          "description": "TCP port used when glang.lsp.transport is 'tcp'."
+        },
+        "glang.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the Glang language server."
+        }
+      }
+    }
   }
 }
