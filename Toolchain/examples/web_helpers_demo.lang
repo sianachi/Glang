@@ -1,0 +1,45 @@
+// web_helpers_demo — url encoding, query strings, paths, CSV, multipart, and
+// the pure parts of the HTTP client (request build + response parse). No
+// sockets, so it runs on every backend.
+
+import "std/url.lang";
+import "std/path.lang";
+import "std/csv.lang";
+import "std/multipart.lang";
+import "std/http_client.lang";
+
+int main() {
+    // URL / query strings.
+    print("encode: " + percentEncode("a b&c=d"));
+    Map<string, string>* q = parseQuery("q=hello+world&page=2");
+    print("query q=" + q->getOr("q", "?") + " page=" + q->getOr("page", "?"));
+
+    // Paths.
+    print("join: " + pathJoin("/srv/www", "assets/app.js"));
+    print("base/dir/ext: " + pathBase("/a/b/c.txt") + " | " + pathDir("/a/b/c.txt")
+        + " | " + pathExt("photo.JPEG"));
+    print("normalize: " + pathNormalize("/a/./b/../c"));
+
+    // CSV round-trip.
+    List<List<string>*>* rows = parseCsv("name,note\nAda,\"hello, world\"\n");
+    print("csv rows: " + intToStr(rows->length())
+        + ", field: " + rows->get(1)->get(1));
+
+    // multipart/form-data parsing.
+    Bytes* form = new Bytes(128);
+    bytesAppendStr(form, "--X\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nada\r\n--X--\r\n");
+    List<MultipartPart*>* parts = parseMultipart(form, "X");
+    MultipartPart* user = multipartField(parts, "user");
+    print("multipart user: " + bytesRangeToStr(user->content, 0, user->content->length()));
+
+    // HTTP client request building + response parsing (pure).
+    Bytes* empty = new Bytes(1);
+    Bytes* req = buildRequestBytes("GET", "example.com", "/hi", empty, "");
+    print("request line: " + bytesRangeToStr(req, 0, 16));
+    Bytes* raw = new Bytes(64);
+    bytesAppendStr(raw, "HTTP/1.1 204 No Content\r\nServer: glang\r\n\r\n");
+    HttpClientResponse* resp = parseResponse(raw);
+    print("parsed status: " + intToStr(resp->status) + " " + resp->reason);
+
+    return 0;
+}

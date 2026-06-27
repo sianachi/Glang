@@ -1,0 +1,43 @@
+// collections_demo — priority queue, deque, bitset, and LRU cache.
+
+import "std/heap.lang";
+import "std/deque.lang";
+import "std/bitset.lang";
+import "std/lru.lang";
+import "std/stringbuilder.lang";
+
+int main() {
+    // Min-heap: push unsorted, pop in order.
+    MinHeap h = MinHeap();
+    h.push(7); h.push(3); h.push(9); h.push(1); h.push(5);
+    StringBuilder sorted = StringBuilder();
+    while (!(h.isEmpty())) {
+        sorted.appendInt(h.pop());
+        if (!(h.isEmpty())) { sorted.append(" "); }
+    }
+    print("heap pop order: " + sorted.build());
+
+    // Deque as both stack and queue.
+    Deque d = Deque();
+    d.pushBack(2); d.pushBack(3); d.pushFront(1);
+    print("deque front/back/size: " + intToStr(d.front()) + " "
+        + intToStr(d.back()) + " " + intToStr(d.size()));
+    print("popFront: " + intToStr(d.popFront()) + ", popBack: " + intToStr(d.popBack()));
+
+    // BitSet over a small universe.
+    BitSet evens = BitSet(16);
+    for (int i = 0; i < 16; i = i + 2) { evens.set(i); }
+    print("evens set count: " + intToStr(evens.count()));
+    print("bit 8 set? " + toString(evens.get(8)) + ", bit 9 set? " + toString(evens.get(9)));
+
+    // LRU cache with capacity 2.
+    LruCache<int> cache = LruCache<int>(2);
+    cache.put("a", 1);
+    cache.put("b", 2);
+    cache.getOr("a", -1);     // touch a -> b becomes least-recently-used
+    cache.put("c", 3);        // evicts b
+    print("after evict, has b? " + toString(cache.has("b")));
+    print("a=" + intToStr(cache.getOr("a", -1)) + " c=" + intToStr(cache.getOr("c", -1)));
+
+    return 0;
+}

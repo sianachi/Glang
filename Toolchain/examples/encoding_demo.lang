@@ -1,0 +1,44 @@
+// encoding_demo — hex, base64, hashing, deterministic random, and UUIDs.
+// Everything here is pure Glang and produces identical output on the
+// interpreter and the native compiler (the random stream is seed-driven).
+
+import "std/hex.lang";
+import "std/base64.lang";
+import "std/hash.lang";
+import "std/random.lang";
+import "std/uuid.lang";
+import "std/result.lang";
+
+int main() {
+    // Build a small binary buffer with non-text bytes.
+    Bytes* data = new Bytes(6);
+    data->append((byte)72); data->append((byte)105);     // "Hi"
+    data->append((byte)0);  data->append((byte)255);     // 0x00, 0xFF
+    data->append((byte)1);  data->append((byte)254);
+
+    print("hex:    " + hexEncode(data));
+    print("base64: " + base64Encode(data));
+
+    Bytes* roundtrip = base64Decode(base64Encode(data));
+    print("b64 roundtrip len: " + intToStr(roundtrip->length()));
+
+    print("crc32(\"glang\"):  " + intToStr(crc32Str("glang")));
+    print("fnv1a(\"glang\"):  " + intToStr(fnv1a32Str("glang")));
+
+    // Deterministic PRNG.
+    Rng* rng = newRng(2025);
+    print("rand a: " + intToStr(rng->nextU32()));
+    print("rand b: " + intToStr(rng->nextU32()));
+    print("dice:   " + intToStr(rng->nextRange(1, 7)));
+
+    // UUIDs from the same seeded stream are reproducible.
+    Rng* idRng = newRng(7);
+    print("uuid4:  " + uuidV4(idRng));
+    print("uuid7:  " + uuidV7(idRng, 1700000000000));
+
+    // Result type.
+    Result<int, string>* parsed = ok<int, string>(123);
+    if (parsed->isOk()) { print("result: ok " + intToStr(parsed->get())); }
+
+    return 0;
+}

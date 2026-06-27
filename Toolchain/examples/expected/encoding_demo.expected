@@ -1,0 +1,11 @@
+hex:    486900ff01fe
+base64: SGkA/wH+
+b64 roundtrip len: 6
+crc32("glang"):  4252829502
+fnv1a("glang"):  96527034
+rand a: 525981047
+rand b: 2601768460
+dice:   2
+uuid4:  e7074345-ff94-4a57-af0a-fde4a8fe4535
+uuid7:  018bcfe5-6800-7dda-bc2b-307053d89c45
+result: ok 123

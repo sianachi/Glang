@@ -1,0 +1,9 @@
+encode: a%20b%26c%3Dd
+query q=hello world page=2
+join: /srv/www/assets/app.js
+base/dir/ext: c.txt | /a/b | jpeg
+normalize: /a/c
+csv rows: 2, field: hello, world
+multipart user: ada
+request line: GET /hi HTTP/1.1
+parsed status: 204 No Content
