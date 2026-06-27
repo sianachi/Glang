@@ -24,6 +24,8 @@
 import "std/net.lang";
 import "std/http.lang";
 import "std/router.lang";
+import "std/static.lang";
+import "std/json.lang";
 import "std/map.lang";
 import "std/list.lang";
 import "std/string.lang";
@@ -65,6 +67,22 @@ class ProxyMount {
         this.prefix = prefix;
         this.host = host;
         this.port = port;
+    }
+}
+
+// Serves a directory at a URL prefix. `writable` enables upload (PUT/POST) and a
+// JSON listing at the prefix root; `spaIndex` (non-empty) makes a missing file
+// fall back to that file under root (single-page-app client routing).
+class StaticMount {
+    string prefix;
+    string rootDir;
+    bool writable;
+    string spaIndex;
+    StaticMount(string prefix, string rootDir, bool writable, string spaIndex) {
+        this.prefix = prefix;
+        this.rootDir = rootDir;
+        this.writable = writable;
+        this.spaIndex = spaIndex;
     }
 }
 
@@ -123,6 +141,8 @@ class HttpServer {
     int listenFd;
     Router* router;
     List<ProxyMount*> mounts;
+    List<StaticMount*> staticMounts;
+    string corsOrigin;          // "" = CORS disabled
     Map<int, Conn*> conns;
     bool running;
 
@@ -134,6 +154,8 @@ class HttpServer {
         netSetNonBlocking(this.listenFd);
         this.router = new Router();
         this.mounts = List<ProxyMount*>();
+        this.staticMounts = List<StaticMount*>();
+        this.corsOrigin = "";
         this.conns = Map<int, Conn*>();
         this.running = true;
     }
@@ -158,6 +180,107 @@ class HttpServer {
             if (startsWith(req->path, m->prefix)) { return m; }
         }
         return null;
+    }
+
+    // ── Static / file-store mounts ──────────────────────────────────────────
+    // Read-only serving of a directory at a URL prefix.
+    void staticDir(string prefix, string rootDir) {
+        this.staticMounts.add(new StaticMount(prefix, rootDir, false, ""));
+    }
+    // Read-only + SPA fallback: a missing path serves `indexFile` under root.
+    void staticSpa(string prefix, string rootDir, string indexFile) {
+        this.staticMounts.add(new StaticMount(prefix, rootDir, false, indexFile));
+    }
+    // Read-write file store: GET prefix lists, GET file downloads, PUT/POST uploads.
+    void fileStore(string prefix, string rootDir) {
+        this.staticMounts.add(new StaticMount(prefix, rootDir, true, ""));
+    }
+
+    // Enable CORS with the given allowed origin ("*" or a specific origin).
+    void cors(string origin) { this.corsOrigin = origin; }
+
+    StaticMount* matchStaticMount(HttpRequest* req) {
+        int n = this.staticMounts.length();
+        for (int i = 0; i < n; ++i) {
+            StaticMount* m = this.staticMounts.get(i);
+            if (startsWith(req->path, m->prefix)) { return m; }
+        }
+        return null;
+    }
+
+    // The request path relative to a mount prefix (no leading slash).
+    string relForMount(HttpRequest* req, StaticMount* m) {
+        string p = substr(req->path, len(m->prefix), len(req->path));
+        if (len(p) > 0 && (int)(p[0]) == 47) { p = substr(p, 1, len(p)); }   // strip '/'
+        return p;
+    }
+
+    // Serve / store a file for a matched static mount.
+    HttpResponse* handleStatic(HttpRequest* req, StaticMount* m) {
+        string rel = this.relForMount(req, m);
+
+        // GET the mount root: a JSON listing for a writable store, else index/404.
+        if (len(rel) == 0) {
+            if (req->method == "GET" && m->writable) {
+                return this.listingResponse(m);
+            }
+            if (m->spaIndex != "") { rel = m->spaIndex; }
+            else { return httpText(404, "404 Not Found\n"); }
+        }
+
+        string safe = sanitizeRelPath(rel);
+        if (safe == "") {
+            return httpText(403, "403 Forbidden\n");      // path traversal blocked
+        }
+        string full = joinPath(m->rootDir, safe);
+
+        if (req->method == "PUT" || req->method == "POST") {
+            if (!(m->writable)) { return httpText(405, "405 Method Not Allowed\n"); }
+            if (writeBytesFile(full, req->body)) {
+                HttpResponse* r = httpText(201, "");
+                r->headers->set("Location", joinPath(m->prefix, safe));
+                return r;
+            }
+            return httpText(500, "500 write failed\n");
+        }
+
+        if (req->method != "GET" && req->method != "HEAD") {
+            return httpText(405, "405 Method Not Allowed\n");
+        }
+
+        Bytes* body = readFileBytes(full);
+        if (body == null && m->spaIndex != "") {
+            body = readFileBytes(joinPath(m->rootDir, m->spaIndex));   // SPA fallback
+        }
+        if (body == null) { return httpText(404, "404 Not Found\n"); }
+
+        HttpResponse* r = new HttpResponse(200);
+        r->setContentType(mimeType(full));
+        r->body = body;
+        return r;
+    }
+
+    // JSON array of file names in a writable store's directory.
+    HttpResponse* listingResponse(StaticMount* m) {
+        List<string> names = listDirNames(m->rootDir);
+        Json* arr = jsonArray();
+        int n = names.length();
+        for (int i = 0; i < n; ++i) { jsonPush(arr, jsonStr(names.get(i))); }
+        HttpResponse* r = new HttpResponse(200);
+        r->setContentType("application/json");
+        r->setBodyStr(jsonStringify(arr));
+        return r;
+    }
+
+    // Apply CORS headers to a locally-generated response (no-op if disabled).
+    void applyCors(HttpRequest* req, HttpResponse* resp) {
+        if (this.corsOrigin == "") { return; }
+        resp->headers->set("Access-Control-Allow-Origin", this.corsOrigin);
+        resp->headers->set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+        string reqH = req->headers->get("access-control-request-headers");
+        if (reqH == "") { reqH = "Content-Type"; }
+        resp->headers->set("Access-Control-Allow-Headers", reqH);
+        resp->headers->set("Vary", "Origin");
     }
 
     void stop() { this.running = false; }
@@ -321,6 +444,26 @@ class HttpServer {
 
             HttpRequest* req = pr->request;
             bytesDropFront(c->inbuf, pr->consumed);
+            bool ka = req->keepAlive();
+
+            // CORS preflight: answer OPTIONS locally (incl. for proxied paths).
+            if (this.corsOrigin != "" && req->method == "OPTIONS") {
+                HttpResponse* pre = new HttpResponse(204);
+                this.applyCors(req, pre);
+                bytesAppendBytes(c->outbuf, renderResponse(pre, ka));
+                if (!ka) { c->wantClose = true; keepParsing = false; }
+                continue;
+            }
+
+            // Static / file-store mounts (before proxy and router).
+            StaticMount* sm = this.matchStaticMount(req);
+            if (sm != null) {
+                HttpResponse* sresp = this.handleStatic(req, sm);
+                this.applyCors(req, sresp);
+                bytesAppendBytes(c->outbuf, renderResponse(sresp, ka));
+                if (!ka) { c->wantClose = true; keepParsing = false; }
+                continue;
+            }
 
             ProxyMount* m = this.matchMount(req);
             if (m != null) {
@@ -329,7 +472,7 @@ class HttpServer {
             }
 
             HttpResponse* resp = this.router->dispatch(req);
-            bool ka = req->keepAlive();
+            this.applyCors(req, resp);
             bytesAppendBytes(c->outbuf, renderResponse(resp, ka));
             if (!ka) { c->wantClose = true; keepParsing = false; }
         }

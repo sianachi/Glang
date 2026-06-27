@@ -58,6 +58,42 @@ def _get(port: int, path: str) -> "tuple[int, str]":
         return e.code, e.read().decode("utf-8", "replace")
 
 
+def _put_bytes(port: int, path: str, data: bytes) -> int:
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method="PUT")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def _get_raw(port: int, path: str) -> "tuple[int, bytes, dict]":
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), dict(e.headers)
+
+
+def _raw_request(port: int, raw: bytes) -> bytes:
+    """Send a literal request (bypasses client-side path normalization)."""
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+        s.sendall(raw)
+        s.shutdown(socket.SHUT_WR)
+        chunks = []
+        while True:
+            d = s.recv(65536)
+            if not d:
+                break
+            chunks.append(d)
+    return b"".join(chunks)
+
+
+def _status_of(resp: bytes) -> int:
+    return int(resp.split(b"\r\n", 1)[0].split(b" ")[1])
+
+
 class _UpstreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         body = (f"UPSTREAM {self.path} host={self.headers.get('Host')} "
@@ -142,3 +178,60 @@ def test_server_and_proxy(server_binary):
         proc.terminate()
         proc.wait(timeout=5)
         upstream.shutdown()
+
+
+def test_file_store_upload_download_and_cors(server_binary):
+    srv_port = _free_port()
+    dead_upstream = _free_port()   # proxy mount is registered but never hit here
+    with tempfile.TemporaryDirectory() as uploads:
+        proc = subprocess.Popen(
+            [server_binary, str(srv_port), "127.0.0.1", str(dead_upstream), uploads],
+            cwd=_ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            _wait_listening(srv_port)
+
+            # Upload a binary blob with NUL/0xFF bytes (string I/O would truncate).
+            blob = bytes([0, 255, 65, 0, 66, 255, 137, 10])
+            assert _put_bytes(srv_port, "/files/blob.bin", blob) == 201
+
+            # JSON listing includes it.
+            status, body = _get(srv_port, "/files")
+            assert status == 200 and "blob.bin" in body
+
+            # Download is byte-identical (binary round-trip over the wire).
+            status, data, _ = _get_raw(srv_port, "/files/blob.bin")
+            assert status == 200 and data == blob
+
+            # MIME by extension on download.
+            _put_bytes(srv_port, "/files/p.png", b"\x89PNG\x00\x01\x02")
+            status, _, headers = _get_raw(srv_port, "/files/p.png")
+            assert status == 200
+            assert headers.get("Content-Type", "").startswith("image/png")
+
+            # Missing file -> 404.
+            assert _get(srv_port, "/files/nope")[0] == 404
+
+            # Path traversal (sent literally to bypass client normalization) -> 403.
+            resp = _raw_request(
+                srv_port,
+                b"GET /files/../../etc/hosts HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            )
+            assert _status_of(resp) == 403
+            # And it did not leak the file.
+            assert b"localhost" not in resp.lower()
+
+            # CORS preflight -> 204 with the allow-origin header.
+            resp = _raw_request(
+                srv_port,
+                b"OPTIONS /files/x HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
+            )
+            assert _status_of(resp) == 204
+            assert b"access-control-allow-origin: *" in resp.lower()
+
+            # A normal response also carries the CORS header.
+            _, _, headers = _get_raw(srv_port, "/files")
+            assert headers.get("Access-Control-Allow-Origin") == "*"
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)

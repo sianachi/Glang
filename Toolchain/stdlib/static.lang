@@ -1,0 +1,133 @@
+// std/static.lang — filesystem helpers for serving and storing files.
+//
+// Built on the binary-safe file builtins (fileSize / readFileInto /
+// writeFileFrom / listDir), so images, fonts, wasm, and arbitrary uploads
+// round-trip intact — unlike readFile/writeFile, which go through a
+// NUL-terminated string. The reads/writes hit the real filesystem, so this runs
+// on every backend (the interpreters implement the builtins against real files,
+// like readFile already does).
+//
+// sanitizeRelPath is the security boundary: it rejects anything that could
+// escape the served root (.. segments, absolute paths, backslashes, NULs).
+
+import "std/bytes.lang";
+import "std/list.lang";
+import "std/string.lang";
+
+// ── MIME types ───────────────────────────────────────────────────────────────
+
+// Lowercase extension (without the dot) of a path, or "" if none.
+string pathExtension(string path) {
+    int n = len(path);
+    int dot = -1;
+    for (int i = n - 1; i >= 0; i = i - 1) {
+        int c = (int)(path[i]);
+        if (c == 46) { dot = i; }            // '.'
+        if (c == 47 || c == 92) { break; }   // stop at '/' or '\'
+        if (dot >= 0) { break; }
+    }
+    if (dot < 0 || dot == n - 1) { return ""; }
+    return strings::toLowerStr(substr(path, dot + 1, n));
+}
+
+// Content-Type for a path by extension; application/octet-stream by default.
+string mimeType(string path) {
+    string e = pathExtension(path);
+    if (e == "html" || e == "htm") { return "text/html; charset=utf-8"; }
+    if (e == "css")  { return "text/css; charset=utf-8"; }
+    if (e == "js" || e == "mjs") { return "text/javascript; charset=utf-8"; }
+    if (e == "json") { return "application/json"; }
+    if (e == "txt" || e == "md") { return "text/plain; charset=utf-8"; }
+    if (e == "csv")  { return "text/csv; charset=utf-8"; }
+    if (e == "xml")  { return "application/xml"; }
+    if (e == "svg")  { return "image/svg+xml"; }
+    if (e == "png")  { return "image/png"; }
+    if (e == "jpg" || e == "jpeg") { return "image/jpeg"; }
+    if (e == "gif")  { return "image/gif"; }
+    if (e == "webp") { return "image/webp"; }
+    if (e == "ico")  { return "image/x-icon"; }
+    if (e == "woff") { return "font/woff"; }
+    if (e == "woff2") { return "font/woff2"; }
+    if (e == "ttf")  { return "font/ttf"; }
+    if (e == "otf")  { return "font/otf"; }
+    if (e == "wasm") { return "application/wasm"; }
+    if (e == "pdf")  { return "application/pdf"; }
+    if (e == "map")  { return "application/json"; }
+    if (e == "zip")  { return "application/zip"; }
+    return "application/octet-stream";
+}
+
+// ── Path safety ──────────────────────────────────────────────────────────────
+
+// Return a safe relative path, or "" if `rel` could escape the served root.
+// Rejects: a leading '/', any backslash, any NUL, and any ".." path segment.
+// A leading "./" and empty segments are normalised away.
+string sanitizeRelPath(string rel) {
+    int n = len(rel);
+    if (n == 0) { return ""; }
+    if ((int)(rel[0]) == 47) { return ""; }   // absolute path '/'
+
+    List<string> outParts = List<string>();
+    int segStart = 0;
+    for (int i = 0; i <= n; ++i) {
+        bool atEnd = i == n;
+        int c = 0;
+        if (!atEnd) {
+            c = (int)(rel[i]);
+            if (c == 92 || c == 0) { return ""; }  // backslash or NUL anywhere
+        }
+        if (atEnd || c == 47) {                // segment boundary at '/' or end
+            if (i > segStart) {
+                string seg = substr(rel, segStart, i);
+                if (seg == "..") { return ""; }
+                if (seg != ".") { outParts.add(seg); }
+            }
+            segStart = i + 1;
+        }
+    }
+    if (outParts.length() == 0) { return ""; }
+    return strings::join(outParts, "/");
+}
+
+// Join a root dir and an already-sanitized relative path.
+string joinPath(string root, string rel) {
+    int rn = len(root);
+    if (rn == 0) { return rel; }
+    if ((int)(root[rn - 1]) == 47) { return root + rel; }
+    return root + "/" + rel;
+}
+
+// ── Binary file I/O as Bytes ──────────────────────────────────────────────────
+
+// Read a whole file into a fresh Bytes (binary-safe), or null if it is missing
+// or unreadable.
+Bytes* readFileBytes(string path) {
+    int sz = fileSize(path);
+    if (sz < 0) { return null; }
+    Bytes* b = new Bytes(sz + 1);
+    if (sz > 0) {
+        int n = readFileInto(path, b->data, sz);
+        if (n < 0) { delete b; return null; }
+        b->size = n;
+    }
+    return b;
+}
+
+// Write a Bytes buffer to a file (truncating it); true on success.
+bool writeBytesFile(string path, Bytes* b) {
+    int n = writeFileFrom(path, b->data, b->length());
+    return n == b->length();
+}
+
+// Directory entry names (sorted, excluding . and ..), empty list on error.
+List<string> listDirNames(string path) {
+    string raw = listDir(path);
+    List<string> out = List<string>();
+    List<string> lines = strings::split(raw, (char)10);   // split on '\n'
+    int n = lines.length();
+    for (int i = 0; i < n; ++i) {
+        string s = lines.get(i);
+        if (len(s) > 0) { out.add(s); }
+    }
+    return out;
+}
