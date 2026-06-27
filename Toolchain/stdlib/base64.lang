@@ -1,0 +1,83 @@
+// std/base64.lang — standard RFC 4648 Base64 (with '+' '/' and '=' padding).
+//
+// base64Encode turns a Bytes into an ASCII string; base64Decode is the inverse
+// and returns null on malformed input. Operates on Bytes (binary-safe); the
+// encoded form is plain ASCII and so is held as a string.
+
+import "std/bytes.lang";
+import "std/stringbuilder.lang";
+
+char b64Char(int n) {
+    if (n < 26) { return (char)(65 + n); }        // A-Z
+    if (n < 52) { return (char)(97 + n - 26); }   // a-z
+    if (n < 62) { return (char)(48 + n - 52); }   // 0-9
+    if (n == 62) { return (char)43; }             // '+'
+    return (char)47;                              // '/'
+}
+
+// Decode one base64 char to 0..63, -1 for invalid, -2 for '=' padding.
+int b64Value(int c) {
+    if (c >= 65 && c <= 90)  { return c - 65; }       // A-Z
+    if (c >= 97 && c <= 122) { return c - 97 + 26; }  // a-z
+    if (c >= 48 && c <= 57)  { return c - 48 + 52; }  // 0-9
+    if (c == 43) { return 62; }                       // '+'
+    if (c == 47) { return 63; }                       // '/'
+    if (c == 61) { return -2; }                       // '='
+    return -1;
+}
+
+string base64Encode(Bytes* b) {
+    StringBuilder sb = StringBuilder();
+    int n = b->length();
+    int i = 0;
+    while (i + 3 <= n) {
+        int b0 = (int)(b->get(i));
+        int b1 = (int)(b->get(i + 1));
+        int b2 = (int)(b->get(i + 2));
+        int triple = (b0 << 16) | (b1 << 8) | b2;
+        sb.appendChar(b64Char((triple >> 18) & 63));
+        sb.appendChar(b64Char((triple >> 12) & 63));
+        sb.appendChar(b64Char((triple >> 6) & 63));
+        sb.appendChar(b64Char(triple & 63));
+        i = i + 3;
+    }
+    int rem = n - i;
+    if (rem == 1) {
+        int b0 = (int)(b->get(i));
+        int triple = b0 << 16;
+        sb.appendChar(b64Char((triple >> 18) & 63));
+        sb.appendChar(b64Char((triple >> 12) & 63));
+        sb.appendChar((char)61);   // '='
+        sb.appendChar((char)61);
+    } else if (rem == 2) {
+        int b0 = (int)(b->get(i));
+        int b1 = (int)(b->get(i + 1));
+        int triple = (b0 << 16) | (b1 << 8);
+        sb.appendChar(b64Char((triple >> 18) & 63));
+        sb.appendChar(b64Char((triple >> 12) & 63));
+        sb.appendChar(b64Char((triple >> 6) & 63));
+        sb.appendChar((char)61);   // '='
+    }
+    return sb.build();
+}
+
+Bytes* base64Decode(string s) {
+    int n = len(s);
+    Bytes* out = new Bytes(n + 1);
+    int acc = 0;
+    int bits = 0;
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(s[i]);
+        if (c == 32 || c == 10 || c == 13 || c == 9) { continue; }   // skip whitespace
+        int v = b64Value(c);
+        if (v == -2) { break; }            // padding -> done
+        if (v < 0) { delete out; return null; }
+        acc = (acc << 6) | v;
+        bits = bits + 6;
+        if (bits >= 8) {
+            bits = bits - 8;
+            out->append((byte)((acc >> bits) & 255));
+        }
+    }
+    return out;
+}

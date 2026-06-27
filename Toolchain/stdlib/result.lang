@@ -1,0 +1,54 @@
+// std/result.lang — a generic success-or-error value, Result<T, E>.
+//
+// The error-returning complement to Option<T>: a Result either holds a value
+// (ok) or an error (err). Modelled as a class (like Option) since the stdlib
+// keeps generic containers as classes. Construct with the ok()/err() helpers.
+//
+//   Result<int, string> r = ok<int, string>(42);
+//   if (r.isOk()) { print(r.get()); } else { print(r.error()); }
+
+class Result<T, E> {
+    bool success;
+    T value;
+    E err;
+
+    Result() {
+        this.success = false;
+    }
+
+    void setOk(T v) {
+        this.success = true;
+        this.value = v;
+    }
+
+    void setErr(E e) {
+        this.success = false;
+        this.err = e;
+    }
+
+    bool isOk()  { return this.success; }
+    bool isErr() { return this.success == false; }
+
+    // The value (zero value of T when this is an error).
+    T get() { return this.value; }
+
+    T getOr(T fallback) {
+        if (this.success) { return this.value; }
+        return fallback;
+    }
+
+    // The error (zero value of E when this is ok).
+    E error() { return this.err; }
+}
+
+Result<T, E>* ok<T, E>(T v) {
+    Result<T, E>* r = new Result<T, E>();
+    r->setOk(v);
+    return r;
+}
+
+Result<T, E>* err<T, E>(E e) {
+    Result<T, E>* r = new Result<T, E>();
+    r->setErr(e);
+    return r;
+}

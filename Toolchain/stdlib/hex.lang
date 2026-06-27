@@ -1,0 +1,44 @@
+// std/hex.lang — lowercase hexadecimal encoding of byte buffers.
+//
+// hexEncode turns a Bytes into a 2-chars-per-byte string; hexDecode is the
+// inverse and returns null on malformed input (odd length or a non-hex digit).
+
+import "std/bytes.lang";
+import "std/stringbuilder.lang";
+
+char hexDigit(int n) {
+    if (n < 10) { return (char)(48 + n); }       // '0'..'9'
+    return (char)(97 + n - 10);                  // 'a'..'f'
+}
+
+// '0'-'9'/'a'-'f'/'A'-'F' to 0..15, or -1 if not a hex digit.
+int hexValue(int c) {
+    if (c >= 48 && c <= 57)  { return c - 48; }   // 0-9
+    if (c >= 97 && c <= 102) { return c - 87; }   // a-f
+    if (c >= 65 && c <= 70)  { return c - 55; }   // A-F
+    return -1;
+}
+
+string hexEncode(Bytes* b) {
+    StringBuilder sb = StringBuilder();
+    int n = b->length();
+    for (int i = 0; i < n; ++i) {
+        int v = (int)(b->get(i));
+        sb.appendChar(hexDigit((v >> 4) & 15));
+        sb.appendChar(hexDigit(v & 15));
+    }
+    return sb.build();
+}
+
+Bytes* hexDecode(string s) {
+    int n = len(s);
+    if (n % 2 != 0) { return null; }
+    Bytes* out = new Bytes(n / 2 + 1);
+    for (int i = 0; i < n; i = i + 2) {
+        int hi = hexValue((int)(s[i]));
+        int lo = hexValue((int)(s[i + 1]));
+        if (hi < 0 || lo < 0) { delete out; return null; }
+        out->append((byte)((hi << 4) | lo));
+    }
+    return out;
+}

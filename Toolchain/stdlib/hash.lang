@@ -1,0 +1,53 @@
+// std/hash.lang — non-cryptographic checksums and hashes (CRC32, FNV-1a).
+//
+// For ETags, content fingerprints, hash-map keys, dedup — NOT for security. All
+// arithmetic is masked to 32 bits and every intermediate fits in int64, so the
+// results are identical under the interpreter and the native compiler.
+
+import "std/bytes.lang";
+
+// ── CRC-32 (IEEE 802.3, reflected, poly 0xEDB88320) ──────────────────────────
+
+int crc32Update(int crc, int byteVal) {
+    int c = crc ^ (byteVal & 255);
+    for (int k = 0; k < 8; ++k) {
+        if ((c & 1) != 0) { c = (c >> 1) ^ 0xEDB88320; }
+        else { c = c >> 1; }
+    }
+    return c & 0xFFFFFFFF;
+}
+
+int crc32(Bytes* b) {
+    int crc = 0xFFFFFFFF;
+    int n = b->length();
+    for (int i = 0; i < n; ++i) { crc = crc32Update(crc, (int)(b->get(i))); }
+    return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+}
+
+int crc32Str(string s) {
+    int crc = 0xFFFFFFFF;
+    int n = len(s);
+    for (int i = 0; i < n; ++i) { crc = crc32Update(crc, (int)(s[i])); }
+    return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+}
+
+// ── FNV-1a (32-bit) ──────────────────────────────────────────────────────────
+
+int fnv1a32Update(int hash, int byteVal) {
+    int h = (hash ^ (byteVal & 255)) & 0xFFFFFFFF;
+    return (h * 16777619) & 0xFFFFFFFF;
+}
+
+int fnv1a32(Bytes* b) {
+    int h = 2166136261;
+    int n = b->length();
+    for (int i = 0; i < n; ++i) { h = fnv1a32Update(h, (int)(b->get(i))); }
+    return h;
+}
+
+int fnv1a32Str(string s) {
+    int h = 2166136261;
+    int n = len(s);
+    for (int i = 0; i < n; ++i) { h = fnv1a32Update(h, (int)(s[i])); }
+    return h;
+}
