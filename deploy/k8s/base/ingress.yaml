@@ -1,0 +1,30 @@
+# Traefik Ingress: routes a hostname to the frontend Service. The frontend's
+# nginx then splits /api -> run and /lsp -> lsp internally. Traefik upgrades the
+# /lsp WebSocket automatically (no special annotation needed).
+#
+# TLS via cert-manager + the existing `letsencrypt-prod` ClusterIssuer (HTTP-01
+# over Traefik, same as the portfolio). The real hostname is supplied by the
+# gitignored local overlay (it patches both the rule host and the tls host).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: glang
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - glang.example.invalid        # patched by the local overlay
+      secretName: glang-app-tls
+  rules:
+    - host: glang.example.invalid      # patched by the local overlay
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

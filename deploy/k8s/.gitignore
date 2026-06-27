@@ -1,0 +1,7 @@
+# Keep cluster- and account-specific details out of git.
+overlay-local/
+.local.env
+*.local.yaml
+*.secret.yaml
+kubeconfig*
+*.kubeconfig

@@ -1,0 +1,42 @@
+# OPTIONAL stricter ingress: only the frontend may reach run/lsp. NOT in the
+# default kustomization because on some CNIs the kubelet's probe traffic (from the
+# node, not a pod) is denied by ingress rules, which would flap readiness. Apply
+# manually and confirm pods stay Ready:
+#   kubectl apply -n glang -f deploy/k8s/networkpolicy-strict-ingress.yaml
+#   kubectl get pods -n glang -w
+# If probes fail, delete these and rely on the egress lock-down alone.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: run-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: run
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 8081
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lsp-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app: lsp
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+      ports:
+        - protocol: TCP
+          port: 8082

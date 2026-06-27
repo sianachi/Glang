@@ -40,6 +40,16 @@ export default function Sidebar({
       >
         <BrandHeader />
         <ProgressMeter done={doneCount} total={TOTAL_LESSONS} />
+        <button
+          onClick={() => onNavigate('playground')}
+          className={`mx-3 mt-2 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            currentId === 'playground'
+              ? 'bg-emerald-600/20 text-emerald-300'
+              : 'text-slate-300 hover:bg-slate-800'
+          }`}
+        >
+          <span className="text-xs leading-none">▶</span> Playground
+        </button>
         <ModuleNav
           modules={MODULES}
           currentId={currentId}

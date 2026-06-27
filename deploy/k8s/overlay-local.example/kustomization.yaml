@@ -1,0 +1,28 @@
+# Template for the gitignored deploy/k8s/overlay-local/ overlay. Copy this dir to
+# overlay-local/ (which is gitignored) and fill in your registry and hostname:
+#
+#   cp -r deploy/k8s/overlay-local.example deploy/k8s/overlay-local
+#   $EDITOR deploy/k8s/overlay-local/kustomization.yaml
+#   kubectl apply -k deploy/k8s/overlay-local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+images:
+  - name: glang-run
+    newName: ghcr.io/YOUR_USER/glang-run
+    newTag: v1
+  - name: glang-lsp
+    newName: ghcr.io/YOUR_USER/glang-lsp
+    newTag: v1
+  - name: glang-frontend
+    newName: ghcr.io/YOUR_USER/glang-frontend
+    newTag: v1
+patches:
+  - target:
+      kind: Ingress
+      name: glang
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: glang.your-domain.example

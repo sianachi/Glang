@@ -1,0 +1,16 @@
+# Committed base — placeholders only, no cluster- or account-specific values.
+# Real registry/tag and the Ingress host come from the gitignored local overlay
+# (deploy/k8s/overlay-local). Deploy with:  kubectl apply -k deploy/k8s/overlay-local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: glang
+resources:
+  - namespace.yaml
+  - run.yaml
+  - lsp.yaml
+  - frontend.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+# Image registry/tag is set by the local overlay (the Deployments use the bare
+# names glang-run / glang-lsp / glang-frontend, which the overlay's images: maps
+# to your real registry). Applying base directly is not intended.

@@ -1,0 +1,51 @@
+# Egress lock-down for the GLang services: they may only reach cluster DNS,
+# nothing else outbound. This is defense-in-depth around the untrusted code the
+# run service interprets — it cannot phone home or scan the network (the
+# interpreter's own socket builtins are in-memory loopback anyway). Egress rules
+# (unlike ingress restrictions) do not interfere with kubelet liveness/readiness
+# probes, so they are safe to apply by default. k3s enforces NetworkPolicy via
+# its built-in controller.
+#
+# Stricter ingress restriction (only allow frontend -> run/lsp) is in
+# networkpolicy-strict-ingress.yaml — not enabled by default because probe
+# traffic from the node can be denied by ingress rules on some CNIs; apply it
+# only after confirming pods stay Ready.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: run-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: run
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lsp-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: lsp
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

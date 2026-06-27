@@ -179,11 +179,12 @@ void stashErr(RunOutcome* out, string kind, string msg, int line, int col) {
     out->errCol = col;
 }
 
-RunOutcome* executeSource(string source, string stdlibDir, int maxSteps, int maxDepth, string tmpPath) {
+// Run an already-written entry file through the pipeline. The catch only writes
+// into the heap RunOutcome (setjmp-safe); reads happen after, in outcomeToJson.
+RunOutcome* runEntry(string entryPath, string stdlibDir, int maxSteps, int maxDepth) {
     RunOutcome* out = new RunOutcome();
-    writeFile(tmpPath, source);
     try {
-        runPipeline(tmpPath, stdlibDir, maxSteps, maxDepth, out);
+        runPipeline(entryPath, stdlibDir, maxSteps, maxDepth, out);
     } catch (RtError* re) {
         stashErr(out, "runtime", re->message, 0, 0);
     } catch (AnalyzeError* ae) {
@@ -196,6 +197,11 @@ RunOutcome* executeSource(string source, string stdlibDir, int maxSteps, int max
         stashErr(out, "load", lo->message, lo->line, lo->col);
     }
     return out;
+}
+
+RunOutcome* executeSource(string source, string stdlibDir, int maxSteps, int maxDepth, string tmpPath) {
+    writeFile(tmpPath, source);
+    return runEntry(tmpPath, stdlibDir, maxSteps, maxDepth);
 }
 
 // ── JSON shaping ─────────────────────────────────────────────────────────────
@@ -256,33 +262,107 @@ HttpResponse* jsonResponse(int status, Json* obj) {
     return r;
 }
 
+Json* errBody(string msg) {
+    Json* o = jsonObject();
+    jsonSet(o, "ok", jsonBool(false));
+    jsonSet(o, "exit", jsonInt(1));
+    jsonSet(o, "output", jsonArray());
+    jsonSet(o, "stderr", jsonStr(msg));
+    return o;
+}
+
+HttpResponse* errResp(int status, string msg) { return jsonResponse(status, errBody(msg)); }
+HttpResponse* denyResp() {
+    return jsonResponse(200, errBody(
+        "filesystem access (readFile/writeFile/...) is disabled in the sandbox"));
+}
+
+// ── multi-file project support ───────────────────────────────────────────────
+// (listHas(List<string>, string) is provided by the imported compiler modules.)
+
+// A safe project file name: a basename ending in `.lang`, no path separators or
+// `..` (prevents writing outside the temp dir).
+bool validProjectName(string name) {
+    int n = len(name);
+    if (n < 6) { return false; }
+    if (!(endsWith(name, ".lang"))) { return false; }
+    if (contains(name, "..")) { return false; }
+    for (int i = 0; i < n; ++i) {
+        char c = name[i];
+        int code = (int) c;
+        bool ok = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+            || (code >= 48 && code <= 57) || c == '_' || c == '-' || c == '.';
+        if (!ok) { return false; }
+    }
+    return true;
+}
+
+// Truncate any `.lang` file in `dir` that is not part of the current project, so
+// a stale file from a previous request can't be imported (per-request isolation
+// without a delete builtin).
+void neutralizeStale(string dir, List<string> keep) {
+    string raw = listDir(dir);
+    List<string> entries = strings::split(raw, (char) 10);
+    int n = entries.length();
+    for (int i = 0; i < n; ++i) {
+        string e = entries.get(i);
+        if (len(e) == 0) { continue; }
+        if (!(endsWith(e, ".lang"))) { continue; }
+        if (!(listHas(keep, e))) { writeFile(dir + "/" + e, ""); }
+    }
+}
+
+// POST /api/run with { files: [{name, content}], entry } — write the project to
+// the temp dir and run the entry file (the loader resolves cross-file imports).
+HttpResponse* handleProject(Json* obj) {
+    string dir = cfgTmp();
+    string entry = "main.lang";
+    if (jsonHas(obj, "entry")) { entry = jsonAsStr(jsonGet(obj, "entry")); }
+
+    Json* files = jsonGet(obj, "files");
+    if (!(jsonIsArray(files))) { return errResp(400, "'files' must be an array"); }
+    int nfiles = jsonLen(files);
+    if (nfiles < 1) { return errResp(400, "at least one file is required"); }
+
+    // Validate everything before writing anything.
+    List<string> names = List<string>();
+    for (int i = 0; i < nfiles; ++i) {
+        Json* f = jsonAt(files, i);
+        string name = jsonAsStr(jsonGet(f, "name"));
+        string content = jsonAsStr(jsonGet(f, "content"));
+        if (!(validProjectName(name))) {
+            return errResp(400, "invalid file name '" + name + "' (basename ending in .lang)");
+        }
+        if (listHas(names, name)) { return errResp(400, "duplicate file name '" + name + "'"); }
+        if (usesBannedBuiltin(content)) { return denyResp(); }
+        names.add(name);
+    }
+    if (!(validProjectName(entry)) || !(listHas(names, entry))) {
+        return errResp(400, "'entry' must be one of the project files");
+    }
+
+    neutralizeStale(dir, names);
+    for (int i = 0; i < nfiles; ++i) {
+        Json* f = jsonAt(files, i);
+        writeFile(dir + "/" + jsonAsStr(jsonGet(f, "name")), jsonAsStr(jsonGet(f, "content")));
+    }
+
+    RunOutcome* out = runEntry(dir + "/" + entry, cfgStdlib(), cfgMaxSteps(), cfgMaxDepth());
+    return jsonResponse(200, outcomeToJson(out));
+}
+
 // ── handlers ─────────────────────────────────────────────────────────────────
 
 HttpResponse* handleRun(HttpRequest* req) {
     string body = bytesRangeToStr(req->body, 0, req->body->length());
-    string source = "";
-    try {
-        Json* obj = jsonParse(body);
-        source = jsonAsStr(jsonGet(obj, "source"));
-    } catch (Exception* e) {
-        Json* o = jsonObject();
-        jsonSet(o, "ok", jsonBool(false));
-        jsonSet(o, "exit", jsonInt(1));
-        jsonSet(o, "output", jsonArray());
-        jsonSet(o, "stderr", jsonStr("bad request: expected JSON {\"source\": \"...\"}"));
-        return jsonResponse(400, o);
-    }
+    Json* obj = jsonParse(body);            // wrapped by serveConn's try/catch
+    if (!(jsonIsObject(obj))) { return errResp(400, "expected a JSON object"); }
 
-    if (usesBannedBuiltin(source)) {
-        Json* o = jsonObject();
-        jsonSet(o, "ok", jsonBool(false));
-        jsonSet(o, "exit", jsonInt(1));
-        jsonSet(o, "output", jsonArray());
-        jsonSet(o, "stderr", jsonStr(
-            "filesystem access (readFile/writeFile/...) is disabled in the sandbox"));
-        return jsonResponse(200, o);
-    }
+    if (jsonHas(obj, "files")) { return handleProject(obj); }
 
+    // Legacy single-file form: { "source": "..." }
+    string source = jsonAsStr(jsonGet(obj, "source"));
+    if (usesBannedBuiltin(source)) { return denyResp(); }
     string tmpPath = cfgTmp() + "/glang_run.lang";
     RunOutcome* out = executeSource(source, cfgStdlib(), cfgMaxSteps(), cfgMaxDepth(), tmpPath);
     return jsonResponse(200, outcomeToJson(out));
@@ -326,7 +406,15 @@ void serveConn(TcpSocket* sock) {
         tmp.dispose();
     }
     if (req == null) { return; }
-    HttpResponse* resp = dispatch(req);
+    // Any exception from a handler (e.g. malformed JSON) becomes a 400 rather
+    // than crashing the server. Safe across the native setjmp/longjmp model:
+    // resp is read after the try/catch, never inside the catch.
+    HttpResponse* resp = null;
+    try {
+        resp = dispatch(req);
+    } catch (Exception* e) {
+        resp = errResp(400, "bad request: " + e->message);
+    }
     addCors(resp);
     Bytes* out = renderResponse(resp, false);
     sock->send(out);
