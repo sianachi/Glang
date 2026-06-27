@@ -1,0 +1,274 @@
+// lsp/server.lang — the GLang Language Server entry point.
+//
+// Speaks LSP over stdio (default) or TCP (`--tcp <port>`). The base-protocol
+// framing lives in jsonrpc.lang, the JSON model in std/json.lang, and the
+// compiler front-end is driven through analysis.lang. This file owns the
+// document store, the request/notification dispatch loop, and the lifecycle.
+//
+// Build (from toolchain/):
+//   ./glangc lsp/server.lang lsp/server.c
+//   gcc -O1 -w lsp/server.c runtime/glang_runtime.c -o glang-lsp
+// Run:
+//   ./glang-lsp --stdio        # for editors
+//   ./glang-lsp --tcp 6789     # for the browser bridge / tests
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/json.lang";
+import "std/net.lang";
+import "jsonrpc.lang";
+import "analysis.lang";
+import "features.lang";
+
+// JSON-RPC error code.
+int ERR_METHOD_NOT_FOUND() { return -32601; }
+
+// ── small JSON builders shared across handlers ───────────────────────────────
+
+Json* lspPos(int line, int ch) {
+    Json* p = jsonObject();
+    jsonSet(p, "line", jsonInt(line));
+    jsonSet(p, "character", jsonInt(ch));
+    return p;
+}
+
+Json* lspRange(int line, int startCh, int endLine, int endCh) {
+    Json* r = jsonObject();
+    jsonSet(r, "start", lspPos(line, startCh));
+    jsonSet(r, "end", lspPos(endLine, endCh));
+    return r;
+}
+
+Json* diagToJson(Diagnostic* d) {
+    Json* dj = jsonObject();
+    jsonSet(dj, "range", lspRange(d->line, d->startChar, d->line, d->endChar));
+    jsonSet(dj, "severity", jsonInt(d->severity));
+    jsonSet(dj, "source", jsonStr("glangc"));
+    jsonSet(dj, "message", jsonStr(d->message));
+    return dj;
+}
+
+class LspServer {
+    Transport* transport;
+    Map<string, string> docs;
+    bool shutdownRequested;
+    bool exitNow;
+
+    LspServer(Transport* tr) {
+        this.transport = tr;
+        this.docs = Map<string, string>();
+        this.shutdownRequested = false;
+        this.exitNow = false;
+    }
+
+    void serve() {
+        while (true) {
+            if (this.transport->atEof()) { return; }
+            string msg = this.transport->readMessage();
+            if (len(msg) == 0) {
+                if (this.transport->atEof()) { return; }
+                continue;
+            }
+            try {
+                this.handleMessage(msg);
+            } catch (Exception* e) {
+                printErr("glang-lsp: handler error: " + e->message);
+            }
+            if (this.exitNow) { return; }
+        }
+    }
+
+    // ── transport-shaped reply helpers ───────────────────────────────────────
+
+    void reply(Json* id, Json* result) {
+        Json* resp = jsonObject();
+        jsonSet(resp, "jsonrpc", jsonStr("2.0"));
+        jsonSet(resp, "id", id);
+        jsonSet(resp, "result", result);
+        this.transport->writeMessage(jsonStringify(resp));
+    }
+
+    void replyError(Json* id, int code, string message) {
+        Json* err = jsonObject();
+        jsonSet(err, "code", jsonInt(code));
+        jsonSet(err, "message", jsonStr(message));
+        Json* resp = jsonObject();
+        jsonSet(resp, "jsonrpc", jsonStr("2.0"));
+        jsonSet(resp, "id", id);
+        jsonSet(resp, "error", err);
+        this.transport->writeMessage(jsonStringify(resp));
+    }
+
+    void notify(string method, Json* params) {
+        Json* n = jsonObject();
+        jsonSet(n, "jsonrpc", jsonStr("2.0"));
+        jsonSet(n, "method", jsonStr(method));
+        jsonSet(n, "params", params);
+        this.transport->writeMessage(jsonStringify(n));
+    }
+
+    // ── dispatch ─────────────────────────────────────────────────────────────
+
+    void handleMessage(string raw) {
+        Json* req = jsonParse(raw);
+        if (!(jsonIsObject(req))) { return; }
+        if (!(jsonHas(req, "method"))) { return; }   // a response we don't track
+        string method = jsonAsStr(jsonGet(req, "method"));
+        bool isRequest = jsonHas(req, "id");
+        Json* id = jsonGetOr(req, "id", jsonNull());
+
+        if (method == "initialize") { this.onInitialize(id); return; }
+        if (method == "initialized") { return; }
+        if (method == "shutdown") {
+            this.shutdownRequested = true;
+            this.reply(id, jsonNull());
+            return;
+        }
+        if (method == "exit") { this.exitNow = true; return; }
+
+        if (method == "textDocument/didOpen") { this.onDidOpen(req); return; }
+        if (method == "textDocument/didChange") { this.onDidChange(req); return; }
+        if (method == "textDocument/didClose") { this.onDidClose(req); return; }
+
+        if (method == "textDocument/hover") { this.onHover(id, req); return; }
+        if (method == "textDocument/completion") { this.onCompletion(id, req); return; }
+        if (method == "textDocument/definition") { this.onDefinition(id, req); return; }
+        if (method == "textDocument/documentSymbol") { this.onDocumentSymbol(id, req); return; }
+
+        if (isRequest) {
+            this.replyError(id, ERR_METHOD_NOT_FOUND(), "method not found: " + method);
+        }
+    }
+
+    void onInitialize(Json* id) {
+        Json* caps = jsonObject();
+        jsonSet(caps, "textDocumentSync", jsonInt(1)); // 1 = Full
+        jsonSet(caps, "hoverProvider", jsonBool(true));
+        Json* comp = jsonObject();
+        Json* triggers = jsonArray();
+        jsonPush(triggers, jsonStr("."));
+        jsonSet(comp, "triggerCharacters", triggers);
+        jsonSet(caps, "completionProvider", comp);
+        jsonSet(caps, "definitionProvider", jsonBool(true));
+        jsonSet(caps, "documentSymbolProvider", jsonBool(true));
+
+        Json* sinfo = jsonObject();
+        jsonSet(sinfo, "name", jsonStr("glang-lsp"));
+        jsonSet(sinfo, "version", jsonStr("0.1.0"));
+
+        Json* result = jsonObject();
+        jsonSet(result, "capabilities", caps);
+        jsonSet(result, "serverInfo", sinfo);
+        this.reply(id, result);
+    }
+
+    // ── document sync + diagnostics ──────────────────────────────────────────
+
+    string uriOf(Json* req) {
+        Json* td = jsonGet(jsonGet(req, "params"), "textDocument");
+        return jsonAsStr(jsonGet(td, "uri"));
+    }
+
+    void onDidOpen(Json* req) {
+        Json* td = jsonGet(jsonGet(req, "params"), "textDocument");
+        string uri = jsonAsStr(jsonGet(td, "uri"));
+        string text = jsonAsStr(jsonGet(td, "text"));
+        this.docs.set(uri, text);
+        this.publishDiagnostics(uri, text);
+    }
+
+    void onDidChange(Json* req) {
+        string uri = this.uriOf(req);
+        Json* changes = jsonGet(jsonGet(req, "params"), "contentChanges");
+        int cn = jsonLen(changes);
+        if (cn > 0) {
+            // Full sync: the final change carries the whole document.
+            string text = jsonAsStr(jsonGet(jsonAt(changes, cn - 1), "text"));
+            this.docs.set(uri, text);
+            this.publishDiagnostics(uri, text);
+        }
+    }
+
+    void onDidClose(Json* req) {
+        string uri = this.uriOf(req);
+        if (this.docs.has(uri)) { this.docs.remove(uri); }
+        Json* params = jsonObject();
+        jsonSet(params, "uri", jsonStr(uri));
+        jsonSet(params, "diagnostics", jsonArray());
+        this.notify("textDocument/publishDiagnostics", params);
+    }
+
+    void publishDiagnostics(string uri, string text) {
+        AnalysisResult* res = analyzeDoc(text, uriToPath(uri));
+        Json* arr = jsonArray();
+        int n = res->diagnostics.length();
+        for (int i = 0; i < n; ++i) {
+            jsonPush(arr, diagToJson(res->diagnostics.get(i)));
+        }
+        Json* params = jsonObject();
+        jsonSet(params, "uri", jsonStr(uri));
+        jsonSet(params, "diagnostics", arr);
+        this.notify("textDocument/publishDiagnostics", params);
+    }
+
+    // ── language features (implemented in features.lang) ─────────────────────
+
+    string docText(Json* req) {
+        string uri = this.uriOf(req);
+        return this.docs.getOr(uri, "");
+    }
+
+    void onHover(Json* id, Json* req) {
+        Json* pos = jsonGet(jsonGet(req, "params"), "position");
+        int line = jsonAsInt(jsonGet(pos, "line"));
+        int ch = jsonAsInt(jsonGet(pos, "character"));
+        this.reply(id, hoverAt(this.docText(req), this.uriOf(req), line, ch));
+    }
+
+    void onCompletion(Json* id, Json* req) {
+        this.reply(id, completionFor(this.docText(req), this.uriOf(req)));
+    }
+
+    void onDefinition(Json* id, Json* req) {
+        Json* pos = jsonGet(jsonGet(req, "params"), "position");
+        int line = jsonAsInt(jsonGet(pos, "line"));
+        int ch = jsonAsInt(jsonGet(pos, "character"));
+        this.reply(id, definitionAt(this.docText(req), this.uriOf(req), line, ch));
+    }
+
+    void onDocumentSymbol(Json* id, Json* req) {
+        this.reply(id, documentSymbols(this.docText(req), this.uriOf(req)));
+    }
+}
+
+int main() {
+    int kind = TRANSPORT_STDIO();
+    int port = 0;
+    int argc = getArgCount();
+    int ai = 0;
+    while (ai < argc) {
+        string a = getArg(ai);
+        if (a == "--stdio") { kind = TRANSPORT_STDIO(); }
+        else if (a == "--tcp") {
+            kind = TRANSPORT_TCP();
+            if (ai + 1 < argc) { port = parseInt(getArg(ai + 1)); ai = ai + 1; }
+        }
+        ai = ai + 1;
+    }
+
+    Transport* tr = null;
+    if (kind == TRANSPORT_TCP()) {
+        TcpListener lis = TcpListener(port);
+        printErr("glang-lsp: listening on tcp port " + toString(lis.port()));
+        TcpSocket* sock = lis.accept();
+        tr = new Transport(TRANSPORT_TCP(), sock);
+    } else {
+        printErr("glang-lsp: serving on stdio");
+        tr = new Transport(TRANSPORT_STDIO(), null);
+    }
+
+    LspServer srv = LspServer(tr);
+    srv.serve();
+    return 0;
+}

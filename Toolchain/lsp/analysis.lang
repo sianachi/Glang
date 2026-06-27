@@ -1,0 +1,342 @@
+// lsp/analysis.lang — run the GLang front-end over an in-memory document and
+// return diagnostics plus the artifacts the feature handlers need (the token
+// stream and the populated GlobalEnv).
+//
+// This is the analyse_dump.lang pipeline, refactored to take a source string
+// and surface (line,col,message) instead of printing. The pipeline is
+// fail-fast, so each call yields at most ONE diagnostic — the first error.
+// Positions from the compiler are 1-based; LSP wants 0-based, so we convert
+// here and size the squiggle to the offending token's text when we can find it.
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "../compiler/token.lang";
+import "../compiler/glexer.lang";
+import "../compiler/token_stream.lang";
+import "../compiler/ast.lang";
+import "../compiler/type_parser.lang";
+import "../compiler/expr_parser.lang";
+import "../compiler/stmt_parser.lang";
+import "../compiler/decl_parser.lang";
+import "../compiler/symtab.lang";
+import "../compiler/tu_core.lang";
+import "../compiler/tu_env.lang";
+import "../compiler/pass2_support.lang";
+import "../compiler/retcheck.lang";
+import "../compiler/namespace.lang";
+import "../compiler/mono.lang";
+import "../compiler/pass1.lang";
+import "../compiler/pass2.lang";
+import "../compiler/loader.lang";
+
+// LSP DiagnosticSeverity
+int SEVERITY_ERROR()   { return 1; }
+int SEVERITY_WARNING() { return 2; }
+
+// A diagnostic in LSP coordinates (0-based line/character, end exclusive).
+class Diagnostic {
+    int line;
+    int startChar;
+    int endChar;
+    string message;
+    int severity;
+    Diagnostic(int ln, int sc, int ec, string msg, int sev) {
+        this.line = ln;
+        this.startChar = sc;
+        this.endChar = ec;
+        this.message = msg;
+        this.severity = sev;
+    }
+}
+
+// A captured error before its source position has been resolved against the
+// token stream. Stored by the catch (a write through the heap result, which is
+// reliable) and consumed after the try/catch by finalizeDiagnostics.
+class RawError {
+    string message;
+    int line;
+    int col;
+    RawError(string m, int ln, int c) {
+        this.message = m;
+        this.line = ln;
+        this.col = c;
+    }
+}
+
+// Everything one analysis pass produces. tokens is empty when lexing itself
+// failed; env is null when analysis did not complete.
+class AnalysisResult {
+    List<Diagnostic*> diagnostics;
+    List<RawError*> rawErrors;
+    List<Token*> tokens;
+    GlobalEnv* env;
+    bool ok;
+    AnalysisResult(List<Diagnostic*> d, List<Token*> t, GlobalEnv* e, bool o) {
+        this.diagnostics = d;
+        this.rawErrors = List<RawError*>();
+        this.tokens = t;
+        this.env = e;
+        this.ok = o;
+    }
+}
+
+// The token starting exactly at 1-based (line,col), or null.
+Token* tokenAtPos(List<Token*> tokens, int line, int col) {
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        if (t->line == line && t->col == col) { return t; }
+    }
+    return null;
+}
+
+// The text between the first pair of single quotes in `msg`, or "".
+string firstQuoted(string msg) {
+    int n = len(msg);
+    int i = 0;
+    while (i < n && msg[i] != '\'') { i = i + 1; }
+    if (i >= n) { return ""; }
+    i = i + 1;
+    StringBuilder sb = StringBuilder();
+    while (i < n && msg[i] != '\'') { sb.appendChar(msg[i]); i = i + 1; }
+    return sb.build();
+}
+
+// The first IDENT token with the given text, or null.
+Token* findIdentToken(List<Token*> tokens, string name) {
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        if (t->type == TokenType.IDENT && t->value == name) { return t; }
+    }
+    return null;
+}
+
+// Build a 0-based diagnostic from a 1-based compiler (line,col), sizing the
+// range to the offending token. Lexer/parser errors carry real positions; most
+// analyser (type) errors do not (AST nodes have no positions), reporting (0,0).
+// In that case we anchor on the identifier the message names in quotes — which
+// covers undefined-name/unknown-type errors. Pure type-mismatch messages whose
+// quoted text is not an identifier in the source fall back to the file start.
+Diagnostic* makeDiag(List<Token*> tokens, int line, int col, string msg) {
+    int useLine = line;
+    int useCol = col;
+    int wlen = 1;
+    if (line <= 0) {
+        string name = firstQuoted(msg);
+        if (len(name) > 0) {
+            Token* t = findIdentToken(tokens, name);
+            if (t != null) {
+                useLine = t->line;
+                useCol = t->col;
+                wlen = len(name);
+            }
+        }
+    } else {
+        Token* t = tokenAtPos(tokens, line, col);
+        if (t != null && len(t->value) > 0) { wlen = len(t->value); }
+    }
+    int l0 = useLine - 1;
+    if (l0 < 0) { l0 = 0; }
+    int c0 = useCol - 1;
+    if (c0 < 0) { c0 = 0; }
+    int endC = c0 + wlen;
+    if (endC <= c0) { endC = c0 + 1; }
+    return new Diagnostic(l0, c0, endC, msg, SEVERITY_ERROR());
+}
+
+// ── document path + stdlib + import resolution ───────────────────────────────
+
+// Hex digit value, or -1 if `c` is not a hex digit.
+int hexVal(char c) {
+    if ((int)c >= (int)'0' && (int)c <= (int)'9') { return (int)c - (int)'0'; }
+    if ((int)c >= (int)'a' && (int)c <= (int)'f') { return (int)c - (int)'a' + 10; }
+    if ((int)c >= (int)'A' && (int)c <= (int)'F') { return (int)c - (int)'A' + 10; }
+    return -1;
+}
+
+// Decode %XX escapes in a (file) URI path. Leaves malformed escapes untouched.
+string percentDecode(string s) {
+    int n = len(s);
+    StringBuilder sb = StringBuilder();
+    int i = 0;
+    while (i < n) {
+        char c = s[i];
+        if (c == '%' && i + 2 < n) {
+            int hi = hexVal(s[i + 1]);
+            int lo = hexVal(s[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                sb.appendChar((char)(hi * 16 + lo));
+                i = i + 3;
+                continue;
+            }
+        }
+        sb.appendChar(c);
+        i = i + 1;
+    }
+    return sb.build();
+}
+
+// Turn a `file://` document URI into a filesystem path. A non-file URI (or a
+// bare path) is returned percent-decoded but otherwise unchanged.
+string uriToPath(string uri) {
+    string p = uri;
+    if (startsWith(uri, "file://")) {
+        p = substr(uri, 7, len(uri));
+    }
+    return percentDecode(p);
+}
+
+// Locate the stdlib directory for resolving `std/...` imports by walking up from
+// the document's directory. At each ancestor we accept either a `stdlib/` (the
+// file lives inside the toolchain tree) or a `Toolchain/stdlib/` (an app/project
+// checked out alongside the toolchain). Falls back to a cwd-relative "stdlib".
+string discoverStdlib(string docPath) {
+    string dir = dirname(docPath);
+    int guard = 0;
+    while (guard < 64) {
+        string here = joinPath(dir, "stdlib");
+        if (fileExists(joinPath(here, "list.lang"))) { return here; }
+        string nested = joinPath(joinPath(dir, "Toolchain"), "stdlib");
+        if (fileExists(joinPath(nested, "list.lang"))) { return nested; }
+        string parent = dirname(dir);
+        if (parent == dir) { break; }   // reached the root
+        dir = parent;
+        guard = guard + 1;
+    }
+    return "stdlib";
+}
+
+// Resolve a document's import list against disk and return the merged, post-order
+// declarations of every transitively-imported module. Reuses the compiler's own
+// Loader (dedup + circular-import detection); the root document itself is NOT in
+// `imports` — its in-memory text is parsed separately by runPipeline.
+List<Decl*> loadImportedDecls(List<Decl*> imports, string baseDir, string stdlibDir) {
+    Loader ld = Loader(stdlibDir);
+    int ni = imports.length();
+    for (int i = 0; i < ni; ++i) {
+        Decl* impDecl = imports.get(i);
+        match (*impDecl) {
+            Decl.ImportDecl(path) => {
+                string target = normPath(ld.resolveImport(path, baseDir));
+                ld.loadFile(target, true, path, 0, 0);
+            }
+            _ => { }
+        }
+    }
+    return ld.declarations;
+}
+
+// Port of analyser/analyser.py::_make_exception_decl (from analyse_dump.lang):
+//   class Exception { string message; Exception(string msg) { this.message = msg; } }
+Decl* lspMakeExceptionDecl() {
+    List<FieldDecl*> fields = List<FieldDecl*>();
+    fields.add(new FieldDecl("message", new TypeNode.NamedType("string"), false, "public"));
+
+    List<StaticFieldDecl*> sfields = List<StaticFieldDecl*>();
+    List<MethodDecl*> methods = List<MethodDecl*>();
+
+    Expr* target = new Expr.FieldAccessExpr(new Expr.ThisExpr(), "message");
+    Expr* value = new Expr.IdentifierExpr("msg");
+    Stmt* assign = new Stmt.AssignStmt(target, "=", value);
+    List<Stmt*> ctorStmts = List<Stmt*>();
+    ctorStmts.add(assign);
+    Stmt* ctorBody = new Stmt.Block(ctorStmts);
+
+    List<Param*> ctorParams = List<Param*>();
+    ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));
+    List<Expr*> superArgs = List<Expr*>();
+    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, ctorBody, false, superArgs);
+
+    List<string> ifaces = List<string>();
+    List<string> typeParams = List<string>();
+    Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+
+    return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
+                              ctor, null, "public", typeParams, bounds, false);
+}
+
+// The lex -> parse -> analyse pipeline, writing all artifacts into the heap
+// `res`. Kept in its own function (not inlined in analyzeDoc's try) so that on
+// the native setjmp/longjmp runtime the caller's `res` local stays reliable in
+// the catch: see analyzeDoc.
+void runPipeline(string text, string docPath, AnalysisResult* res) {
+    GLexer lex = GLexer(text);
+    res->tokens = lex.tokenize();
+    Parser* p = new Parser(res->tokens);
+    Program* prog = p->parse();
+
+    // Resolve the document's imports from disk so stdlib (and any other imported
+    // module's) declarations are visible to pass1/pass2 — mirroring glangc's
+    // load() step, but with the root document coming from the in-memory buffer.
+    string stdlibDir = discoverStdlib(docPath);
+    List<Decl*> imported = loadImportedDecls(prog->imports, dirname(docPath), stdlibDir);
+
+    // Order matches the driver: synthetic Exception, then imported decls
+    // (post-order), then the document's own decls last.
+    List<Decl*> withExc = List<Decl*>();
+    withExc.add(lspMakeExceptionDecl());
+    int impn = imported.length();
+    for (int i = 0; i < impn; ++i) { withExc.add(imported.get(i)); }
+    List<Decl*> decls = prog->declarations;
+    int dn = decls.length();
+    for (int i = 0; i < dn; ++i) { withExc.add(decls.get(i)); }
+    Program* prog2 = new Program(prog->imports, withExc);
+
+    Program* resolved = namespace_resolve(prog2);
+    Program* mono = monomorphize(resolved);
+    res->env = new GlobalEnv();
+    pass1_collect(res->env, mono);
+    Pass2Checker checker = Pass2Checker(res->env);
+    checker.check_program(mono);
+    res->ok = true;
+}
+
+// Stash one raw error. The catch must do ONLY this — a write through `res` —
+// because under the native setjmp/longjmp runtime, READING a heap field through
+// a local pointer inside a catch is unreliable (the position recovery, which
+// reads res->tokens, is therefore deferred to finalizeDiagnostics below, run on
+// the normal control-flow path where `res` is reloaded reliably).
+void stashError(AnalysisResult* res, string msg, int line, int col) {
+    res->rawErrors.add(new RawError(msg, line, col));
+}
+
+// Turn stashed raw errors into positioned diagnostics. Runs OUTSIDE any catch,
+// so res->tokens is reliable here.
+void finalizeDiagnostics(AnalysisResult* res) {
+    int n = res->rawErrors.length();
+    for (int i = 0; i < n; ++i) {
+        RawError* e = res->rawErrors.get(i);
+        res->diagnostics.add(makeDiag(res->tokens, e->line, e->col, e->message));
+    }
+}
+
+// Run the front-end over `text`, capturing the first error (if any) as a
+// diagnostic and caching tokens + GlobalEnv for the feature handlers.
+//
+// IMPORTANT (native exception model): the runtime implements try/catch with
+// setjmp/longjmp, which leaves non-volatile locals indeterminate after a
+// longjmp. So all surviving state lives in the heap AnalysisResult, the
+// pipeline runs in runPipeline(), and the catch does nothing but hand `res` and
+// the exception's own fields to recordError(). Reading a try-local (or even a
+// heap field through a clobbered local pointer) directly in the catch is
+// reliable under the interpreter but NOT under the compiled binary.
+AnalysisResult* analyzeDoc(string text, string docPath) {
+    AnalysisResult* res = new AnalysisResult(
+        List<Diagnostic*>(), List<Token*>(), null, false);
+    try {
+        runPipeline(text, docPath, res);
+    } catch (AnalyzeError* ae) {
+        stashError(res, ae->message, ae->line, ae->col);
+    } catch (ParseError* pe) {
+        stashError(res, pe->message, pe->line, pe->col);
+    } catch (LexError* le) {
+        stashError(res, le->message, le->line, le->col);
+    } catch (LoadError* lo) {
+        stashError(res, lo->message, lo->line, lo->col);
+    }
+    finalizeDiagnostics(res);
+    return res;
+}

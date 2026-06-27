@@ -1,0 +1,12 @@
+// lsp/json_dump.lang — read a JSON document on stdin, parse it, and print the
+// re-serialized form. Used to differentially test std/json.lang against a
+// Python json oracle (parse∘stringify∘parse should be value-stable).
+import "std/string.lang";
+import "std/json.lang";
+
+int main() {
+    string src = readStdin();
+    Json* v = jsonParse(src);
+    print(jsonStringify(v));
+    return 0;
+}

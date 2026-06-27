@@ -1,0 +1,366 @@
+// lsp/features.lang — hover, completion, go-to-definition, and document symbols.
+//
+// Every feature re-runs analyzeDoc to get the token stream and the (pass1-
+// populated) GlobalEnv, then answers from those. Positions come from tokens,
+// since the AST carries none: hover/definition/symbols all resolve a name to a
+// declaration by scanning the token stream. That makes definition single-file
+// and "first textual declaration" — a documented approximation.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/json.lang";
+import "../compiler/token.lang";
+import "../compiler/ast.lang";
+import "../compiler/symtab.lang";
+import "analysis.lang";
+
+// LSP CompletionItemKind / SymbolKind constants used below.
+int CK_FUNCTION() { return 3; }
+int CK_CLASS()    { return 7; }
+int CK_INTERFACE(){ return 8; }
+int CK_ENUM()     { return 13; }
+int CK_KEYWORD()  { return 14; }
+int CK_STRUCT()   { return 22; }
+
+int SK_NAMESPACE(){ return 3; }
+int SK_CLASS()    { return 5; }
+int SK_ENUM()     { return 10; }
+int SK_INTERFACE(){ return 11; }
+int SK_FUNCTION() { return 12; }
+int SK_STRUCT()   { return 23; }
+
+// ── position / range JSON ────────────────────────────────────────────────────
+
+Json* posJson(int line, int ch) {
+    Json* p = jsonObject();
+    jsonSet(p, "line", jsonInt(line));
+    jsonSet(p, "character", jsonInt(ch));
+    return p;
+}
+
+Json* rangeJson(int line, int ch, int endLine, int endCh) {
+    Json* r = jsonObject();
+    jsonSet(r, "start", posJson(line, ch));
+    jsonSet(r, "end", posJson(endLine, endCh));
+    return r;
+}
+
+// 0-based LSP range covering a token's text.
+Json* tokenRange(Token* t) {
+    int l = t->line - 1;
+    if (l < 0) { l = 0; }
+    int c = t->col - 1;
+    if (c < 0) { c = 0; }
+    return rangeJson(l, c, l, c + len(t->value));
+}
+
+// ── token lookup helpers ─────────────────────────────────────────────────────
+
+// The token whose text covers 0-based cursor (line0,char0), or null.
+Token* tokenAtCursor(List<Token*> tokens, int line0, int char0) {
+    int line1 = line0 + 1;
+    int col1 = char0 + 1;
+    int n = tokens.length();
+    for (int i = 0; i < n; ++i) {
+        Token* t = tokens.get(i);
+        if (t->line == line1) {
+            int start = t->col;
+            int end = t->col + len(t->value);
+            if (col1 >= start && col1 < end) { return t; }
+        }
+    }
+    return null;
+}
+
+// Could `tt` begin a type (and thus precede a function-declaration name)?
+bool isTypeStartTok(TokenType tt) {
+    return tt == TokenType.KW_INT || tt == TokenType.KW_FLOAT
+        || tt == TokenType.KW_BOOL || tt == TokenType.KW_CHAR
+        || tt == TokenType.KW_BYTE || tt == TokenType.KW_STRING
+        || tt == TokenType.KW_VOID || tt == TokenType.IDENT
+        || tt == TokenType.STAR || tt == TokenType.AT
+        || tt == TokenType.RBRACKET || tt == TokenType.GT;
+}
+
+// ── signature rendering (for hover) ──────────────────────────────────────────
+
+string paramList(List<Param*> ps) {
+    StringBuilder sb = StringBuilder();
+    int n = ps.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.append(", "); }
+        Param* p = ps.get(i);
+        sb.append(showType(p->type));
+        sb.appendChar(' ');
+        sb.append(p->name);
+    }
+    return sb.build();
+}
+
+string funcSig(FunctionInfo* fi) {
+    return showType(fi->return_type) + " " + fi->name + "(" + paramList(fi->params) + ")";
+}
+
+string classSig(ClassInfo* ci) {
+    StringBuilder sb = StringBuilder();
+    sb.append("class ");
+    sb.append(ci->name);
+    if (ci->superclass != "") { sb.append(" extends "); sb.append(ci->superclass); }
+    sb.append(" {");
+    int nf = ci->fields.size;
+    for (int i = 0; i < nf; ++i) {
+        FieldDecl* fd = ci->fields.vals[i];
+        sb.append("\n  ");
+        sb.append(showType(fd->fieldType));
+        sb.appendChar(' ');
+        sb.append(fd->name);
+        sb.appendChar(';');
+    }
+    int mn = ci->instance_methods.size;
+    for (int i = 0; i < mn; ++i) {
+        MethodDecl* md = ci->instance_methods.vals[i];
+        sb.append("\n  ");
+        sb.append(showType(md->returnType));
+        sb.appendChar(' ');
+        sb.append(md->name);
+        sb.append("(");
+        sb.append(paramList(md->params));
+        sb.append(");");
+    }
+    sb.append("\n}");
+    return sb.build();
+}
+
+string enumSig(EnumInfo* ei) {
+    StringBuilder sb = StringBuilder();
+    sb.append("enum ");
+    sb.append(ei->name);
+    sb.append(" { ");
+    int n = ei->variants.size;
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.append(", "); }
+        sb.append(ei->variants.keys[i]);
+    }
+    sb.append(" }");
+    return sb.build();
+}
+
+string unionSig(UnionInfo* ui) {
+    StringBuilder sb = StringBuilder();
+    sb.append("union ");
+    sb.append(ui->name);
+    sb.append(" { ");
+    int n = ui->variants.size;
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.append(", "); }
+        UnionVariantInfo* v = ui->variants.vals[i];
+        sb.append(v->name);
+        int nvf = v->fields.length();
+        if (nvf > 0) {
+            sb.append("(");
+            for (int j = 0; j < nvf; ++j) {
+                if (j > 0) { sb.append(", "); }
+                sb.append(showType(v->fields.get(j)->fieldType));
+            }
+            sb.append(")");
+        }
+    }
+    sb.append(" }");
+    return sb.build();
+}
+
+string mdCode(string body) {
+    return "```glang\n" + body + "\n```";
+}
+
+// ── hover ────────────────────────────────────────────────────────────────────
+
+Json* hoverAt(string text, string uri, int line, int ch) {
+    AnalysisResult* res = analyzeDoc(text, uriToPath(uri));
+    Token* t = tokenAtCursor(res->tokens, line, ch);
+    if (t == null) { return jsonNull(); }
+    if (t->type != TokenType.IDENT) { return jsonNull(); }
+    GlobalEnv* env = res->env;
+    if (env == null) { return jsonNull(); }
+    string name = t->value;
+
+    string md = "";
+    if (env->functions.has(name)) {
+        md = mdCode(funcSig(env->functions.getOr(name, null)));
+    } else if (env->classes.has(name)) {
+        md = mdCode(classSig(env->classes.getOr(name, null)));
+    } else if (env->enums.has(name)) {
+        md = mdCode(enumSig(env->enums.getOr(name, null)));
+    } else if (env->unions.has(name)) {
+        md = mdCode(unionSig(env->unions.getOr(name, null)));
+    } else {
+        return jsonNull();
+    }
+
+    Json* contents = jsonObject();
+    jsonSet(contents, "kind", jsonStr("markdown"));
+    jsonSet(contents, "value", jsonStr(md));
+    Json* hov = jsonObject();
+    jsonSet(hov, "contents", contents);
+    jsonSet(hov, "range", tokenRange(t));
+    return hov;
+}
+
+// ── completion ───────────────────────────────────────────────────────────────
+
+void addItem(Json* arr, string label, int kind, string detail) {
+    Json* it = jsonObject();
+    jsonSet(it, "label", jsonStr(label));
+    jsonSet(it, "kind", jsonInt(kind));
+    if (len(detail) > 0) { jsonSet(it, "detail", jsonStr(detail)); }
+    jsonPush(arr, it);
+}
+
+Json* completionFor(string text, string uri) {
+    AnalysisResult* res = analyzeDoc(text, uriToPath(uri));
+    Json* items = jsonArray();
+    GlobalEnv* env = res->env;
+
+    if (env != null) {
+        int nFns = env->functions.size;
+        for (int i = 0; i < nFns; ++i) {
+            addItem(items, env->functions.keys[i], CK_FUNCTION(),
+                    funcSig(env->functions.vals[i]));
+        }
+        int cn = env->classes.size;
+        for (int i = 0; i < cn; ++i) {
+            addItem(items, env->classes.keys[i], CK_CLASS(), "class");
+        }
+        int en = env->enums.size;
+        for (int i = 0; i < en; ++i) {
+            addItem(items, env->enums.keys[i], CK_ENUM(), "enum");
+        }
+        int un = env->unions.size;
+        for (int i = 0; i < un; ++i) {
+            addItem(items, env->unions.keys[i], CK_STRUCT(), "union");
+        }
+        int nIfaces = env->interfaces.size;
+        for (int i = 0; i < nIfaces; ++i) {
+            addItem(items, env->interfaces.keys[i], CK_INTERFACE(), "interface");
+        }
+    }
+
+    // Keywords.
+    Map<string, TokenType> kw = keywords();
+    int kn = kw.size;
+    for (int i = 0; i < kn; ++i) {
+        addItem(items, kw.keys[i], CK_KEYWORD(), "");
+    }
+
+    // Common builtins.
+    List<string> bi = List<string>();
+    bi.add("print"); bi.add("printErr"); bi.add("len"); bi.add("toString");
+    bi.add("substr"); bi.add("parseInt"); bi.add("parseFloat"); bi.add("startsWith");
+    bi.add("endsWith"); bi.add("contains"); bi.add("indexOf"); bi.add("readFile");
+    bi.add("writeFile"); bi.add("fileExists"); bi.add("readStdin"); bi.add("readByte");
+    bi.add("writeStdout"); bi.add("exit"); bi.add("getArgCount"); bi.add("getArg");
+    int bn = bi.length();
+    for (int i = 0; i < bn; ++i) {
+        addItem(items, bi.get(i), CK_FUNCTION(), "builtin");
+    }
+
+    return items;
+}
+
+// ── definition ───────────────────────────────────────────────────────────────
+
+// The declaration token for `name`: a class/enum/interface/namespace/union
+// header name, or a function-definition name, found by scanning tokens.
+Token* findDeclToken(List<Token*> tokens, string name) {
+    int n = tokens.length();
+
+    // 1. type declarations: <decl-keyword> IDENT==name, or IDENT('union') IDENT==name.
+    for (int i = 0; i + 1 < n; ++i) {
+        Token* a = tokens.get(i);
+        Token* b = tokens.get(i + 1);
+        if (b->type == TokenType.IDENT && b->value == name) {
+            bool isKw = a->type == TokenType.KW_CLASS || a->type == TokenType.KW_ENUM
+                || a->type == TokenType.KW_INTERFACE || a->type == TokenType.KW_NAMESPACE;
+            bool isUnion = a->type == TokenType.IDENT && a->value == "union";
+            if (isKw || isUnion) { return b; }
+        }
+    }
+    // 2. function definition: type IDENT==name '('.
+    for (int i = 1; i + 1 < n; ++i) {
+        Token* t = tokens.get(i);
+        Token* nx = tokens.get(i + 1);
+        Token* pv = tokens.get(i - 1);
+        if (t->type == TokenType.IDENT && t->value == name
+                && nx->type == TokenType.LPAREN && isTypeStartTok(pv->type)) {
+            return t;
+        }
+    }
+    // 3. fallback: first IDENT==name immediately before '('.
+    for (int i = 0; i + 1 < n; ++i) {
+        Token* t = tokens.get(i);
+        Token* nx = tokens.get(i + 1);
+        if (t->type == TokenType.IDENT && t->value == name
+                && nx->type == TokenType.LPAREN) {
+            return t;
+        }
+    }
+    return null;
+}
+
+Json* definitionAt(string text, string uri, int line, int ch) {
+    AnalysisResult* res = analyzeDoc(text, uriToPath(uri));
+    Token* cur = tokenAtCursor(res->tokens, line, ch);
+    if (cur == null) { return jsonNull(); }
+    if (cur->type != TokenType.IDENT) { return jsonNull(); }
+    Token* decl = findDeclToken(res->tokens, cur->value);
+    if (decl == null) { return jsonNull(); }
+    Json* loc = jsonObject();
+    jsonSet(loc, "uri", jsonStr(uri));
+    jsonSet(loc, "range", tokenRange(decl));
+    return loc;
+}
+
+// ── document symbols ─────────────────────────────────────────────────────────
+
+void addSym(Json* arr, Token* nameTok, int kind) {
+    Json* s = jsonObject();
+    jsonSet(s, "name", jsonStr(nameTok->value));
+    jsonSet(s, "kind", jsonInt(kind));
+    jsonSet(s, "range", tokenRange(nameTok));
+    jsonSet(s, "selectionRange", tokenRange(nameTok));
+    jsonPush(arr, s);
+}
+
+Json* documentSymbols(string text, string uri) {
+    AnalysisResult* res = analyzeDoc(text, uriToPath(uri));
+    List<Token*> toks = res->tokens;
+    Json* arr = jsonArray();
+    int n = toks.length();
+    int depth = 0;
+    for (int i = 0; i < n; ++i) {
+        Token* t = toks.get(i);
+        TokenType tt = t->type;
+
+        if (i + 1 < n) {
+            Token* nx = toks.get(i + 1);
+            if (nx->type == TokenType.IDENT) {
+                if (tt == TokenType.KW_CLASS) { addSym(arr, nx, SK_CLASS()); }
+                else if (tt == TokenType.KW_INTERFACE) { addSym(arr, nx, SK_INTERFACE()); }
+                else if (tt == TokenType.KW_ENUM) { addSym(arr, nx, SK_ENUM()); }
+                else if (tt == TokenType.KW_NAMESPACE) { addSym(arr, nx, SK_NAMESPACE()); }
+                else if (tt == TokenType.IDENT && t->value == "union") { addSym(arr, nx, SK_STRUCT()); }
+            }
+            // top-level function definition at brace depth 0: type IDENT '('
+            if (depth == 0 && tt == TokenType.IDENT && i > 0
+                    && nx->type == TokenType.LPAREN
+                    && isTypeStartTok(toks.get(i - 1)->type)) {
+                addSym(arr, t, SK_FUNCTION());
+            }
+        }
+
+        if (tt == TokenType.LBRACE) { depth = depth + 1; }
+        else if (tt == TokenType.RBRACE) { depth = depth - 1; }
+    }
+    return arr;
+}
