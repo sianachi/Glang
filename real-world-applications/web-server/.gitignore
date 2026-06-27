@@ -1,0 +1,4 @@
+# build artifacts
+web-server
+web-server.c
+*.o

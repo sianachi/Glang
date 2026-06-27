@@ -1,0 +1,98 @@
+// real-world-applications/web-server — a comprehensive HTTP server + reverse
+// proxy written entirely in Glang.
+//
+// Built on the standard library: std/server.lang (non-blocking event loop +
+// streaming reverse proxy), std/http.lang (parsing/building), std/router.lang,
+// std/html.lang. A single thread serves many concurrent connections via poll().
+//
+// Usage:
+//   web-server [listenPort] [upstreamHost] [upstreamPort]
+//   defaults:  8080         127.0.0.1      9000
+//
+// Routes:
+//   GET /         a small HTML home page
+//   GET /health   liveness probe (text/plain "ok")
+//   GET /echo     reflects ?msg=... HTML-escaped (XSS-safe)
+//   GET /time     current wall-clock millis
+//   ANY /api/*    reverse-proxied to the configured upstream
+
+import "std/server.lang";
+import "std/html.lang";
+import "std/string.lang";
+
+HttpResponse* home(HttpRequest* req) {
+    string body = ""
+        + "<h1>Glang web server</h1>\n"
+        + "<p>A non-blocking HTTP/1.1 server and reverse proxy, written in Glang.</p>\n"
+        + "<ul>\n"
+        + "<li><a href=\"/health\">/health</a> — liveness probe</li>\n"
+        + "<li><a href=\"/echo?msg=hello\">/echo?msg=hello</a> — HTML-escaped echo</li>\n"
+        + "<li><a href=\"/time\">/time</a> — server clock</li>\n"
+        + "<li><code>/api/*</code> — reverse-proxied to the upstream</li>\n"
+        + "</ul>\n";
+    return httpHtml(200, htmlPage("Glang web server", body));
+}
+
+HttpResponse* health(HttpRequest* req) {
+    return httpText(200, "ok\n");
+}
+
+// Reflects the `msg` query parameter back, HTML-escaped — demonstrates safe
+// handling of untrusted input (a raw echo would be an XSS hole).
+HttpResponse* echo(HttpRequest* req) {
+    string msg = queryParam(req->query, "msg");
+    string body = "<h1>Echo</h1>\n<p>" + htmlEscape(msg) + "</p>\n";
+    return httpHtml(200, htmlPage("Echo", body));
+}
+
+HttpResponse* timeNow(HttpRequest* req) {
+    return httpText(200, intToStr(wallMillis()) + "\n");
+}
+
+// Tiny query-string lookup: find key=value in "a=1&b=2", return value or "".
+string queryParam(string query, string key) {
+    List<string> pairs = strings::split(query, (char)38);   // split on '&'
+    int n = pairs.length();
+    string want = key + "=";
+    for (int i = 0; i < n; ++i) {
+        string p = pairs.get(i);
+        if (startsWith(p, want)) {
+            return substr(p, len(want), len(p));
+        }
+    }
+    return "";
+}
+
+int argOr(int index, int fallback) {
+    if (getArgCount() > index) {
+        string a = getArg(index);
+        if (len(a) > 0) { return parseInt(a); }
+    }
+    return fallback;
+}
+
+string argStr(int index, string fallback) {
+    if (getArgCount() > index) {
+        string a = getArg(index);
+        if (len(a) > 0) { return a; }
+    }
+    return fallback;
+}
+
+int main() {
+    int port = argOr(0, 8080);
+    string upstreamHost = argStr(1, "127.0.0.1");
+    int upstreamPort = argOr(2, 9000);
+
+    HttpServer srv = HttpServer(port);
+    srv.get("/", home);
+    srv.get("/health", health);
+    srv.get("/echo", echo);
+    srv.get("/time", timeNow);
+    srv.proxy("/api", upstreamHost, upstreamPort);
+
+    print("Glang web server listening on port " + intToStr(srv.port()));
+    print("Reverse-proxying /api/* to " + upstreamHost + ":" + intToStr(upstreamPort));
+    srv.serveForever();
+    return 0;
+}
