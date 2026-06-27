@@ -1,0 +1,346 @@
+// services/run_server.lang — GLang HTTP "run" service for the learn platform.
+//
+// POST /api/run  { "source": "<glang program>" }
+//   -> { ok, output:[...lines], stderr, exit, diagnostics?:[{line,col,message}] }
+// GET  /healthz -> "ok"
+//
+// Runs untrusted code IN-PROCESS through the real interpreter, so it supports
+// the full language including `std/` imports (resolved by the loader against
+// --stdlib at runtime). Safety:
+//   * the Interp is given a finite step + call-depth budget (--max-steps), so an
+//     infinite loop or runaway recursion terminates with a clean error;
+//   * an app-layer guard rejects programs that name the raw filesystem builtins;
+//   * Docker provides the real backstop (read-only rootfs, mem/cpu limits, no
+//     network egress, non-root) — see the compose file.
+//
+// Single-threaded poll loop (std/server.lang): one request runs at a time, which
+// is why a single reused temp filename is safe. The execution body is isolated
+// in runPipeline()/executeSource() so a subprocess-per-request executor can
+// replace the in-process call later without touching the HTTP contract.
+//
+// Build (from toolchain/):
+//   ./glangc services/run_server.lang services/run_server.c
+//   gcc -O2 -w services/run_server.c runtime/glang_runtime.c -o services/run_server
+//   ./services/run_server --port 8081 --stdlib stdlib --tmp /tmp --max-steps 5000000
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/json.lang";
+import "std/net.lang";
+import "std/http.lang";
+import "../compiler/loader.lang";
+import "../compiler/token.lang";
+import "../compiler/glexer.lang";
+import "../compiler/token_stream.lang";
+import "../compiler/ast.lang";
+import "../compiler/type_parser.lang";
+import "../compiler/expr_parser.lang";
+import "../compiler/stmt_parser.lang";
+import "../compiler/decl_parser.lang";
+import "../compiler/symtab.lang";
+import "../compiler/tu_core.lang";
+import "../compiler/tu_env.lang";
+import "../compiler/pass2_support.lang";
+import "../compiler/retcheck.lang";
+import "../compiler/namespace.lang";
+import "../compiler/mono.lang";
+import "../compiler/pass1.lang";
+import "../compiler/pass2.lang";
+import "../compiler/interp.lang";
+
+// ── config (read from argv each request; cheap, single-threaded) ─────────────
+
+string argValue(string flag, string deflt) {
+    int argc = getArgCount();
+    for (int i = 0; i + 1 < argc; ++i) {
+        if (getArg(i) == flag) { return getArg(i + 1); }
+    }
+    return deflt;
+}
+
+int argInt(string flag, int deflt) {
+    string v = argValue(flag, "");
+    if (len(v) == 0) { return deflt; }
+    return parseInt(v);
+}
+
+string cfgStdlib() { return argValue("--stdlib", "stdlib"); }
+string cfgTmp()    { return argValue("--tmp", "/tmp"); }
+int cfgMaxSteps()  { return argInt("--max-steps", 5000000); }
+int cfgMaxDepth()  { return argInt("--max-depth", 1500); }
+
+// ── the synthesized Exception class the pipeline prepends ────────────────────
+
+Decl* mkExceptionDecl() {
+    List<FieldDecl*> fields = List<FieldDecl*>();
+    fields.add(new FieldDecl("message", new TypeNode.NamedType("string"), false, "public"));
+    List<StaticFieldDecl*> sfields = List<StaticFieldDecl*>();
+    List<MethodDecl*> methods = List<MethodDecl*>();
+    Expr* target = new Expr.FieldAccessExpr(new Expr.ThisExpr(), "message");
+    Expr* value = new Expr.IdentifierExpr("msg");
+    Stmt* assign = new Stmt.AssignStmt(target, "=", value);
+    List<Stmt*> ctorStmts = List<Stmt*>();
+    ctorStmts.add(assign);
+    Stmt* ctorBody = new Stmt.Block(ctorStmts);
+    List<Param*> ctorParams = List<Param*>();
+    ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));
+    List<Expr*> superArgs = List<Expr*>();
+    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, ctorBody, false, superArgs);
+    List<string> ifaces = List<string>();
+    List<string> typeParams = List<string>();
+    Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+    return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
+                              ctor, null, "public", typeParams, bounds, false);
+}
+
+// ── filesystem-builtin guard ─────────────────────────────────────────────────
+// Reject programs that name the raw FS builtins (directly or via std/io). A
+// token scan over the USER source only (not merged stdlib). Defense-in-depth.
+
+bool isBannedBuiltin(string name) {
+    return name == "readFile" || name == "writeFile" || name == "readFileInto"
+        || name == "writeFileFrom" || name == "fileExists";
+}
+
+bool usesBannedBuiltin(string source) {
+    try {
+        GLexer lex = GLexer(source);
+        List<Token*> toks = lex.tokenize();
+        int n = toks.length();
+        for (int i = 0; i < n; ++i) {
+            Token* t = toks.get(i);
+            if (t->type == TokenType.IDENT && isBannedBuiltin(t->value)) { return true; }
+        }
+    } catch (LexError* le) {
+        return false;   // a lex error is reported by the real pipeline instead
+    }
+    return false;
+}
+
+// ── execution (setjmp-safe: heap outcome, writes-only in catch) ──────────────
+
+class RunOutcome {
+    Interp* interp;     // set before ip.run so captured output survives a throw
+    bool ok;
+    int exit;
+    bool isError;
+    string errKind;     // "lex" | "parse" | "analyze" | "load" | "runtime"
+    string errMsg;
+    int errLine;
+    int errCol;
+    RunOutcome() {
+        this.interp = null;
+        this.ok = false;
+        this.exit = 0;
+        this.isError = false;
+        this.errKind = "";
+        this.errMsg = "";
+        this.errLine = 0;
+        this.errCol = 0;
+    }
+}
+
+// The whole pipeline lives here (a separate function) so the caller's `out`
+// stays reliable in the catch on the native setjmp/longjmp runtime.
+void runPipeline(string tmpPath, string stdlibDir, int maxSteps, int maxDepth, RunOutcome* out) {
+    Loader ld = Loader(stdlibDir);
+    Program* prog = ld.load(tmpPath);
+
+    List<Decl*> decls = prog->declarations;
+    List<Decl*> withExc = List<Decl*>();
+    withExc.add(mkExceptionDecl());
+    int dn = decls.length();
+    for (int i = 0; i < dn; ++i) { withExc.add(decls.get(i)); }
+    Program* prog2 = new Program(prog->imports, withExc);
+
+    Program* resolved = namespace_resolve(prog2);
+    Program* mono = monomorphize(resolved);
+    GlobalEnv* env = new GlobalEnv();
+    pass1_collect(env, mono);
+    Pass2Checker checker = Pass2Checker(env);
+    checker.check_program(mono);
+
+    Interp* ip = new Interp(env);
+    ip->maxSteps = maxSteps;
+    ip->maxDepth = maxDepth;
+    out->interp = ip;            // heap write BEFORE run -> output survives a throw
+    int code = ip->run(mono);
+    out->exit = code;
+    out->ok = true;
+}
+
+void stashErr(RunOutcome* out, string kind, string msg, int line, int col) {
+    out->isError = true;
+    out->errKind = kind;
+    out->errMsg = msg;
+    out->errLine = line;
+    out->errCol = col;
+}
+
+RunOutcome* executeSource(string source, string stdlibDir, int maxSteps, int maxDepth, string tmpPath) {
+    RunOutcome* out = new RunOutcome();
+    writeFile(tmpPath, source);
+    try {
+        runPipeline(tmpPath, stdlibDir, maxSteps, maxDepth, out);
+    } catch (RtError* re) {
+        stashErr(out, "runtime", re->message, 0, 0);
+    } catch (AnalyzeError* ae) {
+        stashErr(out, "analyze", ae->message, ae->line, ae->col);
+    } catch (ParseError* pe) {
+        stashErr(out, "parse", pe->message, pe->line, pe->col);
+    } catch (LexError* le) {
+        stashErr(out, "lex", le->message, le->line, le->col);
+    } catch (LoadError* lo) {
+        stashErr(out, "load", lo->message, lo->line, lo->col);
+    }
+    return out;
+}
+
+// ── JSON shaping ─────────────────────────────────────────────────────────────
+
+Json* outputArray(RunOutcome* out) {
+    Json* arr = jsonArray();
+    if (out->interp != null) {
+        int n = out->interp->output.length();
+        for (int i = 0; i < n; ++i) { jsonPush(arr, jsonStr(out->interp->output.get(i))); }
+    }
+    return arr;
+}
+
+string interpErrText(RunOutcome* out) {
+    if (out->interp == null) { return ""; }
+    StringBuilder sb = StringBuilder();
+    int n = out->interp->errOutput.length();
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar('\n'); }
+        sb.append(out->interp->errOutput.get(i));
+    }
+    return sb.build();
+}
+
+Json* outcomeToJson(RunOutcome* out) {
+    Json* o = jsonObject();
+    if (!(out->isError)) {
+        jsonSet(o, "ok", jsonBool(true));
+        jsonSet(o, "exit", jsonInt(out->exit));
+        jsonSet(o, "output", outputArray(out));
+        string err = interpErrText(out);
+        if (len(err) > 0) { jsonSet(o, "stderr", jsonStr(err)); }
+        else { jsonSet(o, "stderr", jsonNull()); }
+        return o;
+    }
+    jsonSet(o, "ok", jsonBool(false));
+    jsonSet(o, "exit", jsonInt(1));
+    jsonSet(o, "output", outputArray(out));
+    jsonSet(o, "stderr", jsonStr(out->errKind + " error: " + out->errMsg));
+    // Position-bearing errors get a diagnostic (0-based, LSP-style).
+    if (out->errKind != "runtime" && out->errLine > 0) {
+        Json* diags = jsonArray();
+        Json* d = jsonObject();
+        jsonSet(d, "line", jsonInt(out->errLine - 1));
+        jsonSet(d, "character", jsonInt(out->errCol - 1));
+        jsonSet(d, "message", jsonStr(out->errMsg));
+        jsonSet(d, "severity", jsonInt(1));
+        jsonPush(diags, d);
+        jsonSet(o, "diagnostics", diags);
+    }
+    return o;
+}
+
+HttpResponse* jsonResponse(int status, Json* obj) {
+    HttpResponse* r = new HttpResponse(status);
+    r->setContentType("application/json");
+    r->setBodyStr(jsonStringify(obj));
+    return r;
+}
+
+// ── handlers ─────────────────────────────────────────────────────────────────
+
+HttpResponse* handleRun(HttpRequest* req) {
+    string body = bytesRangeToStr(req->body, 0, req->body->length());
+    string source = "";
+    try {
+        Json* obj = jsonParse(body);
+        source = jsonAsStr(jsonGet(obj, "source"));
+    } catch (Exception* e) {
+        Json* o = jsonObject();
+        jsonSet(o, "ok", jsonBool(false));
+        jsonSet(o, "exit", jsonInt(1));
+        jsonSet(o, "output", jsonArray());
+        jsonSet(o, "stderr", jsonStr("bad request: expected JSON {\"source\": \"...\"}"));
+        return jsonResponse(400, o);
+    }
+
+    if (usesBannedBuiltin(source)) {
+        Json* o = jsonObject();
+        jsonSet(o, "ok", jsonBool(false));
+        jsonSet(o, "exit", jsonInt(1));
+        jsonSet(o, "output", jsonArray());
+        jsonSet(o, "stderr", jsonStr(
+            "filesystem access (readFile/writeFile/...) is disabled in the sandbox"));
+        return jsonResponse(200, o);
+    }
+
+    string tmpPath = cfgTmp() + "/glang_run.lang";
+    RunOutcome* out = executeSource(source, cfgStdlib(), cfgMaxSteps(), cfgMaxDepth(), tmpPath);
+    return jsonResponse(200, outcomeToJson(out));
+}
+
+HttpResponse* handleHealth(HttpRequest* req) {
+    return httpText(200, "ok");
+}
+
+// Add permissive CORS so the browser SPA can call this service directly in dev.
+// In production the nginx proxy makes requests same-origin, so this is harmless.
+void addCors(HttpResponse* r) {
+    r->headers->set("Access-Control-Allow-Origin", "*");
+    r->headers->set("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+    r->headers->set("Access-Control-Allow-Headers", "Content-Type");
+}
+
+HttpResponse* dispatch(HttpRequest* req) {
+    if (req->method == "OPTIONS") { return new HttpResponse(204); }
+    if (req->method == "POST" && req->path == "/api/run") { return handleRun(req); }
+    if (req->method == "GET" && req->path == "/healthz") { return handleHealth(req); }
+    return httpText(404, "not found\n");
+}
+
+// Read one request from a freshly accepted connection, dispatch it, and write
+// the response. Blocking, one connection at a time (responses are bounded by the
+// interpreter's step budget, so a request can't run away). Uses std/net.lang +
+// std/http.lang directly rather than std/server.lang, whose static-file helper
+// collides (joinPath) with the compiler's loader that this service also needs.
+void serveConn(TcpSocket* sock) {
+    Bytes* buf = new Bytes(8192);
+    HttpRequest* req = null;
+    while (true) {
+        HttpParseResult* pr = tryParseRequest(buf);
+        if (pr->error) { return; }
+        if (pr->complete) { req = pr->request; break; }
+        Bytes tmp = Bytes(8192);
+        int n = sock->recv(tmp);
+        if (n <= 0) { tmp.dispose(); return; }
+        for (int i = 0; i < n; ++i) { buf->append(tmp.get(i)); }
+        tmp.dispose();
+    }
+    if (req == null) { return; }
+    HttpResponse* resp = dispatch(req);
+    addCors(resp);
+    Bytes* out = renderResponse(resp, false);
+    sock->send(out);
+}
+
+int main() {
+    int port = argInt("--port", 8081);
+    TcpListener lis = TcpListener(port);
+    print("glang run service on port " + toString(lis.port())
+          + " (stdlib=" + cfgStdlib() + ", maxSteps=" + toString(cfgMaxSteps()) + ")");
+    while (true) {
+        TcpSocket* sock = lis.accept();
+        serveConn(sock);
+        sock->close();
+    }
+    return 0;
+}

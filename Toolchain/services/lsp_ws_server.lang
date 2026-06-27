@@ -1,0 +1,235 @@
+// services/lsp_ws_server.lang — the GLang Language Server over WebSocket.
+//
+// A non-blocking poll() loop (the std/server.lang pattern) that accepts many
+// concurrent WebSocket clients. Each connection performs the RFC 6455 upgrade
+// handshake, then carries LSP JSON-RPC: every decoded text frame is handed to
+// that connection's LspSession (lsp/session.lang, shared with the stdio server),
+// and each queued reply/notification is sent back as a WebSocket text frame.
+// publishDiagnostics on didOpen/didChange gives the editor live squiggles.
+//
+// Concurrency: one thread, one loop. I/O is multiplexed so connections don't
+// block on each other, but analysis is synchronous — a single heavyweight
+// document briefly delays the loop. Fine for the small snippets a learning
+// platform sends.
+//
+// Build (from toolchain/):
+//   ./glangc services/lsp_ws_server.lang services/lsp_ws_server.c
+//   gcc -O2 -w services/lsp_ws_server.c runtime/glang_runtime.c -o services/lsp_ws_server
+//   ./services/lsp_ws_server --port 8082
+
+import "std/list.lang";
+import "std/map.lang";
+import "std/string.lang";
+import "std/bytes.lang";
+import "std/net.lang";
+import "std/http.lang";
+import "std/websocket.lang";
+import "../lsp/session.lang";
+
+class WsConn {
+    int fd;
+    Bytes* inbuf;
+    Bytes* outbuf;
+    bool handshakeDone;
+    bool gotEof;
+    bool wantClose;
+    LspSession session;
+
+    WsConn(int fd) {
+        this.fd = fd;
+        this.inbuf = new Bytes(8192);
+        this.outbuf = new Bytes(8192);
+        this.handshakeDone = false;
+        this.gotEof = false;
+        this.wantClose = false;
+        this.session = LspSession();
+    }
+}
+
+string wsBytesToStr(Bytes* b) { return bytesRangeToStr(b, 0, b->length()); }
+
+class WsServer {
+    int listenFd;
+    Map<int, WsConn*> conns;
+
+    WsServer(int port) {
+        this.listenFd = netListen(port);
+        if (this.listenFd < 0) { throw new Exception("WsServer: listen failed"); }
+        netSetNonBlocking(this.listenFd);
+        this.conns = Map<int, WsConn*>();
+    }
+
+    int port() { return netLocalPort(this.listenFd); }
+
+    void serveForever() {
+        while (true) { this.tick(250); }
+    }
+
+    void tick(int timeoutMs) {
+        Poller p = Poller();
+        p.addRead(this.listenFd);
+        int cn = this.conns.size;
+        for (int i = 0; i < cn; ++i) {
+            int fd = this.conns.keys[i];
+            WsConn* c = this.conns.vals[i];
+            int want = 0;
+            if (c->outbuf->length() > 0) { want = want | 2; }
+            if (!(c->gotEof)) { want = want | 1; }
+            if (want != 0) { p.add(fd, want); }
+        }
+
+        int ready = p.wait(timeoutMs);
+        if (ready <= 0) { this.reap(); return; }
+
+        int rc = p.count();
+        for (int i = 0; i < rc; ++i) {
+            int fd = p.fdAt(i);
+            int rev = p.revAt(i);
+            if (rev == 0) { continue; }
+            if (fd == this.listenFd) {
+                if (pollReadable(rev)) { this.acceptNew(); }
+                continue;
+            }
+            WsConn* c = this.conns.getOr(fd, null);
+            if (c == null) { continue; }
+            if (pollReadable(rev) || pollError(rev)) { this.onReadable(c); }
+            if (pollWritable(rev)) { this.onWritable(c); }
+        }
+        this.reap();
+    }
+
+    void acceptNew() {
+        bool more = true;
+        while (more) {
+            int fd = netAccept(this.listenFd);
+            if (fd < 0) { more = false; }
+            else {
+                netSetNonBlocking(fd);
+                this.conns.set(fd, new WsConn(fd));
+            }
+        }
+    }
+
+    void onReadable(WsConn* c) {
+        byte* rb = alloc(byte, 8192);
+        bool more = true;
+        while (more) {
+            int n = netRecv(c->fd, rb, 8192);
+            if (n > 0) {
+                for (int i = 0; i < n; ++i) { c->inbuf->append(rb[i]); }
+                if (n < 8192) { more = false; }
+            } else if (n == 0) {
+                c->gotEof = true;
+                more = false;
+            } else {
+                more = false;
+                if (!(netWouldBlock())) { c->gotEof = true; }
+            }
+        }
+        free(rb);
+        this.processConn(c);
+    }
+
+    void processConn(WsConn* c) {
+        if (!(c->handshakeDone)) {
+            this.tryHandshake(c);
+            if (!(c->handshakeDone)) { return; }
+        }
+        bool go = true;
+        while (go) {
+            WsFrame* f = wsParseFrame(c->inbuf, 0);
+            if (!(f->complete)) { go = false; }
+            else {
+                this.handleFrame(c, f);
+                bytesDropFront(c->inbuf, f->consumed);
+                if (c->inbuf->length() == 0) { go = false; }
+            }
+        }
+        this.onWritable(c);
+    }
+
+    void tryHandshake(WsConn* c) {
+        HttpParseResult* pr = tryParseRequest(c->inbuf);
+        if (pr->error) { c->wantClose = true; c->gotEof = true; return; }
+        if (!(pr->complete)) { return; }
+        HttpRequest* req = pr->request;
+        string up = req->headers->get("upgrade");
+        string conn = req->headers->get("connection");
+        string key = req->headers->get("sec-websocket-key");
+        if (!(wsHeaderIsUpgrade(up, conn)) || len(key) == 0) {
+            c->wantClose = true;
+            c->gotEof = true;
+            return;
+        }
+        bytesAppendBytes(c->outbuf, wsHandshakeResponse(key));
+        bytesDropFront(c->inbuf, pr->consumed);
+        c->handshakeDone = true;
+    }
+
+    void handleFrame(WsConn* c, WsFrame* f) {
+        if (f->opcode == WS_TEXT()) {
+            string msg = wsBytesToStr(f->payload);
+            try {
+                c->session.handle(msg);
+            } catch (Exception* e) {
+                printErr("ws-lsp: handler error: " + e->message);
+            }
+            int n = c->session.outbox.length();
+            for (int i = 0; i < n; ++i) {
+                bytesAppendBytes(c->outbuf, wsBuildTextFrame(c->session.outbox.get(i)));
+            }
+            c->session.outbox = List<string>();
+            if (c->session.exitNow) { c->wantClose = true; }
+        } else if (f->opcode == WS_PING()) {
+            bytesAppendBytes(c->outbuf, wsBuildPong(f->payload));
+        } else if (f->opcode == WS_CLOSE()) {
+            bytesAppendBytes(c->outbuf, wsBuildCloseFrame());
+            c->wantClose = true;
+        }
+    }
+
+    void onWritable(WsConn* c) {
+        int total = c->outbuf->length();
+        if (total == 0) { return; }
+        byte* buf = alloc(byte, total);
+        for (int i = 0; i < total; ++i) { buf[i] = c->outbuf->get(i); }
+        int sent = netSend(c->fd, buf, total);
+        free(buf);
+        if (sent > 0) { bytesDropFront(c->outbuf, sent); }
+        else if (sent < 0 && !(netWouldBlock())) { c->gotEof = true; }
+    }
+
+    // Close connections that are finished: EOF/asked-to-close with nothing left
+    // to flush. Collect first, then remove (don't mutate while iterating).
+    void reap() {
+        List<int> dead = List<int>();
+        int cn = this.conns.size;
+        for (int i = 0; i < cn; ++i) {
+            int fd = this.conns.keys[i];
+            WsConn* c = this.conns.vals[i];
+            bool finished = c->gotEof || c->wantClose;
+            if (finished && c->outbuf->length() == 0) { dead.add(fd); }
+        }
+        int dn = dead.length();
+        for (int i = 0; i < dn; ++i) {
+            int fd = dead.get(i);
+            netClose(fd);
+            this.conns.remove(fd);
+        }
+    }
+}
+
+int main() {
+    int port = 8082;
+    int argc = getArgCount();
+    int ai = 0;
+    while (ai < argc) {
+        string a = getArg(ai);
+        if (a == "--port" && ai + 1 < argc) { port = parseInt(getArg(ai + 1)); ai = ai + 1; }
+        ai = ai + 1;
+    }
+    WsServer srv = WsServer(port);
+    printErr("glang-lsp-ws: listening on port " + toString(srv.port()));
+    srv.serveForever();
+    return 0;
+}
