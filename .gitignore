@@ -53,3 +53,23 @@ plan.md
 /Toolchain/compiler/SELFHOST.md
 /Toolchain/glangi
 /Toolchain/glangi.c
+
+# Secrets / environment files (never commit)
+.env
+*.env
+!*.env.example
+
+# Node dependencies
+node_modules/
+
+# Generated deployment artifacts
+/deploy/gen/
+
+# LSP / service build artifacts (binaries + generated C, rebuilt from .lang)
+/Toolchain/glang-lsp
+/Toolchain/lsp/server.c
+/Toolchain/services/lsp_ws_server
+/Toolchain/services/lsp_ws_server.c
+/Toolchain/services/run_server
+/Toolchain/services/run_server.c
+/vscode-glang/server/glang-lsp
