@@ -1,0 +1,54 @@
+// std/log.lang — leveled logging to stderr with millisecond timestamps.
+//
+// Levels: 0 DEBUG, 1 INFO, 2 WARN, 3 ERROR. A Logger emits a message only if its
+// level is >= the logger's threshold. Line formatting is split into the pure
+// formatLogLine (testable with a fixed timestamp) from the side-effecting emit
+// (which stamps wallMillis and writes via printErr).
+
+import "std/string.lang";
+
+string logLevelName(int level) {
+    if (level <= 0) { return "DEBUG"; }
+    if (level == 1) { return "INFO"; }
+    if (level == 2) { return "WARN"; }
+    return "ERROR";
+}
+
+int logLevelFromName(string name) {
+    string n = strings::toLowerStr(name);
+    if (n == "debug") { return 0; }
+    if (n == "warn")  { return 2; }
+    if (n == "error") { return 3; }
+    return 1;   // info default
+}
+
+// Pure: "<millis> [LEVEL] name: message" — no I/O, so it is differentially
+// testable with a fixed timestamp.
+string formatLogLine(int millis, int level, string name, string message) {
+    return intToStr(millis) + " [" + logLevelName(level) + "] " + name + ": " + message;
+}
+
+class Logger {
+    string name;
+    int threshold;   // minimum level to emit
+
+    Logger(string name, int threshold) {
+        this.name = name;
+        this.threshold = threshold;
+    }
+
+    void setLevel(int level) { this.threshold = level; }
+
+    void logAt(int level, string message) {
+        if (level < this.threshold) { return; }
+        printErr(formatLogLine(wallMillis(), level, this.name, message));
+    }
+
+    void debug(string m) { this.logAt(0, m); }
+    void info(string m)  { this.logAt(1, m); }
+    void warn(string m)  { this.logAt(2, m); }
+    void error(string m) { this.logAt(3, m); }
+}
+
+// A logger named `name`, defaulting to the INFO threshold.
+Logger* newLogger(string name) { return new Logger(name, 1); }

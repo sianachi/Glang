@@ -1,0 +1,93 @@
+// std/cli.lang — a small, permissive command-line argument parser.
+//
+// Recognises --long, --long=value, --long value, -s, -s value, and positional
+// args. A long/short token with no following value (or followed by another
+// option) becomes a boolean flag stored as "true". parseArgs works on any
+// List<string> (testable); parseCliArgs reads the process args via getArg.
+
+import "std/string.lang";
+import "std/map.lang";
+import "std/list.lang";
+
+class CliArgs {
+    Map<string, string>* options;
+    List<string>* positionals;
+
+    CliArgs() {
+        this.options = new Map<string, string>();
+        this.positionals = new List<string>();
+    }
+
+    bool has(string name) { return this.options->has(name); }
+
+    string getOpt(string name, string fallback) {
+        return this.options->getOr(name, fallback);
+    }
+
+    int getOptInt(string name, int fallback) {
+        if (!(this.options->has(name))) { return fallback; }
+        return parseInt(this.options->getOr(name, "0"));
+    }
+
+    // A flag is present (with any value) — e.g. --verbose.
+    bool getFlag(string name) { return this.options->has(name); }
+
+    int count()             { return this.positionals->length(); }
+    string positional(int i) { return this.positionals->get(i); }
+}
+
+bool cliIsOption(string tok) {
+    return len(tok) > 1 && (int)(tok[0]) == 45;   // starts with '-'
+}
+
+// Parse with a list of names known to be boolean flags. A bare `--name` whose
+// name is in `boolFlags` becomes "true" without consuming the next token; any
+// other bare `--name` greedily takes the next non-option token as its value.
+// `--name=value` always carries a value.
+CliArgs* parseArgsFlags(List<string> argv, List<string> boolFlags) {
+    CliArgs* a = new CliArgs();
+    int n = argv.length();
+    int i = 0;
+    while (i < n) {
+        string tok = argv.get(i);
+        int dashes = 0;
+        if (len(tok) >= 2 && (int)(tok[0]) == 45 && (int)(tok[1]) == 45) { dashes = 2; }
+        else if (len(tok) >= 2 && (int)(tok[0]) == 45) { dashes = 1; }
+
+        if (dashes == 0) {
+            a->positionals->add(tok);
+            i = i + 1;
+            continue;
+        }
+
+        string body = substr(tok, dashes, len(tok));
+        int eq = indexOf(body, "=");
+        if (eq >= 0) {
+            a->options->set(substr(body, 0, eq), substr(body, eq + 1, len(body)));
+            i = i + 1;
+        } else if (boolFlags.contains(body)) {
+            a->options->set(body, "true");          // declared flag: no value
+            i = i + 1;
+        } else if (i + 1 < n && !(cliIsOption(argv.get(i + 1)))) {
+            a->options->set(body, argv.get(i + 1));
+            i = i + 2;
+        } else {
+            a->options->set(body, "true");
+            i = i + 1;
+        }
+    }
+    return a;
+}
+
+// Permissive parse with no declared flags (greedy value consumption).
+CliArgs* parseArgs(List<string> argv) {
+    return parseArgsFlags(argv, List<string>());
+}
+
+// Parse the process arguments (getArg(0..getArgCount-1)).
+CliArgs* parseCliArgs() {
+    List<string> argv = List<string>();
+    int n = getArgCount();
+    for (int i = 0; i < n; ++i) { argv.add(getArg(i)); }
+    return parseArgs(argv);
+}
