@@ -834,6 +834,10 @@ class Interpreter:
             "readFile",
             "writeFile",
             "fileExists",
+            "fileSize",
+            "readFileInto",
+            "writeFileFrom",
+            "listDir",
             "bytesFromString",
             "stringFromBytes",
             "getArgCount",
@@ -841,6 +845,8 @@ class Interpreter:
             "exit",
             "intToStr",
             "readStdin",
+            "readByte",
+            "writeStdout",
             "nowNanos",
             "wallMillis",
             "sleepMs",
@@ -976,6 +982,56 @@ class Interpreter:
             path = self._eval(expr.args[0]).raw
             return Value(NamedType("bool"), os.path.isfile(path))
 
+        if expr.name == "fileSize":
+            path = self._eval(expr.args[0]).raw
+            try:
+                return Value(NamedType("int"), os.path.getsize(path))
+            except OSError:
+                return Value(NamedType("int"), -1)
+
+        if expr.name == "readFileInto":
+            path = self._eval(expr.args[0]).raw
+            buf = self._eval(expr.args[1])
+            cap = int(self._eval(expr.args[2]).raw)
+            if cap <= 0:
+                return Value(NamedType("int"), 0)
+            try:
+                with open(path, "rb") as f:
+                    data = f.read(cap)
+            except OSError:
+                return Value(NamedType("int"), -1)
+            elements = self._deref(buf, expr.line, expr.col).value.raw
+            byte_t = NamedType("byte")
+            n = min(len(data), len(elements))
+            for i in range(n):
+                elements[i].value = Value(byte_t, data[i])
+            return Value(NamedType("int"), n)
+
+        if expr.name == "writeFileFrom":
+            path = self._eval(expr.args[0]).raw
+            buf = self._eval(expr.args[1])
+            length = int(self._eval(expr.args[2]).raw)
+            if length < 0:
+                return Value(NamedType("int"), -1)
+            elements = self._deref(buf, expr.line, expr.col).value.raw
+            n = min(length, len(elements))
+            data = bytes(int(elements[i].value.raw) & 0xFF for i in range(n))
+            try:
+                with open(path, "wb") as f:
+                    f.write(data)
+            except OSError:
+                return Value(NamedType("int"), -1)
+            return Value(NamedType("int"), n)
+
+        if expr.name == "listDir":
+            path = self._eval(expr.args[0]).raw
+            try:
+                names = sorted(os.listdir(path))
+            except OSError:
+                return Value(NamedType("string"), "")
+            joined = "".join(name + "\n" for name in names)
+            return Value(NamedType("string"), joined)
+
         if expr.name == "intToStr":
             n = self._eval(expr.args[0]).raw
             return Value(NamedType("string"), str(int(n)))
@@ -983,6 +1039,24 @@ class Interpreter:
         if expr.name == "readStdin":
             import sys as _sys
             return Value(NamedType("string"), _sys.stdin.read())
+
+        if expr.name == "readByte":
+            import sys as _sys
+            b = _sys.stdin.buffer.read(1)
+            return Value(NamedType("int"), -1 if not b else b[0])
+
+        if expr.name == "writeStdout":
+            import sys as _sys
+            s = str(self._eval(expr.args[0]).raw)
+            # Raw write, no trailing newline (mirrors glang_writestdout in the
+            # C runtime). Goes to the real stream when one is wired (CLI mode).
+            if self._out is not None:
+                self._out.write(s)
+                self._out.flush()
+            else:
+                _sys.stdout.write(s)
+                _sys.stdout.flush()
+            return Value(NamedType("void"), None)
 
         if expr.name == "nowNanos":
             import time as _time

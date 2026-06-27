@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <dirent.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -475,6 +476,85 @@ int glang_fileexists(const char* path) {
     return 0;
 }
 
+/* ── Binary-safe file I/O ──────────────────────────────────────────────────
+   readFile/writeFile go through char* (NUL-terminated), so they truncate binary
+   data. These move raw bytes through a caller-provided buffer instead, so images,
+   fonts, uploads, etc. round-trip intact. */
+
+/* Byte length of a file, or -1 if it can't be opened. */
+int64_t glang_filesize(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return -1;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
+    long sz = ftell(f);
+    fclose(f);
+    return (int64_t)sz;
+}
+
+/* Read up to `cap` bytes of `path` into `buf`; returns bytes read, or -1. */
+int64_t glang_readfile_into(const char* path, uint8_t* buf, int64_t cap) {
+    if (!buf || cap <= 0) return 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return -1;
+    size_t n = fread(buf, 1, (size_t)cap, f);
+    fclose(f);
+    return (int64_t)n;
+}
+
+/* Write `len` bytes of `buf` to `path` (truncating it); returns bytes written,
+   or -1 on error. */
+int64_t glang_writefile_from(const char* path, uint8_t* buf, int64_t len) {
+    if (len < 0) return -1;
+    FILE* f = fopen(path, "wb");
+    if (!f) return -1;
+    size_t n = (len == 0 || !buf) ? 0 : fwrite(buf, 1, (size_t)len, f);
+    int ok = (fclose(f) == 0);
+    if (!ok) return -1;
+    return (int64_t)n;
+}
+
+static int glang_strcmp_qsort(const void* a, const void* b) {
+    return strcmp(*(const char* const*)a, *(const char* const*)b);
+}
+
+/* Newline-separated directory entry names (excluding . and ..), sorted for a
+   deterministic result that matches the interpreters. "" on error. Caller owns
+   the returned string. */
+char* glang_listdir(const char* path) {
+    DIR* d = opendir(path);
+    if (!d) return strdup("");
+    size_t ncap = 16, n = 0;
+    char** names = (char**)malloc(ncap * sizeof(char*));
+    struct dirent* ent;
+    while ((ent = readdir(d)) != NULL) {
+        const char* name = ent->d_name;
+        if (name[0] == '.' && (name[1] == '\0' ||
+            (name[1] == '.' && name[2] == '\0'))) { continue; }
+        if (n == ncap) { ncap *= 2; names = (char**)realloc(names, ncap * sizeof(char*)); }
+        names[n++] = strdup(name);
+    }
+    closedir(d);
+    qsort(names, n, sizeof(char*), glang_strcmp_qsort);
+
+    size_t cap = 256, used = 0;
+    char* out = (char*)malloc(cap);
+    out[0] = '\0';
+    for (size_t i = 0; i < n; ++i) {
+        size_t nl = strlen(names[i]);
+        if (used + nl + 2 > cap) {
+            while (used + nl + 2 > cap) { cap *= 2; }
+            out = (char*)realloc(out, cap);
+        }
+        memcpy(out + used, names[i], nl);
+        used += nl;
+        out[used++] = '\n';
+        out[used] = '\0';
+        free(names[i]);
+    }
+    free(names);
+    return out;
+}
+
 char* glang_readstdin(void) {
     size_t cap = 4096, used = 0;
     char* buf = (char*)malloc(cap);
@@ -485,6 +565,20 @@ char* glang_readstdin(void) {
     }
     buf[used] = '\0';
     return buf;
+}
+
+/* Read one byte from stdin, or -1 at EOF. Lets a server frame messages by
+   exact byte count without waiting for EOF (cf. glang_readstdin). */
+int64_t glang_readbyte(void) {
+    int c = getchar();
+    return c == EOF ? -1 : (int64_t)c;
+}
+
+/* Write a string to stdout with no trailing newline, then flush. The print
+   builtins all append '\n', which corrupts length-prefixed wire protocols. */
+void glang_writestdout(const char* v) {
+    if (v) { fputs(v, stdout); }
+    fflush(stdout);
 }
 
 /* ── Print ────────────────────────────────────────────────────────────── */

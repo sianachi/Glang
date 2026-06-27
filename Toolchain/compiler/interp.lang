@@ -367,6 +367,9 @@ class Interp {
     int heapAddr;
     List<int> live;              // live heap addrs (for free validation)
     NetState* net;               // in-memory socket model (loopback)
+    int maxSteps;                // execution budget; 0 = unlimited (default)
+    int steps;                   // statements/loop-iterations executed so far
+    int maxDepth;                // call-stack depth cap; 0 = unlimited (default)
 
     Interp(GlobalEnv* e) {
         this.env = e;
@@ -378,6 +381,27 @@ class Interp {
         this.heapAddr = 1;
         this.live = List<int>();
         this.net = new NetState();
+        this.maxSteps = 0;
+        this.steps = 0;
+        this.maxDepth = 0;
+    }
+
+    // Charge one execution step and enforce the call-depth cap; throw if either
+    // finite budget is exceeded. Both caps default to 0 (unlimited), so for
+    // glangi and all differential tests this is a single branch — no behaviour
+    // change. The run service sets finite caps so untrusted code with an
+    // infinite loop (maxSteps) or runaway recursion (maxDepth, which would
+    // otherwise overflow the native C stack) terminates cleanly.
+    void step() {
+        if (this.maxSteps > 0) {
+            this.steps = this.steps + 1;
+            if (this.steps > this.maxSteps) {
+                throw new RtError("execution step limit exceeded");
+            }
+        }
+        if (this.maxDepth > 0 && this.frames.length() > this.maxDepth) {
+            throw new RtError("call stack depth exceeded");
+        }
     }
 
     Frame* cur() { return this.frames.get(this.frames.length() - 1); }
@@ -493,6 +517,7 @@ class Interp {
 
     // ── statements ────────────────────────────────────────────────────────
     void execBlock(Stmt* block) {
+        this.step();   // charge every loop iteration / block entry (catches empty-body loops)
         this.cur().pushScope();
         try {
             match (*block) {
@@ -509,6 +534,7 @@ class Interp {
     }
 
     void execStmt(Stmt* s) {
+        this.step();   // charge every executed statement (covers recursion)
         match (*s) {
             Stmt.Block(stmts) => { this.execBlock(s); }
             Stmt.ExprStmt(e) => { this.eval(e); }
@@ -1140,7 +1166,43 @@ class Interp {
         if (name == "readFile")   { return mkStr(readFile(rawStr(this.eval(args.get(0))))); }
         if (name == "writeFile")  { writeFile(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1)))); return mkVoid(); }
         if (name == "fileExists") { return mkBool(fileExists(rawStr(this.eval(args.get(0))))); }
+        if (name == "fileSize")   { return mkInt(fileSize(rawStr(this.eval(args.get(0))))); }
+        if (name == "listDir")    { return mkStr(listDir(rawStr(this.eval(args.get(0))))); }
+        if (name == "readFileInto") {
+            string path = rawStr(this.eval(args.get(0)));
+            RtVal* buf = this.eval(args.get(1));
+            int cap = rawInt(this.eval(args.get(2)));
+            if (cap <= 0) { return mkInt(0); }
+            byte* real = alloc(byte, cap);
+            int n = readFileInto(path, real, cap);
+            if (n > 0) {
+                List<Box*> elems = this.arrElems(buf);
+                int m = n;
+                if (elems.length() < m) { m = elems.length(); }
+                for (int i = 0; i < m; ++i) { elems.get(i)->value = mkByte((int)(real[i]) & 255); }
+                free(real);
+                return mkInt(m);
+            }
+            free(real);
+            return mkInt(n);
+        }
+        if (name == "writeFileFrom") {
+            string path = rawStr(this.eval(args.get(0)));
+            RtVal* buf = this.eval(args.get(1));
+            int length = rawInt(this.eval(args.get(2)));
+            if (length < 0) { return mkInt(-1); }
+            List<Box*> elems = this.arrElems(buf);
+            int m = length;
+            if (elems.length() < m) { m = elems.length(); }
+            byte* real = alloc(byte, m + 1);
+            for (int i = 0; i < m; ++i) { real[i] = (byte)(rawInt(elems.get(i)->value) & 255); }
+            int n = writeFileFrom(path, real, m);
+            free(real);
+            return mkInt(n);
+        }
         if (name == "readStdin")  { return mkStr(readStdin()); }
+        if (name == "readByte")   { return mkInt(readByte()); }
+        if (name == "writeStdout") { writeStdout(rawStr(this.eval(args.get(0)))); return mkVoid(); }
         if (name == "nowNanos")   { return mkInt(nowNanos()); }
         if (name == "wallMillis") { return mkInt(wallMillis()); }
         if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }

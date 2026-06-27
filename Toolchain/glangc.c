@@ -23,7 +23,13 @@ double  glang_parsefloat(const char* s);
 char*   glang_readfile(const char* path);
 void    glang_writefile(const char* path, const char* content);
 int     glang_fileexists(const char* path);
+int64_t glang_filesize(const char* path);
+int64_t glang_readfile_into(const char* path, uint8_t* buf, int64_t cap);
+int64_t glang_writefile_from(const char* path, uint8_t* buf, int64_t len);
+char*   glang_listdir(const char* path);
 char*   glang_readstdin(void);
+int64_t glang_readbyte(void);
+void    glang_writestdout(const char* v);
 void* glang_managed_alloc(size_t size);
 void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
@@ -8312,6 +8318,26 @@ TypeNode* check_builtin_call(char* name, List_TypeNode* arg_types, GlobalEnv* en
         List_TypeNode__add(ps, T("string"));
         return check_callable_args(name, arg_types, ps, T("bool"), env);
     }
+    if ((strcmp(name, "fileSize") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "readFileInto") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        List_TypeNode__add(ps, ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(T("byte")); __up; }));
+        List_TypeNode__add(ps, T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "writeFileFrom") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        List_TypeNode__add(ps, ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(T("byte")); __up; }));
+        List_TypeNode__add(ps, T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "listDir") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
     if ((strcmp(name, "bytesFromString") == 0)) {
         List_TypeNode__add(ps, T("string"));
         return check_callable_args(name, arg_types, ps, ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__PointerType_new(T("byte")); __up; }), env);
@@ -8338,6 +8364,13 @@ TypeNode* check_builtin_call(char* name, List_TypeNode* arg_types, GlobalEnv* en
     }
     if ((strcmp(name, "readStdin") == 0)) {
         return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if ((strcmp(name, "readByte") == 0)) {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if ((strcmp(name, "writeStdout") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
     }
     if ((strcmp(name, "nowNanos") == 0)) {
         return check_callable_args(name, arg_types, ps, T("int"), env);
@@ -14255,7 +14288,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
 }
 
 int Pass2Checker__is_builtin_name(Pass2Checker* self, char* name) {
-    return (((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
+    return (((((((((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "fileSize") == 0)) || (strcmp(name, "readFileInto") == 0)) || (strcmp(name, "writeFileFrom") == 0)) || (strcmp(name, "listDir") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "readByte") == 0)) || (strcmp(name, "writeStdout") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
 }
 
 TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
@@ -17388,7 +17421,7 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             char* nm = __match__.data.as_CallExpr.name;
             List_Expr* args = __match__.data.as_CallExpr.args;
             List_TypeNode* ta = __match__.data.as_CallExpr.typeArgs;
-            if (((((strcmp(nm, "len") == 0) || (strcmp(nm, "parseInt") == 0)) || (strcmp(nm, "indexOf") == 0)) || (strcmp(nm, "getArgCount") == 0))) {
+            if ((((((strcmp(nm, "len") == 0) || (strcmp(nm, "parseInt") == 0)) || (strcmp(nm, "indexOf") == 0)) || (strcmp(nm, "getArgCount") == 0)) || (strcmp(nm, "readByte") == 0))) {
                 return "int";
             }
             if (((strcmp(nm, "nowNanos") == 0) || (strcmp(nm, "wallMillis") == 0))) {
@@ -17400,7 +17433,10 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             if ((((((((strcmp(nm, "netConnectNb") == 0) || (strcmp(nm, "netSetNonBlocking") == 0)) || (strcmp(nm, "netSetNoDelay") == 0)) || (strcmp(nm, "netShutdown") == 0)) || (strcmp(nm, "netSockError") == 0)) || (strcmp(nm, "netErrno") == 0)) || (strcmp(nm, "netPoll") == 0))) {
                 return "int";
             }
-            if (((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0))) {
+            if ((((strcmp(nm, "fileSize") == 0) || (strcmp(nm, "readFileInto") == 0)) || (strcmp(nm, "writeFileFrom") == 0))) {
+                return "int";
+            }
+            if ((((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0)) || (strcmp(nm, "listDir") == 0))) {
                 return "string";
             }
             if ((strcmp(nm, "parseFloat") == 0)) {
@@ -17627,8 +17663,26 @@ char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args) {
     if ((strcmp(name, "fileExists") == 0)) {
         return glang_str_concat(glang_str_concat("glang_fileexists(", CEmit__emitArgs(self, args)), ")");
     }
+    if ((strcmp(name, "fileSize") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_filesize(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "readFileInto") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_readfile_into(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "writeFileFrom") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_writefile_from(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "listDir") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_listdir(", CEmit__emitArgs(self, args)), ")");
+    }
     if ((strcmp(name, "readStdin") == 0)) {
         return "glang_readstdin()";
+    }
+    if ((strcmp(name, "readByte") == 0)) {
+        return "glang_readbyte()";
+    }
+    if ((strcmp(name, "writeStdout") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_writestdout(", CEmit__emitArgs(self, args)), ")");
     }
     if ((strcmp(name, "nowNanos") == 0)) {
         return "glang_now_nanos()";
@@ -18238,7 +18292,13 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "char*   glang_readfile(const char* path);");
     StringBuilder__appendLine(f, "void    glang_writefile(const char* path, const char* content);");
     StringBuilder__appendLine(f, "int     glang_fileexists(const char* path);");
+    StringBuilder__appendLine(f, "int64_t glang_filesize(const char* path);");
+    StringBuilder__appendLine(f, "int64_t glang_readfile_into(const char* path, uint8_t* buf, int64_t cap);");
+    StringBuilder__appendLine(f, "int64_t glang_writefile_from(const char* path, uint8_t* buf, int64_t len);");
+    StringBuilder__appendLine(f, "char*   glang_listdir(const char* path);");
     StringBuilder__appendLine(f, "char*   glang_readstdin(void);");
+    StringBuilder__appendLine(f, "int64_t glang_readbyte(void);");
+    StringBuilder__appendLine(f, "void    glang_writestdout(const char* v);");
     StringBuilder__appendLine(f, "void* glang_managed_alloc(size_t size);");
     StringBuilder__appendLine(f, "void  glang_managed_sweep(void);");
     StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");

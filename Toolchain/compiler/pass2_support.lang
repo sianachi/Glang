@@ -318,6 +318,26 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
         ps.add(T("string"));
         return check_callable_args(name, arg_types, ps, T("bool"), env);
     }
+    if (name == "fileSize") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "readFileInto") {
+        ps.add(T("string"));
+        ps.add(new TypeNode.PointerType(T("byte")));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "writeFileFrom") {
+        ps.add(T("string"));
+        ps.add(new TypeNode.PointerType(T("byte")));
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "listDir") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
     if (name == "bytesFromString") {
         ps.add(T("string"));
         return check_callable_args(name, arg_types, ps,
@@ -344,6 +364,13 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
     }
     if (name == "readStdin") {
         return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "readByte") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "writeStdout") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("void"), env);
     }
     if (name == "nowNanos") {
         return check_callable_args(name, arg_types, ps, T("int"), env);

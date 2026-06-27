@@ -41,7 +41,13 @@ char*   glang_readfile(const char* path);
 void    glang_writefile(const char* path, const char* content);
 int     glang_fileexists(const char* path);
 char*   glang_readstdin(void);
+int64_t glang_readbyte(void);
+void    glang_writestdout(const char* v);
 char*   glang_appendfile(const char* path, const char* content);
+int64_t glang_filesize(const char* path);
+int64_t glang_readfile_into(const char* path, uint8_t* buf, int64_t cap);
+int64_t glang_writefile_from(const char* path, uint8_t* buf, int64_t len);
+char*   glang_listdir(const char* path);
 
 /* ── Print ────────────────────────────────────────────────────────────── */
 void glang_print_int(int64_t v);

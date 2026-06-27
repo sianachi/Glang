@@ -1191,6 +1191,16 @@ class Pass2Checker:
                 NamedType("void"),
             ),
             "fileExists": ([NamedType("string")], NamedType("bool")),
+            "fileSize": ([NamedType("string")], NamedType("int")),
+            "readFileInto": (
+                [NamedType("string"), PointerType(NamedType("byte")), NamedType("int")],
+                NamedType("int"),
+            ),
+            "writeFileFrom": (
+                [NamedType("string"), PointerType(NamedType("byte")), NamedType("int")],
+                NamedType("int"),
+            ),
+            "listDir": ([NamedType("string")], NamedType("string")),
             "bytesFromString": (
                 [NamedType("string")],
                 PointerType(NamedType("byte")),
@@ -1204,6 +1214,8 @@ class Pass2Checker:
             "exit": ([NamedType("int")], NamedType("void")),
             "intToStr": ([NamedType("int")], NamedType("string")),
             "readStdin": ([], NamedType("string")),
+            "readByte": ([], NamedType("int")),
+            "writeStdout": ([NamedType("string")], NamedType("void")),
             "nowNanos": ([], NamedType("int")),
             "wallMillis": ([], NamedType("int")),
             "sleepMs": ([NamedType("int")], NamedType("void")),
