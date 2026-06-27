@@ -1,0 +1,63 @@
+@import 'tailwindcss';
+
+/* Glang Learn — design tokens. A calm slate canvas with an emerald accent that
+   echoes the language's "G". Syntax colors are tuned for the dark editor. */
+@theme {
+  --color-canvas: #0b1120;
+  --color-surface: #0f172a;
+  --color-surface-2: #131c31;
+  --color-border-soft: #1e293b;
+  --color-accent: #34d399;
+  --color-accent-deep: #059669;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-canvas);
+  color: #e2e8f0;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars that fit the dark theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Glang syntax-highlighting token colors (used by lib/highlighter.js output). */
+.tok-kw { color: #c084fc; }
+.tok-type { color: #38bdf8; }
+.tok-str { color: #fbbf24; }
+.tok-num { color: #f472b6; }
+.tok-com { color: #64748b; font-style: italic; }
+.tok-fn { color: #34d399; }
+.tok-punct { color: #94a3b8; }
+.tok-builtin { color: #2dd4bf; }
+.tok-ident { color: #e2e8f0; }
+
+/* Smooth fade for lesson transitions. */
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in { animation: riseIn 0.35s ease-out; }
+
+.prose-glang p { line-height: 1.7; }
