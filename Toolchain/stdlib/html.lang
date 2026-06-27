@@ -1,0 +1,49 @@
+// std/html.lang — minimal, safe HTML generation (pure Glang).
+//
+// htmlEscape() is the important part: it neutralises the five characters that
+// would otherwise let request data break out of text/attribute context, so
+// untrusted input can be embedded without injection.
+
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+string htmlEscape(string s) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        char c = s[i];
+        int cc = (int)c;
+        if (cc == 38)      { sb.append("&amp;"); }    // &
+        else if (cc == 60) { sb.append("&lt;"); }     // <
+        else if (cc == 62) { sb.append("&gt;"); }     // >
+        else if (cc == 34) { sb.append("&quot;"); }   // "
+        else if (cc == 39) { sb.append("&#39;"); }    // '
+        else { sb.appendChar(c); }
+    }
+    return sb.build();
+}
+
+// Wrap body HTML in a complete document with an escaped <title>.
+string htmlPage(string title, string bodyHtml) {
+    StringBuilder sb = StringBuilder();
+    sb.append("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>");
+    sb.append(htmlEscape(title));
+    sb.append("</title></head><body>\n");
+    sb.append(bodyHtml);
+    sb.append("\n</body></html>\n");
+    return sb.build();
+}
+
+// A single element with escaped text content: tag("h1", "Hi & bye") ->
+// "<h1>Hi &amp; bye</h1>".
+string htmlTag(string tag, string text) {
+    StringBuilder sb = StringBuilder();
+    sb.append("<");
+    sb.append(tag);
+    sb.append(">");
+    sb.append(htmlEscape(text));
+    sb.append("</");
+    sb.append(tag);
+    sb.append(">");
+    return sb.build();
+}

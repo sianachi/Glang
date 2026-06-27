@@ -1,0 +1,76 @@
+// std/router.lang — method + path routing to handler functions (pure Glang).
+//
+// A handler is an ordinary function `HttpResponse* h(HttpRequest* req)`. Routes
+// are matched in registration order; the first match wins. A route can match a
+// path exactly or by prefix (prefix routes are how a reverse-proxy mount such as
+// "/api" is attached). If nothing matches, the fallback handler runs.
+//
+// Per the language's function-pointer rules, a stored fn value is copied to a
+// local before being called, and the fallback is initialised to a real function
+// (fn values cannot be compared to null).
+
+import "std/http.lang";
+import "std/list.lang";
+
+class Route {
+    string method;     // "" matches any method
+    string path;       // exact path, or a prefix when isPrefix is true
+    bool isPrefix;
+    fn(HttpRequest*) -> HttpResponse* handler;
+
+    Route(string method, string path, bool isPrefix,
+          fn(HttpRequest*) -> HttpResponse* handler) {
+        this.method = method;
+        this.path = path;
+        this.isPrefix = isPrefix;
+        this.handler = handler;
+    }
+
+    bool matches(HttpRequest* req) {
+        if (this.method != "" && this.method != req->method) { return false; }
+        if (this.isPrefix) { return startsWith(req->path, this.path); }
+        return req->path == this.path;
+    }
+}
+
+HttpResponse* routerDefaultFallback(HttpRequest* req) {
+    return httpText(404, "404 Not Found\n");
+}
+
+class Router {
+    List<Route*> routes;
+    fn(HttpRequest*) -> HttpResponse* fallback;
+
+    Router() {
+        this.routes = List<Route*>();
+        this.fallback = routerDefaultFallback;
+    }
+
+    void add(string method, string path, fn(HttpRequest*) -> HttpResponse* h) {
+        this.routes.add(new Route(method, path, false, h));
+    }
+    void get(string path, fn(HttpRequest*) -> HttpResponse* h)  { this.add("GET", path, h); }
+    void post(string path, fn(HttpRequest*) -> HttpResponse* h) { this.add("POST", path, h); }
+    void any(string path, fn(HttpRequest*) -> HttpResponse* h)  { this.add("", path, h); }
+
+    // Mount a handler on every path under `prefix` (any method) — used to attach
+    // a reverse-proxy upstream to a path namespace.
+    void mount(string prefix, fn(HttpRequest*) -> HttpResponse* h) {
+        this.routes.add(new Route("", prefix, true, h));
+    }
+
+    void setFallback(fn(HttpRequest*) -> HttpResponse* h) { this.fallback = h; }
+
+    HttpResponse* dispatch(HttpRequest* req) {
+        int n = this.routes.length();
+        for (int i = 0; i < n; ++i) {
+            Route* r = this.routes.get(i);
+            if (r->matches(req)) {
+                fn(HttpRequest*) -> HttpResponse* h = r->handler;
+                return h(req);
+            }
+        }
+        fn(HttpRequest*) -> HttpResponse* fb = this.fallback;
+        return fb(req);
+    }
+}

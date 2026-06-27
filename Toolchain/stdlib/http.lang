@@ -1,0 +1,343 @@
+// std/http.lang — a pure HTTP/1.1 request parser and response builder.
+//
+// Everything here is plain Glang over strings and Bytes: no sockets, so it runs
+// and is differentially testable on every backend. The event-loop server in
+// std/server.lang feeds socket bytes into tryParseRequest() and writes the bytes
+// from renderResponse() back out.
+//
+// Scope: request line + headers + a Content-Length body (chunked *request*
+// bodies are not decoded). Header field values are ASCII text; bodies are bytes.
+
+import "std/bytes.lang";
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+// ── byte/string bridges ─────────────────────────────────────────────────────
+
+void bytesAppendStr(Bytes* b, string s) {
+    int n = len(s);
+    for (int i = 0; i < n; ++i) { b->append((byte)((int)(s[i]))); }
+}
+
+void bytesAppendBytes(Bytes* dst, Bytes* src) {
+    int n = src->length();
+    for (int i = 0; i < n; ++i) { dst->append(src->get(i)); }
+}
+
+string bytesRangeToStr(Bytes* b, int start, int end) {
+    StringBuilder sb = StringBuilder();
+    for (int i = start; i < end; ++i) { sb.appendChar((char)(b->get(i))); }
+    return sb.build();
+}
+
+Bytes* bytesSlice(Bytes* src, int start, int end) {
+    int n = end - start;
+    if (n < 1) { n = 1; }
+    Bytes* out = new Bytes(n);
+    for (int i = start; i < end; ++i) { out->append(src->get(i)); }
+    return out;
+}
+
+// Drop the first k bytes from a buffer, sliding the rest down (used by the
+// server to consume one pipelined request and keep the remainder).
+void bytesDropFront(Bytes* b, int k) {
+    if (k <= 0) { return; }
+    int n = b->length();
+    if (k >= n) { b->clear(); return; }
+    for (int i = k; i < n; ++i) { b->set(i - k, b->get(i)); }
+    b->size = n - k;
+}
+
+// Index of the CRLF CRLF that ends the header block, or -1 if not present yet.
+int findHeaderEnd(Bytes* b) {
+    int n = b->length();
+    for (int i = 0; i + 3 < n; ++i) {
+        if ((int)(b->get(i)) == 13 && (int)(b->get(i + 1)) == 10
+            && (int)(b->get(i + 2)) == 13 && (int)(b->get(i + 3)) == 10) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// ── Headers ──────────────────────────────────────────────────────────────────
+
+class HttpHeaders {
+    List<string> names;    // original-case field names
+    List<string> lower;    // lowercased, for case-insensitive lookup
+    List<string> values;
+
+    HttpHeaders() {
+        this.names = List<string>();
+        this.lower = List<string>();
+        this.values = List<string>();
+    }
+
+    void add(string name, string value) {
+        this.names.add(name);
+        this.lower.add(strings::toLowerStr(name));
+        this.values.add(value);
+    }
+
+    void set(string name, string value) {
+        string lo = strings::toLowerStr(name);
+        int n = this.lower.length();
+        for (int i = 0; i < n; ++i) {
+            if (this.lower.get(i) == lo) { this.values.set(i, value); return; }
+        }
+        this.add(name, value);
+    }
+
+    bool has(string name) {
+        string lo = strings::toLowerStr(name);
+        int n = this.lower.length();
+        for (int i = 0; i < n; ++i) {
+            if (this.lower.get(i) == lo) { return true; }
+        }
+        return false;
+    }
+
+    string get(string name) {
+        string lo = strings::toLowerStr(name);
+        int n = this.lower.length();
+        for (int i = 0; i < n; ++i) {
+            if (this.lower.get(i) == lo) { return this.values.get(i); }
+        }
+        return "";
+    }
+
+    int contentLength() {
+        if (!(this.has("content-length"))) { return -1; }
+        string v = strings::trim(this.get("content-length"));
+        if (len(v) == 0) { return -1; }
+        return parseInt(v);
+    }
+
+    int count()          { return this.names.length(); }
+    string nameAt(int i) { return this.names.get(i); }
+    string valueAt(int i){ return this.values.get(i); }
+}
+
+// ── Request ──────────────────────────────────────────────────────────────────
+
+class HttpRequest {
+    string method;
+    string target;     // raw request target (path plus optional ?query)
+    string path;       // target with the query stripped
+    string query;      // query string after '?', "" if none
+    string version;    // e.g. "HTTP/1.1"
+    HttpHeaders* headers;
+    Bytes* body;
+
+    HttpRequest() {
+        this.method = "";
+        this.target = "";
+        this.path = "";
+        this.query = "";
+        this.version = "";
+        this.headers = new HttpHeaders();
+        this.body = new Bytes(1);
+    }
+
+    // Persistent-connection decision per RFC 7230: HTTP/1.1 defaults to
+    // keep-alive unless Connection: close; HTTP/1.0 stays closed unless
+    // Connection: keep-alive.
+    bool keepAlive() {
+        string conn = strings::toLowerStr(strings::trim(this.headers->get("connection")));
+        if (this.version == "HTTP/1.1") {
+            return !(contains(conn, "close"));
+        }
+        return contains(conn, "keep-alive");
+    }
+}
+
+// ── Response ─────────────────────────────────────────────────────────────────
+
+class HttpResponse {
+    int status;
+    string reason;
+    HttpHeaders* headers;
+    Bytes* body;
+
+    HttpResponse(int status) {
+        this.status = status;
+        this.reason = reasonPhrase(status);
+        this.headers = new HttpHeaders();
+        this.body = new Bytes(1);
+    }
+
+    void setContentType(string ct) { this.headers->set("Content-Type", ct); }
+
+    void setBodyStr(string s) {
+        this.body->clear();
+        bytesAppendStr(this.body, s);
+    }
+
+    void setText(string s) {
+        this.setContentType("text/plain; charset=utf-8");
+        this.setBodyStr(s);
+    }
+
+    void setHtml(string s) {
+        this.setContentType("text/html; charset=utf-8");
+        this.setBodyStr(s);
+    }
+}
+
+HttpResponse* httpText(int status, string body) {
+    HttpResponse* r = new HttpResponse(status);
+    r->setText(body);
+    return r;
+}
+
+HttpResponse* httpHtml(int status, string body) {
+    HttpResponse* r = new HttpResponse(status);
+    r->setHtml(body);
+    return r;
+}
+
+HttpResponse* httpNotFound() { return httpText(404, "404 Not Found\n"); }
+
+string reasonPhrase(int status) {
+    if (status == 200) { return "OK"; }
+    if (status == 201) { return "Created"; }
+    if (status == 204) { return "No Content"; }
+    if (status == 301) { return "Moved Permanently"; }
+    if (status == 302) { return "Found"; }
+    if (status == 304) { return "Not Modified"; }
+    if (status == 400) { return "Bad Request"; }
+    if (status == 403) { return "Forbidden"; }
+    if (status == 404) { return "Not Found"; }
+    if (status == 405) { return "Method Not Allowed"; }
+    if (status == 408) { return "Request Timeout"; }
+    if (status == 413) { return "Payload Too Large"; }
+    if (status == 500) { return "Internal Server Error"; }
+    if (status == 502) { return "Bad Gateway"; }
+    if (status == 503) { return "Service Unavailable"; }
+    if (status == 504) { return "Gateway Timeout"; }
+    return "Status";
+}
+
+// ── Parsing ──────────────────────────────────────────────────────────────────
+
+class HttpParseResult {
+    HttpRequest* request;   // null unless `complete`
+    int consumed;           // bytes consumed from the buffer when complete
+    bool complete;          // a whole request (head + body) was parsed
+    bool error;             // the head was malformed -> respond 400 and close
+
+    HttpParseResult() {
+        this.request = null;
+        this.consumed = 0;
+        this.complete = false;
+        this.error = false;
+    }
+}
+
+HttpParseResult* httpIncomplete() { return new HttpParseResult(); }
+HttpParseResult* httpError() {
+    HttpParseResult* r = new HttpParseResult();
+    r->error = true;
+    return r;
+}
+
+// Try to parse one request from the front of `buf`. Returns an incomplete result
+// (request == null, complete == false) when more bytes are needed, an error
+// result on a malformed head, or a complete result with the request and the
+// number of bytes consumed.
+HttpParseResult* tryParseRequest(Bytes* buf) {
+    int headEnd = findHeaderEnd(buf);
+    if (headEnd < 0) { return httpIncomplete(); }
+
+    string head = bytesRangeToStr(buf, 0, headEnd);
+    List<string> lines = strings::split(head, (char)10);   // split on '\n'
+    if (lines.length() == 0) { return httpError(); }
+
+    // Request line: METHOD SP TARGET SP VERSION
+    string reqLine = stripCR(lines.get(0));
+    List<string> parts = strings::split(reqLine, (char)32);   // split on ' '
+    if (parts.length() < 3) { return httpError(); }
+
+    HttpRequest* req = new HttpRequest();
+    req->method = parts.get(0);
+    req->target = parts.get(1);
+    req->version = parts.get(2);
+
+    int q = indexOf(req->target, "?");
+    if (q >= 0) {
+        req->path = substr(req->target, 0, q);
+        req->query = substr(req->target, q + 1, len(req->target));
+    } else {
+        req->path = req->target;
+        req->query = "";
+    }
+
+    // Header lines until the blank line.
+    int nlines = lines.length();
+    for (int i = 1; i < nlines; ++i) {
+        string line = stripCR(lines.get(i));
+        if (len(line) == 0) { continue; }
+        int colon = indexOf(line, ":");
+        if (colon < 0) { return httpError(); }
+        string name = strings::trim(substr(line, 0, colon));
+        string value = strings::trim(substr(line, colon + 1, len(line)));
+        req->headers->add(name, value);
+    }
+
+    int bodyStart = headEnd + 4;
+    int clen = req->headers->contentLength();
+    if (clen < 0) { clen = 0; }
+    int needed = bodyStart + clen;
+    if (buf->length() < needed) { return httpIncomplete(); }   // wait for the body
+
+    if (clen > 0) {
+        req->body = bytesSlice(buf, bodyStart, bodyStart + clen);
+    }
+
+    HttpParseResult* res = new HttpParseResult();
+    res->request = req;
+    res->consumed = needed;
+    res->complete = true;
+    return res;
+}
+
+// Strip a single trailing '\r' (lines were split on '\n').
+string stripCR(string s) {
+    int n = len(s);
+    if (n > 0 && (int)(s[n - 1]) == 13) { return substr(s, 0, n - 1); }
+    return s;
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+
+// Serialize a response. Sets Content-Length from the body and a Connection
+// header reflecting `keepAlive` (the server decides this from the request).
+Bytes* renderResponse(HttpResponse* r, bool keepAlive) {
+    r->headers->set("Content-Length", intToStr(r->body->length()));
+    if (keepAlive) { r->headers->set("Connection", "keep-alive"); }
+    else { r->headers->set("Connection", "close"); }
+    if (!(r->headers->has("Content-Type"))) {
+        r->headers->set("Content-Type", "application/octet-stream");
+    }
+
+    StringBuilder sb = StringBuilder();
+    sb.append("HTTP/1.1 ");
+    sb.appendInt(r->status);
+    sb.appendChar((char)32);
+    sb.append(r->reason);
+    sb.append("\r\n");
+    int hc = r->headers->count();
+    for (int i = 0; i < hc; ++i) {
+        sb.append(r->headers->nameAt(i));
+        sb.append(": ");
+        sb.append(r->headers->valueAt(i));
+        sb.append("\r\n");
+    }
+    sb.append("\r\n");
+
+    Bytes* out = new Bytes(len(sb.build()) + r->body->length() + 1);
+    bytesAppendStr(out, sb.build());
+    bytesAppendBytes(out, r->body);
+    return out;
+}

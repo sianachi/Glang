@@ -1,0 +1,161 @@
+// std/net.lang — blocking TCP sockets for a single-threaded server.
+//
+// Thin wrappers over the socket builtins (netListen/netAccept/netConnect/
+// netRecv/netSend/netClose), passing payloads through Bytes. File descriptors
+// are plain ints; errors throw an Exception.
+//
+// The native compiler maps these to real BSD sockets. The interpreters back
+// them with a deterministic in-memory loopback instead (no real networking), so
+// a single-process listen -> connect -> accept -> send/recv round-trip runs and
+// is differentially testable on every backend. HTTP/router/html on top of this
+// are pure Glang.
+
+import "std/bytes.lang";
+import "std/list.lang";
+
+// A connected TCP stream. Heap-allocated (new/delete); close() then delete.
+class TcpSocket {
+    int fd;
+
+    TcpSocket(int fd) {
+        this.fd = fd;
+    }
+
+    // Receive up to buf.cap bytes into buf, set buf.size, and return the count
+    // (0 = peer closed the connection, throws on error).
+    int recv(Bytes buf) {
+        int n = netRecv(this.fd, buf.data, buf.cap);
+        if (n < 0) {
+            throw new Exception("TcpSocket.recv: error");
+        }
+        buf.size = n;
+        return n;
+    }
+
+    // Send buf.size bytes from buf; returns the number written (throws on error).
+    int send(Bytes buf) {
+        int n = netSend(this.fd, buf.data, buf.size);
+        if (n < 0) {
+            throw new Exception("TcpSocket.send: error");
+        }
+        return n;
+    }
+
+    void close() {
+        netClose(this.fd);
+    }
+}
+
+// A listening server socket.
+class TcpListener {
+    int fd;
+
+    TcpListener(int port) {
+        this.fd = netListen(port);
+        if (this.fd < 0) {
+            throw new Exception("TcpListener: bind/listen failed");
+        }
+    }
+
+    // The actual bound port (useful when constructed with port 0 = ephemeral).
+    int port() {
+        return netLocalPort(this.fd);
+    }
+
+    // Block until a client connects; returns a new TcpSocket (throws on error).
+    TcpSocket* accept() {
+        int c = netAccept(this.fd);
+        if (c < 0) {
+            throw new Exception("TcpListener.accept: error");
+        }
+        return new TcpSocket(c);
+    }
+
+    void close() {
+        netClose(this.fd);
+    }
+}
+
+// Connect to host:port and return a new TcpSocket (throws on error).
+TcpSocket* tcpConnect(string host, int port) {
+    int fd = netConnect(host, port);
+    if (fd < 0) {
+        throw new Exception("tcpConnect: connection failed");
+    }
+    return new TcpSocket(fd);
+}
+
+// ── Non-blocking / event-loop primitives ────────────────────────────────────
+// poll() readiness bits: 1=read, 2=write, 4=error. Use these predicates rather
+// than the raw masks so call sites stay readable.
+
+bool pollReadable(int revents) { return (revents & 1) != 0; }
+bool pollWritable(int revents) { return (revents & 2) != 0; }
+bool pollError(int revents)    { return (revents & 4) != 0; }
+
+// Make a socket non-blocking so recv/send/accept return -1 + netWouldBlock()
+// instead of stalling the single event-loop thread.
+void setNonBlocking(int fd) { netSetNonBlocking(fd); }
+void setNoDelay(int fd)     { netSetNoDelay(fd); }
+
+// Start a non-blocking outbound connection (for a reverse proxy upstream). The
+// returned fd may still be connecting; once poll reports it writable, call
+// netSockError(fd): 0 means connected, anything else is the failure.
+int tcpConnectNonBlocking(string host, int port) {
+    return netConnectNb(host, port);
+}
+
+// A growable set of (fd, interest) registrations multiplexed with one poll()
+// call. Rebuilt each tick: clear(), add the fds you care about, wait(), then
+// iterate fdAt/revAt.
+class Poller {
+    List<int> fds;
+    List<int> wants;
+    List<int> revents;
+
+    Poller() {
+        this.fds = List<int>();
+        this.wants = List<int>();
+        this.revents = List<int>();
+    }
+
+    void clear() {
+        this.fds.clear();
+        this.wants.clear();
+        this.revents.clear();
+    }
+
+    void add(int fd, int events) {
+        this.fds.add(fd);
+        this.wants.add(events);
+    }
+    void addRead(int fd)      { this.add(fd, 1); }
+    void addWrite(int fd)     { this.add(fd, 2); }
+    void addReadWrite(int fd) { this.add(fd, 3); }
+
+    // Block up to timeoutMs (-1 = forever) until at least one fd is ready;
+    // returns the number of ready fds. Results are read back via revAt(i).
+    int wait(int timeoutMs) {
+        int n = this.fds.length();
+        this.revents.clear();
+        if (n == 0) { return 0; }
+        int* fb = alloc(int, n);
+        int* eb = alloc(int, n);
+        int* rb = alloc(int, n);
+        for (int i = 0; i < n; ++i) {
+            fb[i] = this.fds.get(i);
+            eb[i] = this.wants.get(i);
+            rb[i] = 0;
+        }
+        int ready = netPoll(fb, eb, rb, n, timeoutMs);
+        for (int i = 0; i < n; ++i) { this.revents.add(rb[i]); }
+        free(fb);
+        free(eb);
+        free(rb);
+        return ready;
+    }
+
+    int count()      { return this.fds.length(); }
+    int fdAt(int i)   { return this.fds.get(i); }
+    int revAt(int i)  { return this.revents.get(i); }
+}
