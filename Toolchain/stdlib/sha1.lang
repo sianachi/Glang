@@ -1,0 +1,145 @@
+// std/sha1.lang — SHA-1 message digest (RFC 3174), pure GLang.
+//
+// Needed for the WebSocket handshake (Sec-WebSocket-Accept). GLang `int` is
+// 64-bit, so every 32-bit operation is masked with `& 0xFFFFFFFF`; without that
+// the additions silently carry into the high bits and corrupt the digest.
+//
+//   Bytes* d = sha1Bytes(b);            // 20-byte digest
+//   string h = sha1Hex(b);              // lowercase hex
+//   sha1HexOfString("abc") == "a9993e364706816aba3e25717850c26c9cd0d89d"
+
+import "std/bytes.lang";
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+int sha1_mask(int x) { return x & 0xFFFFFFFF; }
+
+// Left-rotate a 32-bit word by n bits. `x` must already be a 32-bit value.
+int sha1_rotl(int x, int n) {
+    return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF;
+}
+
+Bytes* bytesOfString(string s) {
+    Bytes* b = new Bytes(len(s) + 1);
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(s[i]);
+        if (c < 0) { c = c + 256; }
+        b->append((byte) c);
+    }
+    return b;
+}
+
+// 20-byte SHA-1 digest of `msg`.
+Bytes* sha1Bytes(Bytes* msg) {
+    int h0 = 0x67452301;
+    int h1 = 0xEFCDAB89;
+    int h2 = 0x98BADCFE;
+    int h3 = 0x10325476;
+    int h4 = 0xC3D2E1F0;
+
+    int msgLen = msg->length();
+    int bitLen = msgLen * 8;
+
+    // Padded message: original bytes, 0x80, zeros to 56 mod 64, 64-bit BE length.
+    Bytes* m = new Bytes(msgLen + 72);
+    for (int i = 0; i < msgLen; ++i) { m->append(msg->get(i)); }
+    m->append((byte) 0x80);
+    while ((m->length() % 64) != 56) { m->append((byte) 0); }
+    for (int p = 0; p < 8; ++p) {
+        int shift = (7 - p) * 8;
+        m->append((byte) ((bitLen >> shift) & 255));
+    }
+
+    int total = m->length();
+    int chunk = 0;
+    while (chunk < total) {
+        // 80-word message schedule.
+        List<int> w = List<int>();
+        for (int i = 0; i < 16; ++i) {
+            int base = chunk + i * 4;
+            int b0 = (int)(m->get(base));
+            int b1 = (int)(m->get(base + 1));
+            int b2 = (int)(m->get(base + 2));
+            int b3 = (int)(m->get(base + 3));
+            w.add(((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 0xFFFFFFFF);
+        }
+        for (int i = 16; i < 80; ++i) {
+            int x = w.get(i - 3) ^ w.get(i - 8) ^ w.get(i - 14) ^ w.get(i - 16);
+            w.add(sha1_rotl(x & 0xFFFFFFFF, 1));
+        }
+
+        int a = h0;
+        int b = h1;
+        int c = h2;
+        int d = h3;
+        int e = h4;
+
+        for (int i = 0; i < 80; ++i) {
+            int f = 0;
+            int k = 0;
+            if (i < 20) {
+                f = (b & c) | (((~b) & 0xFFFFFFFF) & d);
+                k = 0x5A827999;
+            } else if (i < 40) {
+                f = b ^ c ^ d;
+                k = 0x6ED9EBA1;
+            } else if (i < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                k = 0x8F1BBCDC;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xCA62C1D6;
+            }
+            int temp = (sha1_rotl(a, 5) + (f & 0xFFFFFFFF) + e + k + w.get(i)) & 0xFFFFFFFF;
+            e = d;
+            d = c;
+            c = sha1_rotl(b, 30);
+            b = a;
+            a = temp;
+        }
+
+        h0 = (h0 + a) & 0xFFFFFFFF;
+        h1 = (h1 + b) & 0xFFFFFFFF;
+        h2 = (h2 + c) & 0xFFFFFFFF;
+        h3 = (h3 + d) & 0xFFFFFFFF;
+        h4 = (h4 + e) & 0xFFFFFFFF;
+
+        chunk = chunk + 64;
+    }
+
+    Bytes* out = new Bytes(20);
+    sha1_appendWord(out, h0);
+    sha1_appendWord(out, h1);
+    sha1_appendWord(out, h2);
+    sha1_appendWord(out, h3);
+    sha1_appendWord(out, h4);
+    return out;
+}
+
+void sha1_appendWord(Bytes* out, int w) {
+    out->append((byte) ((w >> 24) & 255));
+    out->append((byte) ((w >> 16) & 255));
+    out->append((byte) ((w >> 8) & 255));
+    out->append((byte) (w & 255));
+}
+
+string sha1_hexNibble(int v) {
+    string digits = "0123456789abcdef";
+    return toString(digits[v & 15]);
+}
+
+string sha1Hex(Bytes* msg) {
+    Bytes* d = sha1Bytes(msg);
+    StringBuilder sb = StringBuilder();
+    int n = d->length();
+    for (int i = 0; i < n; ++i) {
+        int v = (int)(d->get(i));
+        sb.append(sha1_hexNibble(v >> 4));
+        sb.append(sha1_hexNibble(v));
+    }
+    return sb.build();
+}
+
+string sha1HexOfString(string s) { return sha1Hex(bytesOfString(s)); }

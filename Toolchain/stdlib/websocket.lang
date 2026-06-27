@@ -1,0 +1,154 @@
+// std/websocket.lang — minimal RFC 6455 WebSocket server support (handshake +
+// frame codec), pure GLang over std/bytes. Built for carrying LSP JSON-RPC, so
+// it implements server-side framing: it UNMASKS client frames and sends
+// UNMASKED server frames, with the 7/16/64-bit length encodings (LSP messages
+// routinely exceed 125 bytes). It does not fragment outgoing messages (each is
+// one frame) and assumes incoming text messages are single, unfragmented frames
+// (true for browser language clients).
+
+import "std/bytes.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/sha1.lang";
+import "std/base64.lang";
+
+string WS_MAGIC() { return "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"; }
+
+// Opcodes.
+int WS_CONT()  { return 0; }
+int WS_TEXT()  { return 1; }
+int WS_BIN()   { return 2; }
+int WS_CLOSE() { return 8; }
+int WS_PING()  { return 9; }
+int WS_PONG()  { return 10; }
+
+// ── Handshake ────────────────────────────────────────────────────────────────
+
+string wsAccept(string key) {
+    return base64Encode(sha1Bytes(bytesOfString(key + WS_MAGIC())));
+}
+
+// True if the (already lowercased-by-HttpHeaders) headers request an upgrade.
+bool wsHeaderIsUpgrade(string upgradeHeader, string connectionHeader) {
+    string up = strings::toLowerStr(strings::trim(upgradeHeader));
+    string cn = strings::toLowerStr(connectionHeader);
+    return up == "websocket" && contains(cn, "upgrade");
+}
+
+// The raw 101 Switching Protocols response bytes for a given Sec-WebSocket-Key.
+Bytes* wsHandshakeResponse(string key) {
+    string s = "HTTP/1.1 101 Switching Protocols\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Connection: Upgrade\r\n"
+        + "Sec-WebSocket-Accept: " + wsAccept(key) + "\r\n\r\n";
+    return bytesOfString(s);
+}
+
+// ── Frame parsing ────────────────────────────────────────────────────────────
+
+class WsFrame {
+    int opcode;
+    Bytes* payload;
+    int consumed;     // bytes consumed from the buffer
+    bool complete;    // false => need more bytes
+    WsFrame(int op, Bytes* p, int c, bool done) {
+        this.opcode = op;
+        this.payload = p;
+        this.consumed = c;
+        this.complete = done;
+    }
+}
+
+WsFrame* wsIncomplete() { return new WsFrame(0, new Bytes(1), 0, false); }
+
+// Parse one client frame from `buf` beginning at `start`. Client frames are
+// always masked (RFC 6455 §5.1); the payload is unmasked into the result.
+WsFrame* wsParseFrame(Bytes* buf, int start) {
+    int n = buf->length();
+    if (start + 2 > n) { return wsIncomplete(); }
+
+    int b0 = (int)(buf->get(start));
+    int b1 = (int)(buf->get(start + 1));
+    int opcode = b0 & 15;
+    int masked = (b1 >> 7) & 1;
+    int len7 = b1 & 127;
+
+    int off = start + 2;
+    int payloadLen = len7;
+    if (len7 == 126) {
+        if (off + 2 > n) { return wsIncomplete(); }
+        payloadLen = ((int)(buf->get(off)) << 8) | (int)(buf->get(off + 1));
+        off = off + 2;
+    } else if (len7 == 127) {
+        if (off + 8 > n) { return wsIncomplete(); }
+        payloadLen = 0;
+        for (int i = 0; i < 8; ++i) {
+            payloadLen = (payloadLen << 8) | (int)(buf->get(off + i));
+        }
+        off = off + 8;
+    }
+
+    int maskOff = off;
+    if (masked == 1) {
+        if (off + 4 > n) { return wsIncomplete(); }
+        off = off + 4;
+    }
+
+    if (off + payloadLen > n) { return wsIncomplete(); }
+
+    Bytes* payload = new Bytes(payloadLen + 1);
+    for (int i = 0; i < payloadLen; ++i) {
+        int v = (int)(buf->get(off + i));
+        if (masked == 1) {
+            int mk = (int)(buf->get(maskOff + (i & 3)));
+            v = v ^ mk;
+        }
+        payload->append((byte) (v & 255));
+    }
+
+    int consumed = (off + payloadLen) - start;
+    return new WsFrame(opcode, payload, consumed, true);
+}
+
+// ── Frame building (server -> client, unmasked) ──────────────────────────────
+
+void wsWriteHeader(Bytes* out, int opcode, int payloadLen) {
+    out->append((byte) (0x80 | (opcode & 15)));   // FIN + opcode
+    if (payloadLen < 126) {
+        out->append((byte) payloadLen);
+    } else if (payloadLen < 65536) {
+        out->append((byte) 126);
+        out->append((byte) ((payloadLen >> 8) & 255));
+        out->append((byte) (payloadLen & 255));
+    } else {
+        out->append((byte) 127);
+        for (int p = 0; p < 8; ++p) {
+            int shift = (7 - p) * 8;
+            out->append((byte) ((payloadLen >> shift) & 255));
+        }
+    }
+}
+
+Bytes* wsBuildTextFrame(string s) {
+    Bytes* payload = bytesOfString(s);
+    int plen = payload->length();
+    Bytes* out = new Bytes(plen + 12);
+    wsWriteHeader(out, WS_TEXT(), plen);
+    for (int i = 0; i < plen; ++i) { out->append(payload->get(i)); }
+    return out;
+}
+
+Bytes* wsBuildCloseFrame() {
+    Bytes* out = new Bytes(2);
+    out->append((byte) (0x80 | WS_CLOSE()));
+    out->append((byte) 0);
+    return out;
+}
+
+Bytes* wsBuildPong(Bytes* pingPayload) {
+    int plen = pingPayload->length();
+    Bytes* out = new Bytes(plen + 4);
+    wsWriteHeader(out, WS_PONG(), plen);
+    for (int i = 0; i < plen; ++i) { out->append(pingPayload->get(i)); }
+    return out;
+}
