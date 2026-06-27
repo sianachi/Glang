@@ -1,0 +1,20 @@
+# Keep the build context small and reproducible.
+.git
+**/node_modules
+learn/dist
+.venv
+**/__pycache__
+**/.pytest_cache
+*.pyc
+
+# Build artifacts (regenerated inside the image).
+toolchain/glangc
+toolchain/glangi
+toolchain/*.o
+toolchain/services/*.c
+toolchain/services/run_server
+toolchain/services/lsp_ws_server
+toolchain/lsp/*.c
+toolchain/lsp/glang-lsp
+toolchain/services/*.out
+**/*.gen.c

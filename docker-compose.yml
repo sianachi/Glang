@@ -1,0 +1,59 @@
+# GLang learn platform — GLang backend services + React frontend.
+#
+#   docker compose up --build
+#   open http://localhost:8080
+#
+# Topology: the browser talks only to `frontend` (nginx), which proxies /api to
+# the run service and /lsp (WebSocket) to the LSP service. The two GLang services
+# sit on an internal-only network with no internet egress, run as non-root with
+# dropped capabilities, and are resource-capped — defense-in-depth around the
+# untrusted code the run service interprets (the step budget bounds CPU; these
+# bound memory/filesystem/network/blast-radius).
+
+services:
+  run:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.services
+      target: run
+    networks: [internal]
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  lsp:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.services
+      target: lsp
+    networks: [internal]
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+    ports:
+      - "8080:80"
+    networks: [edge, internal]
+    depends_on: [run, lsp]
+    restart: unless-stopped
+
+networks:
+  edge: {}
+  internal:
+    internal: true   # no internet egress for the GLang service containers

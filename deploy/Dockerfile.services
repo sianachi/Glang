@@ -1,0 +1,45 @@
+# Multi-stage build for the GLang backend services (run + LSP-over-WebSocket).
+#
+# The portable C for each service is generated on the HOST by deploy/prebuild.sh
+# (glangc holds the whole compiler+interpreter in memory and can OOM a small
+# build VM; the emitted C is platform-neutral). This image only runs gcc.
+#
+#   bash deploy/prebuild.sh && docker compose up --build
+#
+# Two runtime targets share the builder:
+#   run  — needs toolchain/stdlib/ at runtime (the interpreter's loader resolves
+#          user `import "std/..."` from disk) plus a writable /tmp.
+#   lsp  — standalone (analyses in-memory buffers only; no stdlib at runtime).
+
+FROM debian:bookworm-slim AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY deploy/gen/ ./
+RUN mkdir -p /out \
+ && gcc -O1 -w run_server.c glang_runtime.c -o /out/run_server \
+ && gcc -O1 -w lsp_ws_server.c glang_runtime.c -o /out/lsp_ws_server
+
+# ── run service ──────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS run
+WORKDIR /app
+COPY --from=build /out/run_server /app/run_server
+COPY toolchain/stdlib/ /app/stdlib/
+USER nobody
+EXPOSE 8081
+# The tree-walking interpreter allocates per step without freeing, so a high step
+# budget can leak past the container memory limit (OOM) before the budget trips.
+# 1,000,000 steps is far more than any learning exercise needs and keeps a
+# runaway program's footprint well under the 512m limit set in compose. (A
+# subprocess-per-request executor would reclaim memory after each run — the
+# documented next step.)
+ENTRYPOINT ["/app/run_server", "--port", "8081", "--stdlib", "/app/stdlib", "--tmp", "/tmp", "--max-steps", "1000000"]
+
+# ── LSP WebSocket service ────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS lsp
+WORKDIR /app
+COPY --from=build /out/lsp_ws_server /app/lsp_ws_server
+USER nobody
+EXPOSE 8082
+ENTRYPOINT ["/app/lsp_ws_server", "--port", "8082"]
