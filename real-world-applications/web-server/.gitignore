@@ -2,3 +2,7 @@
 web-server
 web-server.c
 *.o
+
+# runtime upload store (created at runtime; keep the dir, ignore its contents)
+uploads/*
+!uploads/.gitkeep

@@ -1,20 +1,26 @@
-// real-world-applications/web-server — a comprehensive HTTP server + reverse
-// proxy written entirely in Glang.
+// real-world-applications/web-server — a comprehensive HTTP server, reverse
+// proxy, and file store written entirely in Glang.
 //
 // Built on the standard library: std/server.lang (non-blocking event loop +
-// streaming reverse proxy), std/http.lang (parsing/building), std/router.lang,
-// std/html.lang. A single thread serves many concurrent connections via poll().
+// streaming reverse proxy + static/file-store mounts + CORS), std/http.lang,
+// std/router.lang, std/html.lang, std/static.lang. A single thread serves many
+// concurrent connections via poll().
 //
 // Usage:
-//   web-server [listenPort] [upstreamHost] [upstreamPort]
-//   defaults:  8080         127.0.0.1      9000
+//   web-server [listenPort] [upstreamHost] [upstreamPort] [uploadsDir]
+//   defaults:  8080         127.0.0.1      9000           ./uploads
 //
 // Routes:
-//   GET /         a small HTML home page
-//   GET /health   liveness probe (text/plain "ok")
-//   GET /echo     reflects ?msg=... HTML-escaped (XSS-safe)
-//   GET /time     current wall-clock millis
-//   ANY /api/*    reverse-proxied to the configured upstream
+//   GET /                  HTML home page with a file uploader
+//   GET /health            liveness probe (text/plain "ok")
+//   GET /echo              reflects ?msg=... HTML-escaped (XSS-safe)
+//   GET /time              current wall-clock millis
+//   GET /files             JSON list of uploaded files
+//   PUT /files/<name>      upload a file (binary-safe)
+//   GET /files/<name>      download a file (binary-safe, MIME by extension)
+//   ANY /api/*             reverse-proxied to the configured upstream
+//
+// The uploads directory must exist (e.g. `mkdir -p uploads`).
 
 import "std/server.lang";
 import "std/html.lang";
@@ -23,13 +29,36 @@ import "std/string.lang";
 HttpResponse* home(HttpRequest* req) {
     string body = ""
         + "<h1>Glang web server</h1>\n"
-        + "<p>A non-blocking HTTP/1.1 server and reverse proxy, written in Glang.</p>\n"
-        + "<ul>\n"
+        + "<p>A non-blocking HTTP/1.1 server, reverse proxy, and file store, "
+        + "written in Glang.</p>\n"
+        + "<h2>Upload a file</h2>\n"
+        + "<input type=\"file\" id=\"f\"> <button onclick=\"up()\">Upload</button>\n"
+        + "<h2>Files</h2>\n<ul id=\"list\"></ul>\n"
+        + "<h2>Other endpoints</h2>\n<ul>\n"
         + "<li><a href=\"/health\">/health</a> — liveness probe</li>\n"
         + "<li><a href=\"/echo?msg=hello\">/echo?msg=hello</a> — HTML-escaped echo</li>\n"
         + "<li><a href=\"/time\">/time</a> — server clock</li>\n"
         + "<li><code>/api/*</code> — reverse-proxied to the upstream</li>\n"
-        + "</ul>\n";
+        + "</ul>\n"
+        + "<script>\n"
+        + "async function refresh(){\n"
+        + "  const r = await fetch('/files'); const names = await r.json();\n"
+        + "  const ul = document.getElementById('list'); ul.textContent = '';\n"
+        + "  for (const n of names){\n"
+        + "    const li = document.createElement('li');\n"
+        + "    const a = document.createElement('a');\n"
+        + "    a.href = '/files/' + encodeURIComponent(n);\n"
+        + "    a.textContent = n;\n"              // textContent: no HTML injection
+        + "    li.appendChild(a); ul.appendChild(li);\n"
+        + "  }\n"
+        + "}\n"
+        + "async function up(){\n"
+        + "  const f = document.getElementById('f').files[0]; if(!f) return;\n"
+        + "  await fetch('/files/' + encodeURIComponent(f.name), {method:'PUT', body:f});\n"
+        + "  refresh();\n"
+        + "}\n"
+        + "refresh();\n"
+        + "</script>\n";
     return httpHtml(200, htmlPage("Glang web server", body));
 }
 
@@ -83,15 +112,19 @@ int main() {
     int port = argOr(0, 8080);
     string upstreamHost = argStr(1, "127.0.0.1");
     int upstreamPort = argOr(2, 9000);
+    string uploadsDir = argStr(3, "./uploads");
 
     HttpServer srv = HttpServer(port);
     srv.get("/", home);
     srv.get("/health", health);
     srv.get("/echo", echo);
     srv.get("/time", timeNow);
+    srv.fileStore("/files", uploadsDir);      // upload / list / download
     srv.proxy("/api", upstreamHost, upstreamPort);
+    srv.cors("*");                            // allow browser uploads cross-origin
 
     print("Glang web server listening on port " + intToStr(srv.port()));
+    print("File store at /files -> " + uploadsDir);
     print("Reverse-proxying /api/* to " + upstreamHost + ":" + intToStr(upstreamPort));
     srv.serveForever();
     return 0;
