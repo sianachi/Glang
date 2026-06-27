@@ -1,0 +1,86 @@
+// std/path.lang — POSIX-style path manipulation (pure string work).
+//
+// Function names are prefixed `path*` to avoid clashing with std/static.lang's
+// web-serving helpers (joinPath / sanitizeRelPath). Separator is '/'.
+
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/list.lang";
+
+bool pathIsAbsolute(string p) {
+    return len(p) > 0 && (int)(p[0]) == 47;   // leading '/'
+}
+
+// Join two path segments with a single '/'.
+string pathJoin(string a, string b) {
+    if (len(a) == 0) { return b; }
+    if (len(b) == 0) { return a; }
+    if (pathIsAbsolute(b)) { return b; }       // absolute b wins
+    bool aSlash = (int)(a[len(a) - 1]) == 47;
+    if (aSlash) { return a + b; }
+    return a + "/" + b;
+}
+
+// The final component: pathBase("a/b/c.txt") -> "c.txt".
+string pathBase(string p) {
+    int n = len(p);
+    if (n == 0) { return ""; }
+    int end = n;
+    if ((int)(p[end - 1]) == 47) { end = end - 1; }   // ignore a trailing '/'
+    int start = end;
+    while (start > 0 && (int)(p[start - 1]) != 47) { start = start - 1; }
+    return substr(p, start, end);
+}
+
+// The directory part: pathDir("a/b/c.txt") -> "a/b"; "" if none.
+string pathDir(string p) {
+    int n = len(p);
+    int end = n;
+    if (end > 0 && (int)(p[end - 1]) == 47) { end = end - 1; }
+    int slash = -1;
+    for (int i = 0; i < end; ++i) {
+        if ((int)(p[i]) == 47) { slash = i; }
+    }
+    if (slash < 0) { return ""; }
+    if (slash == 0) { return "/"; }
+    return substr(p, 0, slash);
+}
+
+// Lowercase extension without the dot, or "" if none: pathExt("x.TAR.gz") -> "gz".
+string pathExt(string p) {
+    string b = pathBase(p);
+    int n = len(b);
+    int dot = -1;
+    for (int i = 0; i < n; ++i) {
+        if ((int)(b[i]) == 46) { dot = i; }
+    }
+    if (dot <= 0 || dot == n - 1) { return ""; }   // no dot, leading dot, or trailing dot
+    return strings::toLowerStr(substr(b, dot + 1, n));
+}
+
+// Collapse '.', '..', empty, and duplicate-slash segments. Keeps a leading '/'
+// for absolute paths; a result that would be empty becomes "." (relative) or
+// "/" (absolute).
+string pathNormalize(string p) {
+    bool abs = pathIsAbsolute(p);
+    List<string> parts = strings::split(p, (char)47);   // '/'
+    List<string> out = List<string>();
+    int n = parts.length();
+    for (int i = 0; i < n; ++i) {
+        string seg = parts.get(i);
+        if (len(seg) == 0 || seg == ".") { continue; }
+        if (seg == "..") {
+            if (out.length() > 0 && out.get(out.length() - 1) != "..") {
+                out.removeAt(out.length() - 1);
+            } else if (!abs) {
+                out.add("..");
+            }
+            continue;
+        }
+        out.add(seg);
+    }
+    string joined = strings::join(out, "/");
+    if (abs) { return "/" + joined; }
+    if (len(joined) == 0) { return "."; }
+    return joined;
+}

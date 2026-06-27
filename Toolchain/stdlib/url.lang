@@ -1,0 +1,104 @@
+// std/url.lang — percent-encoding and query-string parsing/building.
+//
+// percentEncode/Decode implement RFC 3986; queryDecode also turns '+' into a
+// space (the application/x-www-form-urlencoded convention). parseQuery and
+// buildQuery move between a query string and a Map<string,string>.
+//
+// Caveat: decoding produces a string, so a literal %00 would embed a NUL — avoid
+// percent-encoded NULs (use Bytes if you need true binary).
+
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/map.lang";
+import "std/list.lang";
+
+bool urlUnreserved(int c) {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57)
+        || c == 45 || c == 46 || c == 95 || c == 126;   // - . _ ~
+}
+
+char urlHexUpper(int n) {
+    if (n < 10) { return (char)(48 + n); }
+    return (char)(65 + n - 10);
+}
+
+int urlHexVal(int c) {
+    if (c >= 48 && c <= 57)  { return c - 48; }
+    if (c >= 97 && c <= 102) { return c - 87; }
+    if (c >= 65 && c <= 70)  { return c - 55; }
+    return -1;
+}
+
+string percentEncode(string s) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(s[i]);
+        if (urlUnreserved(c)) {
+            sb.appendChar((char)c);
+        } else {
+            sb.appendChar((char)37);   // '%'
+            sb.appendChar(urlHexUpper((c >> 4) & 15));
+            sb.appendChar(urlHexUpper(c & 15));
+        }
+    }
+    return sb.build();
+}
+
+string pctDecodeImpl(string s, bool plusSpace) {
+    StringBuilder sb = StringBuilder();
+    int n = len(s);
+    int i = 0;
+    while (i < n) {
+        int c = (int)(s[i]);
+        if (c == 37 && i + 2 < n) {                 // "%XX"
+            int hi = urlHexVal((int)(s[i + 1]));
+            int lo = urlHexVal((int)(s[i + 2]));
+            if (hi >= 0 && lo >= 0) {
+                sb.appendChar((char)((hi << 4) | lo));
+                i = i + 3;
+                continue;
+            }
+        }
+        if (c == 43 && plusSpace) { sb.appendChar((char)32); }   // '+' -> space
+        else { sb.appendChar((char)c); }
+        i = i + 1;
+    }
+    return sb.build();
+}
+
+string percentDecode(string s) { return pctDecodeImpl(s, false); }
+string queryDecode(string s)   { return pctDecodeImpl(s, true); }
+
+// Parse "a=1&b=hello+world" into a Map (last value wins on duplicate keys).
+Map<string, string>* parseQuery(string query) {
+    Map<string, string>* m = new Map<string, string>();
+    List<string> pairs = strings::split(query, (char)38);   // '&'
+    int n = pairs.length();
+    for (int i = 0; i < n; ++i) {
+        string p = pairs.get(i);
+        if (len(p) == 0) { continue; }
+        int eq = indexOf(p, "=");
+        if (eq < 0) {
+            m->set(queryDecode(p), "");
+        } else {
+            string k = substr(p, 0, eq);
+            string v = substr(p, eq + 1, len(p));
+            m->set(queryDecode(k), queryDecode(v));
+        }
+    }
+    return m;
+}
+
+// Build "k1=v1&k2=v2" with each key/value percent-encoded.
+string buildQuery(Map<string, string>* m) {
+    StringBuilder sb = StringBuilder();
+    int n = m->size;
+    for (int i = 0; i < n; ++i) {
+        if (i > 0) { sb.appendChar((char)38); }   // '&'
+        sb.append(percentEncode(m->keys[i]));
+        sb.appendChar((char)61);                   // '='
+        sb.append(percentEncode(m->vals[i]));
+    }
+    return sb.build();
+}

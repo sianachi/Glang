@@ -1,0 +1,54 @@
+// std/uuid.lang — RFC 4122 UUIDs (version 4 random, version 7 time-ordered).
+//
+// Randomness comes from std/random.lang's Rng, so a fixed-seed Rng yields a
+// deterministic UUID stream (testable on every backend). v7 takes the timestamp
+// explicitly (millis) so it is testable; uuidV7Now uses the wall clock.
+
+import "std/random.lang";
+import "std/bytes.lang";
+import "std/stringbuilder.lang";
+
+char uuidHex(int n) {
+    if (n < 10) { return (char)(48 + n); }
+    return (char)(97 + n - 10);
+}
+
+// Format 16 bytes as 8-4-4-4-12 lowercase hex.
+string uuidFormat(Bytes* b) {
+    StringBuilder sb = StringBuilder();
+    for (int i = 0; i < 16; ++i) {
+        if (i == 4 || i == 6 || i == 8 || i == 10) { sb.appendChar((char)45); }  // '-'
+        int v = (int)(b->get(i));
+        sb.appendChar(uuidHex((v >> 4) & 15));
+        sb.appendChar(uuidHex(v & 15));
+    }
+    return sb.build();
+}
+
+string uuidV4(Rng* rng) {
+    Bytes* b = new Bytes(16);
+    for (int i = 0; i < 16; ++i) { b->append((byte)(rng->nextInt(256))); }
+    b->set(6, (byte)(((int)(b->get(6)) & 15) | 64));    // version 4 (0x40)
+    b->set(8, (byte)(((int)(b->get(8)) & 63) | 128));   // RFC variant (0x80)
+    string s = uuidFormat(b);
+    delete b;
+    return s;
+}
+
+string uuidV7(Rng* rng, int millisTime) {
+    Bytes* b = new Bytes(16);
+    b->append((byte)((millisTime >> 40) & 255));        // 48-bit big-endian ms
+    b->append((byte)((millisTime >> 32) & 255));
+    b->append((byte)((millisTime >> 24) & 255));
+    b->append((byte)((millisTime >> 16) & 255));
+    b->append((byte)((millisTime >> 8) & 255));
+    b->append((byte)(millisTime & 255));
+    for (int i = 6; i < 16; ++i) { b->append((byte)(rng->nextInt(256))); }
+    b->set(6, (byte)(((int)(b->get(6)) & 15) | 112));   // version 7 (0x70)
+    b->set(8, (byte)(((int)(b->get(8)) & 63) | 128));   // RFC variant (0x80)
+    string s = uuidFormat(b);
+    delete b;
+    return s;
+}
+
+string uuidV7Now(Rng* rng) { return uuidV7(rng, wallMillis()); }

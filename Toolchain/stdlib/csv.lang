@@ -1,0 +1,102 @@
+// std/csv.lang — RFC 4180 CSV parsing and writing.
+//
+// parseCsv returns rows as List<List<string>*>* (each row a list of fields),
+// handling quoted fields with embedded commas, quotes ("" escape), and newlines.
+// writeCsv is the inverse, quoting fields only when necessary. Rows are joined
+// with "\n" on write.
+
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/list.lang";
+
+List<List<string>*>* parseCsv(string text) {
+    List<List<string>*>* rows = new List<List<string>*>();
+    List<string>* cur = new List<string>();
+    StringBuilder field = StringBuilder();
+    bool inQuotes = false;
+    bool rowHasData = false;
+    int n = len(text);
+    int i = 0;
+    while (i < n) {
+        int c = (int)(text[i]);
+        if (inQuotes) {
+            if (c == 34) {                                  // '"'
+                if (i + 1 < n && (int)(text[i + 1]) == 34) {
+                    field.appendChar((char)34);             // "" -> literal quote
+                    i = i + 2;
+                    continue;
+                }
+                inQuotes = false;
+                i = i + 1;
+                continue;
+            }
+            field.appendChar((char)c);
+            i = i + 1;
+            continue;
+        }
+        if (c == 34) { inQuotes = true; rowHasData = true; i = i + 1; continue; }
+        if (c == 44) {                                       // ','
+            cur->add(field.build());
+            field.clear();
+            rowHasData = true;
+            i = i + 1;
+            continue;
+        }
+        if (c == 13) { i = i + 1; continue; }                // skip CR
+        if (c == 10) {                                       // LF ends the row
+            cur->add(field.build());
+            field.clear();
+            rows->add(cur);
+            cur = new List<string>();
+            rowHasData = false;
+            i = i + 1;
+            continue;
+        }
+        field.appendChar((char)c);
+        rowHasData = true;
+        i = i + 1;
+    }
+    if (field.length() > 0 || cur->length() > 0 || rowHasData) {
+        cur->add(field.build());
+        rows->add(cur);
+    }
+    return rows;
+}
+
+bool csvNeedsQuote(string field) {
+    int n = len(field);
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(field[i]);
+        if (c == 44 || c == 34 || c == 10 || c == 13) { return true; }
+    }
+    return false;
+}
+
+string csvQuoteField(string field) {
+    if (!(csvNeedsQuote(field))) { return field; }
+    StringBuilder sb = StringBuilder();
+    sb.appendChar((char)34);
+    int n = len(field);
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(field[i]);
+        if (c == 34) { sb.appendChar((char)34); }   // double an embedded quote
+        sb.appendChar((char)c);
+    }
+    sb.appendChar((char)34);
+    return sb.build();
+}
+
+string writeCsv(List<List<string>*>* rows) {
+    StringBuilder sb = StringBuilder();
+    int nr = rows->length();
+    for (int r = 0; r < nr; ++r) {
+        if (r > 0) { sb.appendChar((char)10); }   // '\n' between rows
+        List<string>* row = rows->get(r);
+        int nc = row->length();
+        for (int cI = 0; cI < nc; ++cI) {
+            if (cI > 0) { sb.appendChar((char)44); }   // ','
+            sb.append(csvQuoteField(row->get(cI)));
+        }
+    }
+    return sb.build();
+}
