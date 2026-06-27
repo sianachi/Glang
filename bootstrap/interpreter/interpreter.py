@@ -102,6 +102,40 @@ class CallableValue:
     current_class: Optional[str] = None
 
 
+class _NetConn:
+    """A bidirectional in-memory pipe between two endpoints (a fake socket pair).
+
+    The client writes to ``c2s`` and reads ``s2c``; the server does the reverse.
+    Backs the net* builtins so a single-process loopback round-trip is
+    deterministic — no real OS sockets (those stay a compiled-path capability).
+    """
+
+    __slots__ = ("c2s", "s2c", "client_open", "server_open")
+
+    def __init__(self) -> None:
+        self.c2s = bytearray()       # client -> server
+        self.s2c = bytearray()       # server -> client
+        self.client_open = True
+        self.server_open = True
+
+
+class _NetEndpoint:
+    __slots__ = ("conn", "is_client")
+
+    def __init__(self, conn: "_NetConn", is_client: bool) -> None:
+        self.conn = conn
+        self.is_client = is_client
+
+
+class _NetListener:
+    __slots__ = ("port", "backlog", "open")
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+        self.backlog: List[int] = []   # server-side fds awaiting accept()
+        self.open = True
+
+
 class Heap:
     """Tracks heap-allocated boxes and validates free/delete."""
 
@@ -210,6 +244,15 @@ class Interpreter:
         self._err = err
         self._args: List[str] = prog_args if prog_args is not None else []
         self._stack_addr = -1  # negative addresses for non-heap boxes
+        # In-memory socket model (see _NetConn): deterministic loopback so the
+        # net* builtins run on the interpreter. Real OS sockets stay compiled-only.
+        self._net_listeners: Dict[int, _NetListener] = {}   # listener fd -> listener
+        self._net_by_port: Dict[int, int] = {}              # port -> listener fd
+        self._net_endpoints: Dict[int, _NetEndpoint] = {}   # endpoint fd -> endpoint
+        self._net_next_fd = 3                               # 0..2 reserved (std streams)
+        self._net_next_eph = 40000                          # ephemeral port allocator
+        self._net_would_block = False                       # last call hit a would-block
+        self._net_errno = 0                                 # last call's errno-ish code
 
     # -- public entry ----------------------------------------------------
 
@@ -801,6 +844,21 @@ class Interpreter:
             "nowNanos",
             "wallMillis",
             "sleepMs",
+            "netListen",
+            "netLocalPort",
+            "netAccept",
+            "netConnect",
+            "netRecv",
+            "netSend",
+            "netClose",
+            "netConnectNb",
+            "netSetNonBlocking",
+            "netSetNoDelay",
+            "netShutdown",
+            "netSockError",
+            "netErrno",
+            "netWouldBlock",
+            "netPoll",
         }
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
@@ -940,6 +998,204 @@ class Interpreter:
             if ms > 0:
                 _time.sleep(ms / 1000.0)
             return VOID
+
+        if expr.name == "netListen":
+            port = int(self._eval(expr.args[0]).raw)
+            if port == 0:
+                port = self._net_next_eph
+                self._net_next_eph += 1
+            elif port in self._net_by_port:
+                return Value(NamedType("int"), -1)   # address already in use
+            fd = self._net_next_fd
+            self._net_next_fd += 1
+            self._net_listeners[fd] = _NetListener(port)
+            self._net_by_port[port] = fd
+            return Value(NamedType("int"), fd)
+
+        if expr.name == "netLocalPort":
+            fd = int(self._eval(expr.args[0]).raw)
+            lis = self._net_listeners.get(fd)
+            return Value(NamedType("int"), lis.port if lis is not None else -1)
+
+        if expr.name == "netAccept":
+            fd = int(self._eval(expr.args[0]).raw)
+            lis = self._net_listeners.get(fd)
+            if lis is None or not lis.backlog:
+                return Value(NamedType("int"), -1)   # would block / not listening
+            return Value(NamedType("int"), lis.backlog.pop(0))
+
+        if expr.name == "netConnect":
+            self._eval(expr.args[0])                 # host is ignored (loopback)
+            port = int(self._eval(expr.args[1]).raw)
+            lfd = self._net_by_port.get(port)
+            lis = self._net_listeners.get(lfd) if lfd is not None else None
+            if lis is None or not lis.open:
+                return Value(NamedType("int"), -1)   # connection refused
+            conn = _NetConn()
+            cfd = self._net_next_fd
+            sfd = self._net_next_fd + 1
+            self._net_next_fd += 2
+            self._net_endpoints[cfd] = _NetEndpoint(conn, True)
+            self._net_endpoints[sfd] = _NetEndpoint(conn, False)
+            lis.backlog.append(sfd)
+            return Value(NamedType("int"), cfd)
+
+        if expr.name == "netRecv":
+            fd = int(self._eval(expr.args[0]).raw)
+            buf = self._eval(expr.args[1])
+            cap = int(self._eval(expr.args[2]).raw)
+            ep = self._net_endpoints.get(fd)
+            if ep is None:
+                return Value(NamedType("int"), -1)
+            if cap <= 0:
+                return Value(NamedType("int"), 0)
+            inbound = ep.conn.s2c if ep.is_client else ep.conn.c2s
+            peer_open = ep.conn.server_open if ep.is_client else ep.conn.client_open
+            if not inbound:
+                # Empty: peer closed -> EOF (0); peer still open -> would block.
+                if not peer_open:
+                    self._net_would_block = False
+                    return Value(NamedType("int"), 0)
+                self._net_would_block = True
+                self._net_errno = 35   # EAGAIN
+                return Value(NamedType("int"), -1)
+            self._net_would_block = False
+            block = self._deref(buf, expr.line, expr.col)
+            elements = block.value.raw
+            n = min(cap, len(inbound), len(elements))
+            byte_t = NamedType("byte")
+            for i in range(n):
+                elements[i].value = Value(byte_t, inbound[i])
+            del inbound[:n]
+            return Value(NamedType("int"), n)
+
+        if expr.name == "netSend":
+            fd = int(self._eval(expr.args[0]).raw)
+            buf = self._eval(expr.args[1])
+            length = int(self._eval(expr.args[2]).raw)
+            ep = self._net_endpoints.get(fd)
+            if ep is None:
+                return Value(NamedType("int"), -1)
+            if length <= 0:
+                return Value(NamedType("int"), 0)
+            peer_open = ep.conn.server_open if ep.is_client else ep.conn.client_open
+            if not peer_open:
+                self._net_would_block = False
+                self._net_errno = 32   # EPIPE
+                return Value(NamedType("int"), -1)   # broken pipe
+            self._net_would_block = False
+            outbound = ep.conn.c2s if ep.is_client else ep.conn.s2c
+            block = self._deref(buf, expr.line, expr.col)
+            elements = block.value.raw
+            n = min(length, len(elements))
+            for i in range(n):
+                outbound.append(int(elements[i].value.raw) & 0xFF)
+            return Value(NamedType("int"), n)
+
+        if expr.name == "netClose":
+            fd = int(self._eval(expr.args[0]).raw)
+            lis = self._net_listeners.get(fd)
+            if lis is not None:
+                lis.open = False
+                if self._net_by_port.get(lis.port) == fd:
+                    del self._net_by_port[lis.port]
+                del self._net_listeners[fd]
+                return VOID
+            ep = self._net_endpoints.get(fd)
+            if ep is not None:
+                if ep.is_client:
+                    ep.conn.client_open = False
+                else:
+                    ep.conn.server_open = False
+                del self._net_endpoints[fd]
+            return VOID
+
+        if expr.name == "netConnectNb":
+            # The loopback model connects instantly; identical to netConnect.
+            self._eval(expr.args[0])
+            port = int(self._eval(expr.args[1]).raw)
+            lfd = self._net_by_port.get(port)
+            lis = self._net_listeners.get(lfd) if lfd is not None else None
+            if lis is None or not lis.open:
+                self._net_errno = 61   # ECONNREFUSED
+                return Value(NamedType("int"), -1)
+            conn = _NetConn()
+            cfd = self._net_next_fd
+            sfd = self._net_next_fd + 1
+            self._net_next_fd += 2
+            self._net_endpoints[cfd] = _NetEndpoint(conn, True)
+            self._net_endpoints[sfd] = _NetEndpoint(conn, False)
+            lis.backlog.append(sfd)
+            return Value(NamedType("int"), cfd)
+
+        if expr.name == "netSetNonBlocking":
+            self._eval(expr.args[0])
+            return Value(NamedType("int"), 0)   # the model is always non-blocking
+
+        if expr.name == "netSetNoDelay":
+            self._eval(expr.args[0])
+            return Value(NamedType("int"), 0)   # no-op in the model
+
+        if expr.name == "netSockError":
+            self._eval(expr.args[0])
+            return Value(NamedType("int"), 0)   # connect completes instantly
+
+        if expr.name == "netErrno":
+            return Value(NamedType("int"), self._net_errno)
+
+        if expr.name == "netWouldBlock":
+            return Value(NamedType("bool"), self._net_would_block)
+
+        if expr.name == "netShutdown":
+            fd = int(self._eval(expr.args[0]).raw)
+            how = int(self._eval(expr.args[1]).raw)
+            ep = self._net_endpoints.get(fd)
+            if ep is None:
+                return Value(NamedType("int"), -1)
+            if how != 0:   # write or both: peer drains then sees EOF
+                if ep.is_client:
+                    ep.conn.client_open = False
+                else:
+                    ep.conn.server_open = False
+            return Value(NamedType("int"), 0)
+
+        if expr.name == "netPoll":
+            fds_v = self._eval(expr.args[0])
+            events_v = self._eval(expr.args[1])
+            revents_v = self._eval(expr.args[2])
+            count = int(self._eval(expr.args[3]).raw)
+            self._eval(expr.args[4])   # timeout: model never blocks
+            fds_el = self._deref(fds_v, expr.line, expr.col).value.raw
+            ev_el = self._deref(events_v, expr.line, expr.col).value.raw
+            rev_el = self._deref(revents_v, expr.line, expr.col).value.raw
+            int_t = NamedType("int")
+            ready = 0
+            for i in range(count):
+                fd = int(fds_el[i].value.raw)
+                want = int(ev_el[i].value.raw)
+                r = 0
+                lis = self._net_listeners.get(fd)
+                if lis is not None:
+                    if (want & 1) and lis.backlog:
+                        r |= 1
+                else:
+                    ep = self._net_endpoints.get(fd)
+                    if ep is not None:
+                        inbound = ep.conn.s2c if ep.is_client else ep.conn.c2s
+                        peer_open = (ep.conn.server_open if ep.is_client
+                                     else ep.conn.client_open)
+                        # Readable if data waiting or peer closed (recv -> 0/EOF).
+                        if (want & 1) and (inbound or not peer_open):
+                            r |= 1
+                        # Writable while the peer can still receive.
+                        if (want & 2) and peer_open:
+                            r |= 2
+                    else:
+                        r |= 4   # unknown fd -> error
+                rev_el[i].value = Value(int_t, r)
+                if r:
+                    ready += 1
+            return Value(NamedType("int"), ready)
 
         source = self._eval(expr.args[0]).raw
         needle = self._eval(expr.args[1]).raw

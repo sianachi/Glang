@@ -261,6 +261,77 @@ bool sListHas(List<string> xs, string v) {
     return false;
 }
 
+// ── In-memory socket model ──────────────────────────────────────────────────
+// A deterministic loopback backing the net* builtins so they run on the
+// interpreter. The client writes c2s and reads s2c; the server does the reverse.
+// Real OS sockets stay a compiled-path-only capability. Mirrors the Python
+// reference's _NetConn/_NetEndpoint/_NetListener.
+
+class NetConn {
+    List<int> c2s; int c2sHead;   // client -> server queue + read cursor
+    List<int> s2c; int s2cHead;   // server -> client queue + read cursor
+    bool clientOpen; bool serverOpen;
+    NetConn() {
+        this.c2s = List<int>(); this.c2sHead = 0;
+        this.s2c = List<int>(); this.s2cHead = 0;
+        this.clientOpen = true; this.serverOpen = true;
+    }
+    // Bytes available to the reader on the given side.
+    int inAvail(bool isClient) {
+        if (isClient) { return this.s2c.length() - this.s2cHead; }
+        return this.c2s.length() - this.c2sHead;
+    }
+    // Pop one byte from the inbound queue for the given side.
+    int inPop(bool isClient) {
+        if (isClient) { int b = this.s2c.get(this.s2cHead); this.s2cHead = this.s2cHead + 1; return b; }
+        int b = this.c2s.get(this.c2sHead); this.c2sHead = this.c2sHead + 1; return b;
+    }
+    // Append one byte to the outbound queue for the given side.
+    void outPush(bool isClient, int b) {
+        if (isClient) { this.c2s.add(b & 255); } else { this.s2c.add(b & 255); }
+    }
+    // Is the peer endpoint still open?
+    bool peerOpen(bool isClient) {
+        if (isClient) { return this.serverOpen; }
+        return this.clientOpen;
+    }
+    void closeSide(bool isClient) {
+        if (isClient) { this.clientOpen = false; } else { this.serverOpen = false; }
+    }
+}
+
+class NetEndpoint {
+    NetConn* conn;
+    bool isClient;
+    NetEndpoint(NetConn* c, bool ic) { this.conn = c; this.isClient = ic; }
+}
+
+class NetListener {
+    int port;
+    List<int> backlog;   // server-side fds awaiting accept()
+    bool open;
+    NetListener(int p) { this.port = p; this.backlog = List<int>(); this.open = true; }
+}
+
+class NetState {
+    Map<int, NetListener*> listeners;   // listener fd -> listener
+    Map<int, int> portToFd;             // port -> listener fd
+    Map<int, NetEndpoint*> endpoints;   // endpoint fd -> endpoint
+    int nextFd;
+    int nextEph;
+    bool wouldBlock;                    // did the last call hit a would-block?
+    int lastErrno;                      // last call's errno-ish code
+    NetState() {
+        this.listeners = Map<int, NetListener*>();
+        this.portToFd = Map<int, int>();
+        this.endpoints = Map<int, NetEndpoint*>();
+        this.nextFd = 3;
+        this.nextEph = 40000;
+        this.wouldBlock = false;
+        this.lastErrno = 0;
+    }
+}
+
 // ── The interpreter ─────────────────────────────────────────────────────────
 
 class Frame {
@@ -295,6 +366,7 @@ class Interp {
     int stackAddr;
     int heapAddr;
     List<int> live;              // live heap addrs (for free validation)
+    NetState* net;               // in-memory socket model (loopback)
 
     Interp(GlobalEnv* e) {
         this.env = e;
@@ -305,6 +377,7 @@ class Interp {
         this.stackAddr = -1;
         this.heapAddr = 1;
         this.live = List<int>();
+        this.net = new NetState();
     }
 
     Frame* cur() { return this.frames.get(this.frames.length() - 1); }
@@ -1071,6 +1144,160 @@ class Interp {
         if (name == "nowNanos")   { return mkInt(nowNanos()); }
         if (name == "wallMillis") { return mkInt(wallMillis()); }
         if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }
+        if (name == "netListen") {
+            int port = rawInt(this.eval(args.get(0)));
+            if (port == 0) { port = this.net->nextEph; this.net->nextEph = this.net->nextEph + 1; }
+            else if (this.net->portToFd.has(port)) { return mkInt(-1); }
+            int fd = this.net->nextFd; this.net->nextFd = this.net->nextFd + 1;
+            this.net->listeners.set(fd, new NetListener(port));
+            this.net->portToFd.set(port, fd);
+            return mkInt(fd);
+        }
+        if (name == "netLocalPort") {
+            int fd = rawInt(this.eval(args.get(0)));
+            NetListener* lis = this.net->listeners.getOr(fd, null);
+            if (lis == null) { return mkInt(-1); }
+            return mkInt(lis->port);
+        }
+        if (name == "netAccept") {
+            int fd = rawInt(this.eval(args.get(0)));
+            NetListener* lis = this.net->listeners.getOr(fd, null);
+            if (lis == null || lis->backlog.isEmpty()) { return mkInt(-1); }
+            int sfd = lis->backlog.get(0);
+            lis->backlog.removeAt(0);
+            return mkInt(sfd);
+        }
+        if (name == "netConnect") {
+            this.eval(args.get(0));   // host is ignored (loopback)
+            int port = rawInt(this.eval(args.get(1)));
+            if (!(this.net->portToFd.has(port))) { return mkInt(-1); }
+            int lfd = this.net->portToFd.getOr(port, -1);
+            NetListener* lis = this.net->listeners.getOr(lfd, null);
+            if (lis == null || !(lis->open)) { return mkInt(-1); }
+            NetConn* conn = new NetConn();
+            int cfd = this.net->nextFd; int sfd = this.net->nextFd + 1;
+            this.net->nextFd = this.net->nextFd + 2;
+            this.net->endpoints.set(cfd, new NetEndpoint(conn, true));
+            this.net->endpoints.set(sfd, new NetEndpoint(conn, false));
+            lis->backlog.add(sfd);
+            return mkInt(cfd);
+        }
+        if (name == "netRecv") {
+            int fd = rawInt(this.eval(args.get(0)));
+            RtVal* buf = this.eval(args.get(1));
+            int cap = rawInt(this.eval(args.get(2)));
+            NetEndpoint* ep = this.net->endpoints.getOr(fd, null);
+            if (ep == null) { return mkInt(-1); }
+            if (cap <= 0) { return mkInt(0); }
+            int av = ep->conn->inAvail(ep->isClient);
+            if (av == 0) {
+                if (ep->conn->peerOpen(ep->isClient)) {
+                    this.net->wouldBlock = true; this.net->lastErrno = 35;   // EAGAIN
+                    return mkInt(-1);
+                }
+                this.net->wouldBlock = false;
+                return mkInt(0);                                            // peer closed: EOF
+            }
+            this.net->wouldBlock = false;
+            List<Box*> elems = this.arrElems(buf);
+            int n = cap;
+            if (av < n) { n = av; }
+            if (elems.length() < n) { n = elems.length(); }
+            for (int i = 0; i < n; ++i) {
+                int b = ep->conn->inPop(ep->isClient);
+                elems.get(i)->value = mkByte(b);
+            }
+            return mkInt(n);
+        }
+        if (name == "netSend") {
+            int fd = rawInt(this.eval(args.get(0)));
+            RtVal* buf = this.eval(args.get(1));
+            int length = rawInt(this.eval(args.get(2)));
+            NetEndpoint* ep = this.net->endpoints.getOr(fd, null);
+            if (ep == null) { return mkInt(-1); }
+            if (length <= 0) { return mkInt(0); }
+            if (!(ep->conn->peerOpen(ep->isClient))) {
+                this.net->wouldBlock = false; this.net->lastErrno = 32;   // EPIPE
+                return mkInt(-1);                                          // broken pipe
+            }
+            this.net->wouldBlock = false;
+            List<Box*> elems = this.arrElems(buf);
+            int n = length;
+            if (elems.length() < n) { n = elems.length(); }
+            for (int i = 0; i < n; ++i) {
+                ep->conn->outPush(ep->isClient, rawInt(elems.get(i)->value) & 255);
+            }
+            return mkInt(n);
+        }
+        if (name == "netClose") {
+            int fd = rawInt(this.eval(args.get(0)));
+            NetListener* lis = this.net->listeners.getOr(fd, null);
+            if (lis != null) { lis->open = false; return mkVoid(); }
+            NetEndpoint* ep = this.net->endpoints.getOr(fd, null);
+            if (ep != null) { ep->conn->closeSide(ep->isClient); }
+            return mkVoid();
+        }
+        if (name == "netConnectNb") {
+            this.eval(args.get(0));   // host ignored; the model connects instantly
+            int port = rawInt(this.eval(args.get(1)));
+            if (!(this.net->portToFd.has(port))) { this.net->lastErrno = 61; return mkInt(-1); }
+            int lfd = this.net->portToFd.getOr(port, -1);
+            NetListener* lis = this.net->listeners.getOr(lfd, null);
+            if (lis == null || !(lis->open)) { this.net->lastErrno = 61; return mkInt(-1); }
+            NetConn* conn = new NetConn();
+            int cfd = this.net->nextFd; int sfd = this.net->nextFd + 1;
+            this.net->nextFd = this.net->nextFd + 2;
+            this.net->endpoints.set(cfd, new NetEndpoint(conn, true));
+            this.net->endpoints.set(sfd, new NetEndpoint(conn, false));
+            lis->backlog.add(sfd);
+            return mkInt(cfd);
+        }
+        if (name == "netSetNonBlocking") { this.eval(args.get(0)); return mkInt(0); }
+        if (name == "netSetNoDelay")     { this.eval(args.get(0)); return mkInt(0); }
+        if (name == "netSockError")      { this.eval(args.get(0)); return mkInt(0); }
+        if (name == "netErrno")          { return mkInt(this.net->lastErrno); }
+        if (name == "netWouldBlock")     { return mkBool(this.net->wouldBlock); }
+        if (name == "netShutdown") {
+            int fd = rawInt(this.eval(args.get(0)));
+            int how = rawInt(this.eval(args.get(1)));
+            NetEndpoint* ep = this.net->endpoints.getOr(fd, null);
+            if (ep == null) { return mkInt(-1); }
+            if (how != 0) { ep->conn->closeSide(ep->isClient); }   // write/both: peer sees EOF
+            return mkInt(0);
+        }
+        if (name == "netPoll") {
+            RtVal* fdsV = this.eval(args.get(0));
+            RtVal* evV = this.eval(args.get(1));
+            RtVal* revV = this.eval(args.get(2));
+            int count = rawInt(this.eval(args.get(3)));
+            this.eval(args.get(4));   // timeout: the model never blocks
+            List<Box*> fdsE = this.arrElems(fdsV);
+            List<Box*> evE = this.arrElems(evV);
+            List<Box*> revE = this.arrElems(revV);
+            int ready = 0;
+            for (int i = 0; i < count; ++i) {
+                int fd = rawInt(fdsE.get(i)->value);
+                int want = rawInt(evE.get(i)->value);
+                int r = 0;
+                NetListener* lis = this.net->listeners.getOr(fd, null);
+                if (lis != null) {
+                    if ((want & 1) != 0 && !(lis->backlog.isEmpty())) { r = r | 1; }
+                } else {
+                    NetEndpoint* ep = this.net->endpoints.getOr(fd, null);
+                    if (ep != null) {
+                        bool hasData = ep->conn->inAvail(ep->isClient) > 0;
+                        bool peerUp = ep->conn->peerOpen(ep->isClient);
+                        if ((want & 1) != 0 && (hasData || !peerUp)) { r = r | 1; }
+                        if ((want & 2) != 0 && peerUp) { r = r | 2; }
+                    } else {
+                        r = r | 4;   // unknown fd -> error
+                    }
+                }
+                revE.get(i)->value = mkInt(r);
+                if (r != 0) { ready = ready + 1; }
+            }
+            return mkInt(ready);
+        }
         if (name == "getArgCount") { return mkInt(0); }
         if (name == "getArg")      { throw new RtError("getArg index out of range"); }
         if (name == "bytesFromString") {
