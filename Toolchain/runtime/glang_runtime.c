@@ -494,9 +494,20 @@ char* glang_inttostr(int64_t n) {
 
 char* glang_floattostr(double f) {
     char buf[64];
-    /* %.15g: up to 15 significant digits, trailing zeros trimmed. Note this
-       renders whole values without a fractional part ("9", not "9.0"). */
+    /* Canonical float rendering, identical to the Python reference: %.15g gives
+       up to 15 significant digits with trailing zeros trimmed, then we append
+       ".0" when the result looks like a bare integer (no '.', exponent, or
+       inf/nan) so whole values print as "9.0" rather than "9". */
     snprintf(buf, sizeof(buf), "%.15g", f);
+    int bare = 1;
+    for (char* p = buf; *p; ++p) {
+        char c = *p;
+        if (c == '.' || c == 'e' || c == 'E' || c == 'n' || c == 'i') { bare = 0; break; }
+    }
+    if (bare) {
+        size_t n = strlen(buf);
+        if (n + 2 < sizeof(buf)) { buf[n] = '.'; buf[n + 1] = '0'; buf[n + 2] = '\0'; }
+    }
     return strdup(buf);
 }
 

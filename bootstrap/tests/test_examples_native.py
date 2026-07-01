@@ -33,6 +33,7 @@ NATIVE_EXAMPLES = [
     "regex_demo",
     "test_demo",
     "generic_inference",
+    "float_format",
 ]
 
 

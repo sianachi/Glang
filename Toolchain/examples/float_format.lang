@@ -1,0 +1,20 @@
+// float_format.lang — floats print identically on both backends.
+//
+// The interpreter and the compiled runtime share one canonical rendering
+// (%.15g, with ".0" appended for whole values), so a float produces the same
+// text whether a program is interpreted or compiled. Whole values keep a
+// fractional part ("9.0"), and division that lands exactly still reads back as
+// a float.
+
+int main() {
+    print(toString(9.0));          // 9.0   (whole value keeps ".0")
+    print(toString(100.0));        // 100.0
+    print(toString(-7.0));         // -7.0
+    print(toString(3.14));         // 3.14
+    print(toString(0.1));          // 0.1
+    print(toString(1.0 / 3.0));    // 0.333333333333333  (15 significant digits)
+    print(toString(10.0 / 4.0));   // 2.5
+    print(toString(6.0 / 2.0));    // 3.0   (exact division still a float)
+    print(2.5);                    // print() dispatches floats the same way
+    return 0;
+}

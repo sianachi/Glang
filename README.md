@@ -235,7 +235,7 @@ machinery and a hole behaves exactly like the expression it contains.
 |----------|------------------|--------------------------------------------|
 | `int`    | 64-bit signed    | Integer division when both operands are int|
 | `uint`   | 64-bit unsigned  | Wraps modulo 2⁶⁴; logical shifts; prints unsigned |
-| `float`  | 64-bit IEEE 754  |                                            |
+| `float`  | 64-bit IEEE 754  | Prints canonically (`%.15g`, `.0` for whole values); identical text interpreted or compiled |
 | `bool`   | 1 byte           | Not an alias of int                        |
 | `char`   | 1 byte           | ASCII only; *text*, not arithmetic         |
 | `byte`   | unsigned 8-bit   | Octet for binary data; wraps modulo 256    |

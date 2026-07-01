@@ -2142,7 +2142,20 @@ class Interpreter:
     def _value_to_string(self, value: Value) -> str:
         if self._is(value, "bool"):
             return "true" if value.raw else "false"
+        if self._is(value, "float"):
+            return format_float(value.raw)
         return str(value.raw)
+
+
+def format_float(f: float) -> str:
+    """Canonical float rendering, identical to the native runtime's
+    glang_floattostr: %.15g, with ".0" appended for whole values so a float
+    prints as "9.0" rather than "9". Keeps interpreter and compiled output
+    byte-identical."""
+    s = "%.15g" % f
+    if not any(c in s for c in (".", "e", "E", "n", "i")):
+        s += ".0"
+    return s
 
 
 def _as_method(dtor: DestructorDecl) -> MethodDecl:
