@@ -406,7 +406,23 @@ class ExprParser {
                     if (buf.length() > 0) { segs.add(new InterpSeg(false, buf.build())); buf = StringBuilder(); }
                     int j = i + 1;
                     StringBuilder hole = StringBuilder();
-                    while (j < n && raw[j] != '}') { hole.appendChar(raw[j]); j = j + 1; }
+                    while (j < n && raw[j] != '}') {
+                        if (raw[j] == '"') {
+                            // Copy a string literal whole so a '}' inside it does
+                            // not end the hole.
+                            hole.appendChar(raw[j]); j = j + 1;
+                            while (j < n && raw[j] != '"') {
+                                if (raw[j] == '\\' && j + 1 < n) {
+                                    hole.appendChar(raw[j]); hole.appendChar(raw[j + 1]); j = j + 2;
+                                } else {
+                                    hole.appendChar(raw[j]); j = j + 1;
+                                }
+                            }
+                            if (j < n) { hole.appendChar(raw[j]); j = j + 1; }
+                        } else {
+                            hole.appendChar(raw[j]); j = j + 1;
+                        }
+                    }
                     if (j >= n) { throw new ParseError("unterminated '{' in interpolated string", 0, 0); }
                     string src = strings::trim(hole.build());
                     if (len(src) == 0) { throw new ParseError("empty '{}' in interpolated string", 0, 0); }

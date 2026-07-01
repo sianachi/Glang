@@ -414,6 +414,19 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
         ps.add(T("string"));
         return check_callable_args(name, arg_types, ps, T("string"), env);
     }
+    if (name == "getEnv") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if (name == "removeFile" || name == "makeDir" || name == "isDir") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "renameFile") {
+        ps.add(T("string"));
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
     if (name == "nowNanos") {
         return check_callable_args(name, arg_types, ps, T("int"), env);
     }

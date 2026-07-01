@@ -1,0 +1,39 @@
+// fs_demo.lang — filesystem and environment built-ins.
+//
+// Built-ins (no import needed):
+//   getEnv(name)          environment variable value, or "" if unset
+//   makeDir(path)         create a directory        (bool: success)
+//   isDir(path)           is path a directory?      (bool)
+//   renameFile(from, to)  rename/move a path        (bool: success)
+//   removeFile(path)      delete a file             (bool: success)
+// alongside the existing readFile / writeFile / fileExists / listDir.
+//
+//   python3 main.py run examples/fs_demo.lang
+
+import "std/string.lang";
+
+int main() {
+    // Environment: PATH is always present; an unknown name yields "".
+    print($"PATH is set: {len(getEnv("PATH")) > 0}");
+    print($"UNKNOWN is empty: {getEnv("GLANG_UNKNOWN_VAR") == ""}");
+
+    // Work inside a scratch directory (idempotent across runs).
+    string dir = "/tmp/glang_fs_demo";
+    string note = dir + "/note.txt";
+    string kept = dir + "/kept.txt";
+
+    removeFile(note);                        // clear any leftover
+    if (!(isDir(dir))) { makeDir(dir); }
+    print($"is directory: {isDir(dir)}");
+
+    writeFile(note, "hello");
+    print($"wrote note: {fileExists(note)}");
+
+    print($"renamed: {renameFile(note, kept)}");
+    print($"old gone: {fileExists(note) == false}");
+    print($"new here: {fileExists(kept)}");
+
+    print($"removed: {removeFile(kept)}");
+    print($"missing dir: {isDir("/tmp/glang_no_such_dir")}");
+    return 0;
+}

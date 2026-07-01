@@ -911,6 +911,11 @@ class Interpreter:
             "termResized",
             "termInterrupted",
             "shell",
+            "getEnv",
+            "removeFile",
+            "makeDir",
+            "renameFile",
+            "isDir",
             "nowNanos",
             "wallMillis",
             "sleepMs",
@@ -1256,6 +1261,28 @@ class Interpreter:
             except Exception:
                 out = ""
             return Value(NamedType("string"), out)
+
+        if expr.name == "getEnv":
+            import os as _os
+            name = str(self._eval(expr.args[0]).raw)
+            return Value(NamedType("string"), _os.environ.get(name, ""))
+
+        if expr.name in ("removeFile", "makeDir", "isDir", "renameFile"):
+            import os as _os
+            path = str(self._eval(expr.args[0]).raw)
+            try:
+                if expr.name == "removeFile":
+                    _os.remove(path); ok = True
+                elif expr.name == "makeDir":
+                    _os.mkdir(path); ok = True
+                elif expr.name == "isDir":
+                    ok = _os.path.isdir(path)
+                else:  # renameFile
+                    dst = str(self._eval(expr.args[1]).raw)
+                    _os.rename(path, dst); ok = True
+            except OSError:
+                ok = False
+            return Value(NamedType("bool"), bool(ok))
 
         if expr.name == "nowNanos":
             import time as _time

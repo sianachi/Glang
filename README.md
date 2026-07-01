@@ -716,6 +716,8 @@ and all live in the global function namespace. Grouped by area:
 | Strings | `len`, `substr`, `indexOf`, `startsWith`, `endsWith`, `contains` | string queries (`substr` is start-inclusive, end-exclusive) |
 | Conversions | `toString`, `intToStr`, `parseInt`, `parseFloat` | value ⇄ string |
 | Files | `readFile`, `writeFile`, `fileExists`, `fileSize`, `listDir` | `(string) -> …`; `listDir` returns newline-joined names |
+| Filesystem | `makeDir`, `isDir`, `renameFile`, `removeFile` | directory/file management (`-> bool` success) |
+| Environment | `getEnv` | `(string) -> string` — variable value, `""` if unset |
 | Binary files | `readFileInto`, `writeFileFrom` | `(string, byte*, int) -> int` (bounded blocks) |
 | Byte interop | `bytesFromString`, `stringFromBytes` | `string ⇄ byte*` |
 | Standard streams | `readStdin`, `readByte`, `writeStdout` | full stdin / one byte (`-1` at EOF) / raw stdout, no newline |
@@ -1408,8 +1410,9 @@ declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
 inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
 **string interpolation** (`$"...{expr}..."`), the **`uint`** unsigned 64-bit
-type, **method dispatch through interface pointers**, **terminal-control built-ins**
-and a **`shell`** built-in
+type, **method dispatch through interface pointers**, **terminal-control
+built-ins**, **filesystem/environment built-ins** (`makeDir`/`isDir`/
+`renameFile`/`removeFile`/`getEnv`), and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal
 editor, and a task manager). The standard library also gained `std/format.lang`

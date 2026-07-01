@@ -1280,7 +1280,8 @@ class CEmit {
                     || nm == "netShutdown" || nm == "netSockError" || nm == "netErrno"
                     || nm == "netPoll") { return "int"; }
                 if (nm == "fileSize" || nm == "readFileInto" || nm == "writeFileFrom") { return "int"; }
-                if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg" || nm == "listDir" || nm == "shell") { return "string"; }
+                if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg" || nm == "listDir" || nm == "shell" || nm == "getEnv") { return "string"; }
+                if (nm == "removeFile" || nm == "makeDir" || nm == "renameFile" || nm == "isDir") { return "bool"; }
                 if (nm == "parseFloat") { return "float"; }
                 if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains" || nm == "netWouldBlock") { return "bool"; }
                 if (nm == "termResized" || nm == "termInterrupted") { return "bool"; }
@@ -1412,6 +1413,11 @@ class CEmit {
         if (name == "termResized")     { return "glang_term_resized()"; }
         if (name == "termInterrupted") { return "glang_term_interrupted()"; }
         if (name == "shell")      { return "glang_shell(" + this.emitArgs(args) + ")"; }
+        if (name == "getEnv")     { return "glang_getenv(" + this.emitArgs(args) + ")"; }
+        if (name == "removeFile") { return "glang_remove_file(" + this.emitArgs(args) + ")"; }
+        if (name == "makeDir")    { return "glang_make_dir(" + this.emitArgs(args) + ")"; }
+        if (name == "renameFile") { return "glang_rename_file(" + this.emitArgs(args) + ")"; }
+        if (name == "isDir")      { return "glang_is_dir(" + this.emitArgs(args) + ")"; }
         if (name == "nowNanos")   { return "glang_now_nanos()"; }
         if (name == "wallMillis") { return "glang_wall_millis()"; }
         if (name == "sleepMs")    { return "glang_sleep_ms(" + this.emitArgs(args) + ")"; }
@@ -1732,6 +1738,11 @@ class CEmit {
         f.appendLine("int64_t glang_term_resized(void);");
         f.appendLine("int64_t glang_term_interrupted(void);");
         f.appendLine("char*   glang_shell(const char* cmd);");
+        f.appendLine("char*   glang_getenv(const char* name);");
+        f.appendLine("int64_t glang_remove_file(const char* path);");
+        f.appendLine("int64_t glang_make_dir(const char* path);");
+        f.appendLine("int64_t glang_rename_file(const char* from, const char* to);");
+        f.appendLine("int64_t glang_is_dir(const char* path);");
         f.appendLine("void* glang_managed_alloc(size_t size);");
         f.appendLine("void  glang_managed_sweep(void);");
         f.appendLine("void* glang_alloc(size_t size);");

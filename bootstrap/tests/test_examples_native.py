@@ -29,6 +29,7 @@ NATIVE_EXAMPLES = [
     "default_args",
     "uint_demo",
     "interp_demo",
+    "fs_demo",
 ]
 
 

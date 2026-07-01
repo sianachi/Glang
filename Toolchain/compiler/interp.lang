@@ -1232,6 +1232,11 @@ class Interp {
         if (name == "termResized")     { return mkBool(termResized()); }
         if (name == "termInterrupted") { return mkBool(termInterrupted()); }
         if (name == "shell")      { return mkStr(shell(rawStr(this.eval(args.get(0))))); }
+        if (name == "getEnv")     { return mkStr(getEnv(rawStr(this.eval(args.get(0))))); }
+        if (name == "removeFile") { return mkBool(removeFile(rawStr(this.eval(args.get(0))))); }
+        if (name == "makeDir")    { return mkBool(makeDir(rawStr(this.eval(args.get(0))))); }
+        if (name == "isDir")      { return mkBool(isDir(rawStr(this.eval(args.get(0))))); }
+        if (name == "renameFile") { return mkBool(renameFile(rawStr(this.eval(args.get(0))), rawStr(this.eval(args.get(1))))); }
         if (name == "nowNanos")   { return mkInt(nowNanos()); }
         if (name == "wallMillis") { return mkInt(wallMillis()); }
         if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }

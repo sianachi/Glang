@@ -420,7 +420,19 @@ class ExprParser:
                 j = i + 1
                 hole = []
                 while j < n and raw[j] != "}":
-                    hole.append(raw[j]); j += 1
+                    if raw[j] == '"':
+                        # copy a string literal whole so a '}' inside it doesn't
+                        # end the hole
+                        hole.append(raw[j]); j += 1
+                        while j < n and raw[j] != '"':
+                            if raw[j] == "\\" and j + 1 < n:
+                                hole.append(raw[j]); hole.append(raw[j + 1]); j += 2
+                            else:
+                                hole.append(raw[j]); j += 1
+                        if j < n:
+                            hole.append(raw[j]); j += 1
+                    else:
+                        hole.append(raw[j]); j += 1
                 if j >= n:
                     raise ParseError("unterminated '{' in interpolated string", line, col)
                 src = "".join(hole).strip()

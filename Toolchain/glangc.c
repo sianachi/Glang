@@ -38,6 +38,11 @@ int64_t glang_read_byte_timeout(int64_t ms);
 int64_t glang_term_resized(void);
 int64_t glang_term_interrupted(void);
 char*   glang_shell(const char* cmd);
+char*   glang_getenv(const char* name);
+int64_t glang_remove_file(const char* path);
+int64_t glang_make_dir(const char* path);
+int64_t glang_rename_file(const char* from, const char* to);
+int64_t glang_is_dir(const char* path);
 void* glang_managed_alloc(size_t size);
 void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
@@ -2053,6 +2058,7 @@ int chars__isSpace(char c);
 char chars__toUpper(char c);
 char chars__toLower(char c);
 int64_t chars__digitToInt(char c);
+int64_t strings__compare(char* a, char* b);
 char* strings__toUpperStr(char* s);
 char* strings__toLowerStr(char* s);
 char* strings__reverse(char* s);
@@ -3457,6 +3463,20 @@ int64_t chars__digitToInt(char c) {
     return (-1);
 }
 
+int64_t strings__compare(char* a, char* b) {
+    int64_t an = (int64_t)strlen(a);
+    int64_t bn = (int64_t)strlen(b);
+    int64_t m = ((an < bn) ? an : bn);
+    for (int64_t i = 0; (i < m); (++i)) {
+        int64_t ca = ((int64_t)(a[i]));
+        int64_t cb = ((int64_t)(b[i]));
+        if ((ca != cb)) {
+            return (ca - cb);
+        }
+    }
+    return (an - bn);
+}
+
 char* strings__toUpperStr(char* s) {
     char* out = "";
     int64_t n = (int64_t)strlen(s);
@@ -4357,17 +4377,18 @@ Token* GLexer__lexInterpString(GLexer* self, int64_t line, int64_t col) {
     GLexer__advance(self);
     GLexer__advance(self);
     StringBuilder* parts = StringBuilder_new();
+    int64_t depth = 0;
     while (1) {
         if (GLexer__atEnd(self)) {
             GLANG_THROW(LexError_new("unterminated interpolated string", line, col), "LexError");
         }
         char c = GLexer__peek(self, 0);
-        if ((c == '"')) {
-            GLexer__advance(self);
-            break;
-        }
         if ((c == '\n')) {
             GLANG_THROW(LexError_new("newline inside interpolated string", self->line, self->col), "LexError");
+        }
+        if (((depth == 0) && (c == '"'))) {
+            GLexer__advance(self);
+            break;
         }
         if ((c == '\\')) {
             StringBuilder__appendChar(parts, GLexer__advance(self));
@@ -4375,7 +4396,46 @@ Token* GLexer__lexInterpString(GLexer* self, int64_t line, int64_t col) {
                 StringBuilder__appendChar(parts, GLexer__advance(self));
             }
         } else {
-            StringBuilder__appendChar(parts, GLexer__advance(self));
+            if ((((depth == 0) && (c == '{')) && (GLexer__peek(self, 1) == '{'))) {
+                StringBuilder__appendChar(parts, GLexer__advance(self));
+                StringBuilder__appendChar(parts, GLexer__advance(self));
+            } else {
+                if ((((depth == 0) && (c == '}')) && (GLexer__peek(self, 1) == '}'))) {
+                    StringBuilder__appendChar(parts, GLexer__advance(self));
+                    StringBuilder__appendChar(parts, GLexer__advance(self));
+                } else {
+                    if ((c == '{')) {
+                        depth = (depth + 1);
+                        StringBuilder__appendChar(parts, GLexer__advance(self));
+                    } else {
+                        if ((c == '}')) {
+                            if ((depth > 0)) {
+                                depth = (depth - 1);
+                            }
+                            StringBuilder__appendChar(parts, GLexer__advance(self));
+                        } else {
+                            if (((depth > 0) && (c == '"'))) {
+                                StringBuilder__appendChar(parts, GLexer__advance(self));
+                                while (((!GLexer__atEnd(self)) && (GLexer__peek(self, 0) != '"'))) {
+                                    if ((GLexer__peek(self, 0) == '\\')) {
+                                        StringBuilder__appendChar(parts, GLexer__advance(self));
+                                        if ((!GLexer__atEnd(self))) {
+                                            StringBuilder__appendChar(parts, GLexer__advance(self));
+                                        }
+                                    } else {
+                                        StringBuilder__appendChar(parts, GLexer__advance(self));
+                                    }
+                                }
+                                if ((!GLexer__atEnd(self))) {
+                                    StringBuilder__appendChar(parts, GLexer__advance(self));
+                                }
+                            } else {
+                                StringBuilder__appendChar(parts, GLexer__advance(self));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     return Token_new(TokenType__INTERP_STRING, StringBuilder__build(parts), line, col);
@@ -6327,8 +6387,27 @@ List_InterpSeg* ExprParser__splitInterp(ExprParser* self, char* raw) {
                 int64_t j = (i + 1);
                 StringBuilder* hole = StringBuilder_new();
                 while (((j < n) && (raw[j] != '}'))) {
-                    StringBuilder__appendChar(hole, raw[j]);
-                    j = (j + 1);
+                    if ((raw[j] == '"')) {
+                        StringBuilder__appendChar(hole, raw[j]);
+                        j = (j + 1);
+                        while (((j < n) && (raw[j] != '"'))) {
+                            if (((raw[j] == '\\') && ((j + 1) < n))) {
+                                StringBuilder__appendChar(hole, raw[j]);
+                                StringBuilder__appendChar(hole, raw[(j + 1)]);
+                                j = (j + 2);
+                            } else {
+                                StringBuilder__appendChar(hole, raw[j]);
+                                j = (j + 1);
+                            }
+                        }
+                        if ((j < n)) {
+                            StringBuilder__appendChar(hole, raw[j]);
+                            j = (j + 1);
+                        }
+                    } else {
+                        StringBuilder__appendChar(hole, raw[j]);
+                        j = (j + 1);
+                    }
                 }
                 if ((j >= n)) {
                     GLANG_THROW(ParseError_new("unterminated '{' in interpolated string", 0, 0), "ParseError");
@@ -9081,6 +9160,19 @@ TypeNode* check_builtin_call(char* name, List_TypeNode* arg_types, GlobalEnv* en
     if ((strcmp(name, "shell") == 0)) {
         List_TypeNode__add(ps, T("string"));
         return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if ((strcmp(name, "getEnv") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
+    if ((((strcmp(name, "removeFile") == 0) || (strcmp(name, "makeDir") == 0)) || (strcmp(name, "isDir") == 0))) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if ((strcmp(name, "renameFile") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
     }
     if ((strcmp(name, "nowNanos") == 0)) {
         return check_callable_args(name, arg_types, ps, T("int"), env);
@@ -15105,7 +15197,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
 }
 
 int Pass2Checker__is_builtin_name(Pass2Checker* self, char* name) {
-    return (((((((((((((((((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "fileSize") == 0)) || (strcmp(name, "readFileInto") == 0)) || (strcmp(name, "writeFileFrom") == 0)) || (strcmp(name, "listDir") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "readByte") == 0)) || (strcmp(name, "writeStdout") == 0)) || (strcmp(name, "termRawOn") == 0)) || (strcmp(name, "termRawOff") == 0)) || (strcmp(name, "termWidth") == 0)) || (strcmp(name, "termHeight") == 0)) || (strcmp(name, "readByteTimeout") == 0)) || (strcmp(name, "termResized") == 0)) || (strcmp(name, "termInterrupted") == 0)) || (strcmp(name, "shell") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
+    return ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "fileSize") == 0)) || (strcmp(name, "readFileInto") == 0)) || (strcmp(name, "writeFileFrom") == 0)) || (strcmp(name, "listDir") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "readByte") == 0)) || (strcmp(name, "writeStdout") == 0)) || (strcmp(name, "termRawOn") == 0)) || (strcmp(name, "termRawOff") == 0)) || (strcmp(name, "termWidth") == 0)) || (strcmp(name, "termHeight") == 0)) || (strcmp(name, "readByteTimeout") == 0)) || (strcmp(name, "termResized") == 0)) || (strcmp(name, "termInterrupted") == 0)) || (strcmp(name, "shell") == 0)) || (strcmp(name, "getEnv") == 0)) || (strcmp(name, "removeFile") == 0)) || (strcmp(name, "makeDir") == 0)) || (strcmp(name, "renameFile") == 0)) || (strcmp(name, "isDir") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
 }
 
 TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
@@ -18574,8 +18666,11 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             if ((((strcmp(nm, "fileSize") == 0) || (strcmp(nm, "readFileInto") == 0)) || (strcmp(nm, "writeFileFrom") == 0))) {
                 return "int";
             }
-            if (((((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0)) || (strcmp(nm, "listDir") == 0)) || (strcmp(nm, "shell") == 0))) {
+            if ((((((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0)) || (strcmp(nm, "listDir") == 0)) || (strcmp(nm, "shell") == 0)) || (strcmp(nm, "getEnv") == 0))) {
                 return "string";
+            }
+            if (((((strcmp(nm, "removeFile") == 0) || (strcmp(nm, "makeDir") == 0)) || (strcmp(nm, "renameFile") == 0)) || (strcmp(nm, "isDir") == 0))) {
+                return "bool";
             }
             if ((strcmp(nm, "parseFloat") == 0)) {
                 return "float";
@@ -18848,6 +18943,21 @@ char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args) {
     }
     if ((strcmp(name, "shell") == 0)) {
         return glang_str_concat(glang_str_concat("glang_shell(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "getEnv") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_getenv(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "removeFile") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_remove_file(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "makeDir") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_make_dir(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "renameFile") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_rename_file(", CEmit__emitArgs(self, args)), ")");
+    }
+    if ((strcmp(name, "isDir") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_is_dir(", CEmit__emitArgs(self, args)), ")");
     }
     if ((strcmp(name, "nowNanos") == 0)) {
         return "glang_now_nanos()";
@@ -19485,6 +19595,11 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "int64_t glang_term_resized(void);");
     StringBuilder__appendLine(f, "int64_t glang_term_interrupted(void);");
     StringBuilder__appendLine(f, "char*   glang_shell(const char* cmd);");
+    StringBuilder__appendLine(f, "char*   glang_getenv(const char* name);");
+    StringBuilder__appendLine(f, "int64_t glang_remove_file(const char* path);");
+    StringBuilder__appendLine(f, "int64_t glang_make_dir(const char* path);");
+    StringBuilder__appendLine(f, "int64_t glang_rename_file(const char* from, const char* to);");
+    StringBuilder__appendLine(f, "int64_t glang_is_dir(const char* path);");
     StringBuilder__appendLine(f, "void* glang_managed_alloc(size_t size);");
     StringBuilder__appendLine(f, "void  glang_managed_sweep(void);");
     StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");

@@ -1066,6 +1066,8 @@ class Pass2Checker {
             || name == "termWidth" || name == "termHeight"
             || name == "readByteTimeout" || name == "termResized"
             || name == "termInterrupted" || name == "shell"
+            || name == "getEnv" || name == "removeFile" || name == "makeDir"
+            || name == "renameFile" || name == "isDir"
             || name == "nowNanos" || name == "wallMillis" || name == "sleepMs"
             || name == "netListen" || name == "netLocalPort" || name == "netAccept"
             || name == "netConnect" || name == "netRecv" || name == "netSend"

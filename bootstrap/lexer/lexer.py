@@ -301,22 +301,45 @@ class Lexer:
         self._advance()  # $
         self._advance()  # opening "
         parts: List[str] = []
+        depth = 0   # brace nesting; a closing quote only ends the string at depth 0
         while True:
             if self._pos >= len(self._src):
                 raise LexError("unterminated interpolated string", line, col)
             ch = self._peek()
-            if ch == '"':
-                self._advance()
-                break
             if ch == "\n":
                 raise LexError("newline inside interpolated string", self._line, self._col)
+            if depth == 0 and ch == '"':
+                self._advance()
+                break
             if ch == "\\":
-                # Preserve the escape verbatim; the parser decodes it.
                 parts.append(self._advance())
                 if self._pos < len(self._src):
                     parts.append(self._advance())
-            else:
+                continue
+            if depth == 0 and ch == "{" and self._pos + 1 < len(self._src) and self._src[self._pos + 1] == "{":
+                parts.append(self._advance()); parts.append(self._advance()); continue
+            if depth == 0 and ch == "}" and self._pos + 1 < len(self._src) and self._src[self._pos + 1] == "}":
+                parts.append(self._advance()); parts.append(self._advance()); continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                if depth > 0:
+                    depth -= 1
+            elif depth > 0 and ch == '"':
+                # A string literal inside a hole: copy it whole so its quotes and
+                # braces do not affect the interpolation scan.
                 parts.append(self._advance())
+                while self._pos < len(self._src) and self._peek() != '"':
+                    if self._peek() == "\\":
+                        parts.append(self._advance())
+                        if self._pos < len(self._src):
+                            parts.append(self._advance())
+                    else:
+                        parts.append(self._advance())
+                if self._pos < len(self._src):
+                    parts.append(self._advance())   # closing quote
+                continue
+            parts.append(self._advance())
         return Token(TokenType.INTERP_STRING, "".join(parts), line, col)
 
     # ------------------------------------------------------------------

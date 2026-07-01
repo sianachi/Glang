@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -703,6 +704,36 @@ char* glang_shell(const char* cmd) {
     buf[used] = '\0';
     pclose(p);
     return buf;
+}
+
+/* ── Filesystem & environment ───────────────────────────────────────────── */
+
+/* Value of environment variable `name`, or "" if unset. */
+char* glang_getenv(const char* name) {
+    const char* v = name ? getenv(name) : NULL;
+    return strdup(v ? v : "");
+}
+
+/* Delete a file. Returns 1 on success, 0 on failure. */
+int64_t glang_remove_file(const char* path) {
+    return (path && remove(path) == 0) ? 1 : 0;
+}
+
+/* Create a directory (mode 0755). Returns 1 on success, 0 on failure. */
+int64_t glang_make_dir(const char* path) {
+    return (path && mkdir(path, 0755) == 0) ? 1 : 0;
+}
+
+/* Rename/move a path. Returns 1 on success, 0 on failure. */
+int64_t glang_rename_file(const char* from, const char* to) {
+    return (from && to && rename(from, to) == 0) ? 1 : 0;
+}
+
+/* True (1) if `path` exists and is a directory. */
+int64_t glang_is_dir(const char* path) {
+    struct stat st;
+    if (!path || stat(path, &st) != 0) { return 0; }
+    return S_ISDIR(st.st_mode) ? 1 : 0;
 }
 
 /* ── Print ────────────────────────────────────────────────────────────── */

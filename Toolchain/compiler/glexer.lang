@@ -327,17 +327,40 @@ class GLexer {
         this.advance();   // $
         this.advance();   // opening "
         StringBuilder parts = StringBuilder();
+        int depth = 0;    // a closing quote only ends the string at brace-depth 0
         while (true) {
             if (this.atEnd()) {
                 throw new LexError("unterminated interpolated string", line, col);
             }
             char c = this.peek(0);
-            if (c == '"') { this.advance(); break; }
             if (c == '\n') {
                 throw new LexError("newline inside interpolated string", this.line, this.col);
             }
+            if (depth == 0 && c == '"') { this.advance(); break; }
             if (c == '\\') {
-                parts.appendChar(this.advance());          // backslash, verbatim
+                parts.appendChar(this.advance());
+                if (!(this.atEnd())) { parts.appendChar(this.advance()); }
+            } else if (depth == 0 && c == '{' && this.peek(1) == '{') {
+                parts.appendChar(this.advance()); parts.appendChar(this.advance());
+            } else if (depth == 0 && c == '}' && this.peek(1) == '}') {
+                parts.appendChar(this.advance()); parts.appendChar(this.advance());
+            } else if (c == '{') {
+                depth = depth + 1;
+                parts.appendChar(this.advance());
+            } else if (c == '}') {
+                if (depth > 0) { depth = depth - 1; }
+                parts.appendChar(this.advance());
+            } else if (depth > 0 && c == '"') {
+                // Copy a string literal inside a hole whole.
+                parts.appendChar(this.advance());
+                while (!(this.atEnd()) && this.peek(0) != '"') {
+                    if (this.peek(0) == '\\') {
+                        parts.appendChar(this.advance());
+                        if (!(this.atEnd())) { parts.appendChar(this.advance()); }
+                    } else {
+                        parts.appendChar(this.advance());
+                    }
+                }
                 if (!(this.atEnd())) { parts.appendChar(this.advance()); }
             } else {
                 parts.appendChar(this.advance());
