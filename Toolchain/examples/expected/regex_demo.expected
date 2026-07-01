@@ -1,0 +1,10 @@
+email  ada.lovelace@example.com  ->  valid
+email  not an email  ->  invalid
+email  bad@@example.com  ->  invalid
+number  42  ->  valid
+number  -7  ->  valid
+number  3.14  ->  invalid
+yesno  maybe  ->  valid
+yesno  nope  ->  invalid
+first digit run in "order id 10582 shipped" at index 9
+contains digits: true

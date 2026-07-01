@@ -1,0 +1,287 @@
+// std/regex.lang — a small regular-expression engine.
+//
+// Supported syntax:
+//   literals, `.` (any char), `[abc]` / `[a-z]` / `[^...]` classes,
+//   `\d \w \s \D \W \S` and escapes `\. \\ \n \t \( \) \[ \] \* \+ \? \| \^ \$`,
+//   `^` / `$` anchors, `* + ?` quantifiers (on an atom or a `(...)` group),
+//   `|` alternation, and `(...)` grouping.
+//
+// Matching uses a position-set evaluator: matchEnds returns every position a
+// sub-pattern can reach from a start, so alternation and quantifiers backtrack
+// without exponential blow-up (a visited set bounds the work). Not supported:
+// `{n,m}` counts, capture extraction, lazy quantifiers, back-references.
+//
+//   Regex* re = new Regex("[a-z]+@[a-z]+");
+//   re->test("contact ada@example");     // true (matches somewhere)
+//   re->fullMatch("ada@example");        // true (matches the whole string)
+//   re->find("x ada@ex");                // 2 (start index) or -1
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+union RE {
+    Lit    { char c; }
+    Any    { }
+    Klass  { string chars; bool neg; }   // expanded character set
+    Star   { RE* r; }
+    Plus   { RE* r; }
+    Opt    { RE* r; }
+    Seq    { List<RE*> items; }
+    Alt    { List<RE*> alts; }
+    Begin  { }
+    End    { }
+}
+
+// ── Parser ──────────────────────────────────────────────────────────────
+
+class RegexParser {
+    string src;
+    int pos;
+    RegexParser(string src) { this.src = src; this.pos = 0; }
+
+    bool atEnd() { return this.pos >= len(this.src); }
+    char peek() { return this.src[this.pos]; }
+    char next() { char c = this.src[this.pos]; this.pos = this.pos + 1; return c; }
+
+    // alt := seq ('|' seq)*
+    RE* parseAlt() {
+        List<RE*> alts = List<RE*>();
+        alts.add(this.parseSeq());
+        while (!(this.atEnd()) && this.peek() == '|') {
+            this.next();
+            alts.add(this.parseSeq());
+        }
+        if (alts.length() == 1) { return alts.get(0); }
+        return new RE.Alt(alts);
+    }
+
+    // seq := term*
+    RE* parseSeq() {
+        List<RE*> items = List<RE*>();
+        while (!(this.atEnd()) && this.peek() != '|' && this.peek() != ')') {
+            items.add(this.parseTerm());
+        }
+        return new RE.Seq(items);
+    }
+
+    // term := atom quantifier?
+    RE* parseTerm() {
+        RE* atom = this.parseAtom();
+        if (!(this.atEnd())) {
+            char c = this.peek();
+            if (c == '*') { this.next(); return new RE.Star(atom); }
+            if (c == '+') { this.next(); return new RE.Plus(atom); }
+            if (c == '?') { this.next(); return new RE.Opt(atom); }
+        }
+        return atom;
+    }
+
+    RE* parseAtom() {
+        char c = this.next();
+        if (c == '(') {
+            RE* inner = this.parseAlt();
+            if (!(this.atEnd()) && this.peek() == ')') { this.next(); }
+            return inner;
+        }
+        if (c == '[') { return this.parseClass(); }
+        if (c == '.') { return new RE.Any(); }
+        if (c == '^') { return new RE.Begin(); }
+        if (c == '$') { return new RE.End(); }
+        if (c == '\\') { return this.parseEscape(); }
+        return new RE.Lit(c);
+    }
+
+    RE* parseEscape() {
+        char e = this.next();
+        if (e == 'd') { return new RE.Klass("0123456789", false); }
+        if (e == 'D') { return new RE.Klass("0123456789", true); }
+        if (e == 'w') { return new RE.Klass(regexWordChars(), false); }
+        if (e == 'W') { return new RE.Klass(regexWordChars(), true); }
+        if (e == 's') { return new RE.Klass(" \t\r\n", false); }
+        if (e == 'S') { return new RE.Klass(" \t\r\n", true); }
+        if (e == 'n') { return new RE.Lit('\n'); }
+        if (e == 't') { return new RE.Lit('\t'); }
+        if (e == 'r') { return new RE.Lit('\r'); }
+        return new RE.Lit(e);   // \. \\ \( etc. — the literal character
+    }
+
+    // class := '[' '^'? item* ']' where item is c or c-c
+    RE* parseClass() {
+        bool neg = false;
+        if (!(this.atEnd()) && this.peek() == '^') { this.next(); neg = true; }
+        StringBuilder set = StringBuilder();
+        while (!(this.atEnd()) && this.peek() != ']') {
+            char c = this.next();
+            if (c == '\\' && !(this.atEnd())) {
+                char e = this.next();
+                if (e == 'd') { set.append("0123456789"); }
+                else if (e == 'w') { set.append(regexWordChars()); }
+                else if (e == 's') { set.append(" \t\r\n"); }
+                else if (e == 'n') { set.appendChar('\n'); }
+                else if (e == 't') { set.appendChar('\t'); }
+                else { set.appendChar(e); }
+                continue;
+            }
+            // range a-z
+            if (!(this.atEnd()) && this.peek() == '-' && this.pos + 1 < len(this.src) && this.src[this.pos + 1] != ']') {
+                this.next();               // consume '-'
+                char hi = this.next();
+                int lo = (int)c;
+                int h = (int)hi;
+                for (int v = lo; v <= h; v = v + 1) { set.appendChar((char)v); }
+            } else {
+                set.appendChar(c);
+            }
+        }
+        if (!(this.atEnd()) && this.peek() == ']') { this.next(); }
+        return new RE.Klass(set.build(), neg);
+    }
+}
+
+string regexWordChars() {
+    StringBuilder sb = StringBuilder();
+    for (int v = (int)'a'; v <= (int)'z'; v = v + 1) { sb.appendChar((char)v); }
+    for (int v = (int)'A'; v <= (int)'Z'; v = v + 1) { sb.appendChar((char)v); }
+    sb.append("0123456789_");
+    return sb.build();
+}
+
+// ── Matcher (set of reachable end positions) ────────────────────────────
+
+bool regexInSet(char c, string set, bool neg) {
+    bool found = false;
+    int n = len(set);
+    for (int i = 0; i < n; i = i + 1) { if (set[i] == c) { found = true; } }
+    if (neg) { return !found; }
+    return found;
+}
+
+bool regexListHas(List<int> xs, int v) {
+    for (int i = 0; i < xs.length(); i = i + 1) { if (xs.get(i) == v) { return true; } }
+    return false;
+}
+
+// Every position reachable by matching `re` starting at `pos` in `text`.
+List<int> regexMatch(RE* re, string text, int pos) {
+    int n = len(text);
+    List<int> out = List<int>();
+    match (*re) {
+        RE.Lit(c) => {
+            if (pos < n && text[pos] == c) { out.add(pos + 1); }
+        }
+        RE.Any() => {
+            if (pos < n) { out.add(pos + 1); }
+        }
+        RE.Klass(chars, neg) => {
+            if (pos < n && regexInSet(text[pos], chars, neg)) { out.add(pos + 1); }
+        }
+        RE.Begin() => {
+            if (pos == 0) { out.add(pos); }
+        }
+        RE.End() => {
+            if (pos == n) { out.add(pos); }
+        }
+        RE.Seq(items) => {
+            List<int> cur = List<int>();
+            cur.add(pos);
+            for (int i = 0; i < items.length(); i = i + 1) {
+                List<int> nextSet = List<int>();
+                for (int j = 0; j < cur.length(); j = j + 1) {
+                    List<int> r = regexMatch(items.get(i), text, cur.get(j));
+                    for (int k = 0; k < r.length(); k = k + 1) {
+                        if (!(regexListHas(nextSet, r.get(k)))) { nextSet.add(r.get(k)); }
+                    }
+                }
+                cur = nextSet;
+            }
+            out = cur;
+        }
+        RE.Alt(alts) => {
+            for (int i = 0; i < alts.length(); i = i + 1) {
+                List<int> r = regexMatch(alts.get(i), text, pos);
+                for (int k = 0; k < r.length(); k = k + 1) {
+                    if (!(regexListHas(out, r.get(k)))) { out.add(r.get(k)); }
+                }
+            }
+        }
+        RE.Opt(r) => {
+            out.add(pos);
+            List<int> m = regexMatch(r, text, pos);
+            for (int k = 0; k < m.length(); k = k + 1) {
+                if (!(regexListHas(out, m.get(k)))) { out.add(m.get(k)); }
+            }
+        }
+        RE.Star(r) => {
+            out = regexClosure(r, text, pos, true);
+        }
+        RE.Plus(r) => {
+            // one or more: first application, then closure of each
+            List<int> first = regexMatch(r, text, pos);
+            for (int k = 0; k < first.length(); k = k + 1) {
+                List<int> c = regexClosure(r, text, first.get(k), true);
+                for (int m = 0; m < c.length(); m = m + 1) {
+                    if (!(regexListHas(out, c.get(m)))) { out.add(c.get(m)); }
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// Positions reachable by 0+ repetitions of `re` from `pos`. A visited set bounds
+// the search and prevents empty-match loops.
+List<int> regexClosure(RE* re, string text, int pos, bool includeZero) {
+    List<int> result = List<int>();
+    List<int> frontier = List<int>();
+    result.add(pos);
+    frontier.add(pos);
+    while (frontier.length() > 0) {
+        List<int> nextF = List<int>();
+        for (int i = 0; i < frontier.length(); i = i + 1) {
+            int p = frontier.get(i);
+            List<int> r = regexMatch(re, text, p);
+            for (int k = 0; k < r.length(); k = k + 1) {
+                int q = r.get(k);
+                if (!(regexListHas(result, q))) {
+                    result.add(q);
+                    nextF.add(q);
+                }
+            }
+        }
+        frontier = nextF;
+    }
+    return result;
+}
+
+// ── Public API ──────────────────────────────────────────────────────────
+
+class Regex {
+    RE* root;
+    Regex(string pattern) {
+        RegexParser p = RegexParser(pattern);
+        this.root = p.parseAlt();
+    }
+
+    // Every end position of a match starting exactly at `pos`.
+    List<int> matchEnds(string text, int pos) { return regexMatch(this.root, text, pos); }
+
+    // Does the entire text match the pattern?
+    bool fullMatch(string text) { return regexListHas(this.matchEnds(text, 0), len(text)); }
+
+    // Does the pattern match anywhere in the text?
+    bool test(string text) {
+        for (int i = 0; i <= len(text); i = i + 1) {
+            if (this.matchEnds(text, i).length() > 0) { return true; }
+        }
+        return false;
+    }
+
+    // Start index of the first (leftmost) match, or -1.
+    int find(string text) {
+        for (int i = 0; i <= len(text); i = i + 1) {
+            if (this.matchEnds(text, i).length() > 0) { return i; }
+        }
+        return -1;
+    }
+}

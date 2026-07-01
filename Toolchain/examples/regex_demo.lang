@@ -1,0 +1,39 @@
+// regex_demo.lang — pattern matching with std/regex.lang.
+//
+// Compile a pattern once, then test / fullMatch / find against strings.
+//
+//   python3 main.py run examples/regex_demo.lang
+
+import "std/regex.lang";
+import "std/string.lang";
+
+void check(Regex* re, string label, string text) {
+    string verdict = re->fullMatch(text) ? "valid" : "invalid";
+    print($"{label}  {text}  ->  {verdict}");
+}
+
+int main() {
+    // A simple e-mail-ish validator.
+    Regex* email = new Regex("[a-z0-9_.]+@[a-z0-9]+\\.[a-z]+");
+    check(email, "email", "ada.lovelace@example.com");
+    check(email, "email", "not an email");
+    check(email, "email", "bad@@example.com");
+
+    // Integers (optionally signed).
+    Regex* number = new Regex("-?\\d+");
+    check(number, "number", "42");
+    check(number, "number", "-7");
+    check(number, "number", "3.14");
+
+    // Alternation and anchors.
+    Regex* yesno = new Regex("^(yes|no|maybe)$");
+    check(yesno, "yesno", "maybe");
+    check(yesno, "yesno", "nope");
+
+    // Search (not full match): find the first digit run.
+    Regex* digits = new Regex("\\d+");
+    string s = "order id 10582 shipped";
+    print($"first digit run in \"{s}\" at index {digits->find(s)}");
+    print($"contains digits: {digits->test(s)}");
+    return 0;
+}

@@ -30,6 +30,7 @@ NATIVE_EXAMPLES = [
     "uint_demo",
     "interp_demo",
     "fs_demo",
+    "regex_demo",
 ]
 
 

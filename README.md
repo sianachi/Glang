@@ -1511,6 +1511,7 @@ The library has grown to ~50 modules. The tables below group them by area.
 | `std/csv.lang`  | RFC 4180 CSV read/write |
 | `std/url.lang`  | percent-encoding and query strings |
 | `std/html.lang` | safe HTML generation |
+| `std/regex.lang` | `Regex` — regular expressions: classes, `* + ?`, `\|`, groups, anchors, `\d\w\s`; `test`/`fullMatch`/`find` |
 
 **Math & utility**
 
