@@ -18,7 +18,7 @@ from shutil import which
 import pytest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_VIM = os.path.join("Toolchain", "examples", "tui", "vim.lang")
+_VIM = os.path.join("real-world-applications", "vim.lang")
 
 INPUT = "0123456789\nDELETE ME\nkeep\n"
 # lll -> col3, x deletes '3'; j down; dd deletes line 2; i insert "->" at start

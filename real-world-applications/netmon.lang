@@ -6,10 +6,10 @@
 // once per second via std/sysnet.lang (which uses netstat/route/ipconfig/scutil
 // or /proc on Linux).
 //
-// Interactive — needs a real terminal. From the Toolchain directory:
-//   python3 ../bootstrap/main.py run examples/tui/netmon.lang
-// or compiled:
-//   ./glangc examples/tui/netmon.lang /tmp/netmon.c
+// Interactive — needs a real terminal. From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/netmon.lang
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/netmon.lang /tmp/netmon.c
 //   gcc -O2 /tmp/netmon.c runtime/glang_runtime.c -o /tmp/netmon && /tmp/netmon
 //
 // Controls: up/down select an interface, q or Ctrl-C to quit.

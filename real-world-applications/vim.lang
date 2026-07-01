@@ -4,10 +4,10 @@
 // List<string> of lines; the viewport scrolls; a status line and command line
 // sit at the bottom. Files load/save through readFile/writeFile.
 //
-// Interactive — needs a real terminal. From the Toolchain directory:
-//   python3 ../bootstrap/main.py run examples/tui/vim.lang <file>
-// or compiled:
-//   ./glangc examples/tui/vim.lang /tmp/vim.c
+// Interactive — needs a real terminal. From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/vim.lang <file>
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/vim.lang /tmp/vim.c
 //   gcc -O2 /tmp/vim.c runtime/glang_runtime.c -o /tmp/vim && /tmp/vim <file>
 //
 // NORMAL: h j k l / arrows move · 0 $ line ends · gg G top/bottom · w b words
