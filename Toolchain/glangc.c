@@ -567,6 +567,7 @@ typedef enum {
     Expr__SuperExpr,
     Expr__UnaryExpr,
     Expr__BinaryExpr,
+    Expr__TernaryExpr,
     Expr__AddressOfExpr,
     Expr__DerefExpr,
     Expr__CastExpr,
@@ -605,6 +606,11 @@ struct Expr {
             char* op;
             Expr* right;
         } as_BinaryExpr;
+        struct {
+            Expr* cond;
+            Expr* thenE;
+            Expr* elseE;
+        } as_TernaryExpr;
         struct {
             Expr* operand;
         } as_AddressOfExpr;
@@ -713,6 +719,15 @@ static Expr Expr__BinaryExpr_new(Expr* left, char* op, Expr* right) {
     __v.data.as_BinaryExpr.left = left;
     __v.data.as_BinaryExpr.op = op;
     __v.data.as_BinaryExpr.right = right;
+    return __v;
+}
+
+static Expr Expr__TernaryExpr_new(Expr* cond, Expr* thenE, Expr* elseE) {
+    Expr __v;
+    __v.tag = Expr__TernaryExpr;
+    __v.data.as_TernaryExpr.cond = cond;
+    __v.data.as_TernaryExpr.thenE = thenE;
+    __v.data.as_TernaryExpr.elseE = elseE;
     return __v;
 }
 
@@ -4686,6 +4701,13 @@ char* showExpr(Expr* e) {
             return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(b ", op), " "), showExpr(l)), " "), showExpr(r)), ")");
             break;
         }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(?: ", showExpr(c)), " "), showExpr(t)), " "), showExpr(e)), ")");
+            break;
+        }
         case Expr__AddressOfExpr: {
             Expr* o = __match__.data.as_AddressOfExpr.operand;
             return glang_str_concat(glang_str_concat("(addr ", showExpr(o)), ")");
@@ -5686,6 +5708,9 @@ void Bp_delete(Bp* self) {
 }
 
 Bp* infixBp(TokenType t) {
+    if ((t == TokenType__QUESTION)) {
+        return Bp_new(7, 8);
+    }
     if ((t == TokenType__QUESTION_QUESTION)) {
         return Bp_new(9, 10);
     }
@@ -6052,6 +6077,12 @@ Expr* ExprParser__parseNew(ExprParser* self) {
 
 Expr* ExprParser__parsePostfix(ExprParser* self, Expr* left, int64_t rightBp) {
     Token* tok = TokenStream__advance(self->s);
+    if ((tok->type == TokenType__QUESTION)) {
+        Expr* thenE = ExprParser__parseExpr(self, 0);
+        TokenStream__expect(self->s, TokenType__COLON);
+        Expr* elseE = ExprParser__parseExpr(self, 0);
+        return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__TernaryExpr_new(left, thenE, elseE); __up; });
+    }
     if ((tok->type == TokenType__DOT)) {
         Token* nameTok = TokenStream__expect(self->s, TokenType__IDENT);
         if (TokenStream__check(self->s, TokenType__LPAREN)) {
@@ -9786,6 +9817,13 @@ Expr* NamespaceResolver__r_expr(NamespaceResolver* self, Expr* e, List_string* p
             return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__BinaryExpr_new(NamespaceResolver__r_expr(self, left, p), op, NamespaceResolver__r_expr(self, right, p)); __up; });
             break;
         }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__TernaryExpr_new(NamespaceResolver__r_expr(self, c, p), NamespaceResolver__r_expr(self, t, p), NamespaceResolver__r_expr(self, e, p)); __up; });
+            break;
+        }
         case Expr__UnaryExpr: {
             char* op = __match__.data.as_UnaryExpr.op;
             Expr* operand = __match__.data.as_UnaryExpr.operand;
@@ -10145,6 +10183,13 @@ Expr* clone_expr(Expr* e) {
             char* op = __match__.data.as_BinaryExpr.op;
             Expr* r = __match__.data.as_BinaryExpr.right;
             return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__BinaryExpr_new(clone_expr(l), op, clone_expr(r)); __up; });
+            break;
+        }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__TernaryExpr_new(clone_expr(c), clone_expr(t), clone_expr(e)); __up; });
             break;
         }
         case Expr__AddressOfExpr: {
@@ -11651,6 +11696,13 @@ Expr* Monomorphizer__t_expr(Monomorphizer* self, Expr* e, Map_string_TypeNode* m
             return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__BinaryExpr_new(Monomorphizer__t_expr(self, l, m), op, Monomorphizer__t_expr(self, r, m)); __up; });
             break;
         }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__TernaryExpr_new(Monomorphizer__t_expr(self, c, m), Monomorphizer__t_expr(self, t, m), Monomorphizer__t_expr(self, e, m)); __up; });
+            break;
+        }
         case Expr__UnaryExpr: {
             char* op = __match__.data.as_UnaryExpr.op;
             Expr* o = __match__.data.as_UnaryExpr.operand;
@@ -12405,6 +12457,17 @@ TypeNode* Monomorphizer__infer_expr_type(Monomorphizer* self, Expr* e) {
             }
             else { GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name); }
             GLANG_CATCH_DONE
+            break;
+        }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            TypeNode* tt = Monomorphizer__infer_expr_type(self, t);
+            if ((tt != NULL)) {
+                return tt;
+            }
+            return Monomorphizer__infer_expr_type(self, e);
             break;
         }
         case Expr__UnaryExpr: {
@@ -14357,6 +14420,25 @@ TypeNode* Pass2Checker__check_expr(Pass2Checker* self, Expr* expr) {
                 }
             }
             return Pass2Checker__check_binary_operation_type(self, op, lt, rt);
+            break;
+        }
+        case Expr__TernaryExpr: {
+            Expr* cond = __match__.data.as_TernaryExpr.cond;
+            Expr* thenE = __match__.data.as_TernaryExpr.thenE;
+            Expr* elseE = __match__.data.as_TernaryExpr.elseE;
+            TypeNode* cond_t = Pass2Checker__check_expr(self, cond);
+            if ((!is_bool(cond_t))) {
+                GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat("ternary condition must be 'bool', got '", type_str(cond_t)), "'"), 0, 0), "AnalyzeError");
+            }
+            TypeNode* then_t = Pass2Checker__check_expr(self, thenE);
+            TypeNode* else_t = Pass2Checker__check_expr(self, elseE);
+            if (Pass2Checker__assignable(self, then_t, else_t, thenE)) {
+                return else_t;
+            }
+            if (Pass2Checker__assignable(self, else_t, then_t, elseE)) {
+                return then_t;
+            }
+            GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("ternary branches have incompatible types '", type_str(then_t)), "' and '"), type_str(else_t)), "'"), 0, 0), "AnalyzeError");
             break;
         }
         case Expr__CallExpr: {
@@ -17412,6 +17494,13 @@ char* CEmit__emitExpr(CEmit* self, Expr* e) {
             return CEmit__emitBinary(self, l, op, r);
             break;
         }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", CEmit__emitExpr(self, c)), " ? "), CEmit__emitExpr(self, t)), " : "), CEmit__emitExpr(self, e)), ")");
+            break;
+        }
         case Expr__CastExpr: {
             TypeNode* ty = __match__.data.as_CastExpr.targetType;
             Expr* x = __match__.data.as_CastExpr.expr;
@@ -17855,6 +17944,17 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             return CEmit__infer(self, r);
             break;
         }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            char* tt = CEmit__infer(self, t);
+            if ((strcmp(tt, "") != 0)) {
+                return tt;
+            }
+            return CEmit__infer(self, e);
+            break;
+        }
         case Expr__UnaryExpr: {
             char* op = __match__.data.as_UnaryExpr.op;
             Expr* o = __match__.data.as_UnaryExpr.operand;
@@ -18279,6 +18379,15 @@ void CEmit__collectUsedIdents(CEmit* self, Expr* e, List_string* used) {
             Expr* r = __match__.data.as_BinaryExpr.right;
             CEmit__collectUsedIdents(self, l, used);
             CEmit__collectUsedIdents(self, r, used);
+            break;
+        }
+        case Expr__TernaryExpr: {
+            Expr* c = __match__.data.as_TernaryExpr.cond;
+            Expr* t = __match__.data.as_TernaryExpr.thenE;
+            Expr* e = __match__.data.as_TernaryExpr.elseE;
+            CEmit__collectUsedIdents(self, c, used);
+            CEmit__collectUsedIdents(self, t, used);
+            CEmit__collectUsedIdents(self, e, used);
             break;
         }
         case Expr__CastExpr: {

@@ -22,6 +22,7 @@ class Bp {
 }
 
 Bp* infixBp(TokenType t) {
+    if (t == TokenType.QUESTION) { return new Bp(7, 8); }
     if (t == TokenType.QUESTION_QUESTION) { return new Bp(9, 10); }
     if (t == TokenType.OR)       { return new Bp(11, 12); }
     if (t == TokenType.AND)      { return new Bp(21, 22); }
@@ -298,6 +299,13 @@ class ExprParser {
     Expr* parsePostfix(Expr* left, int rightBp) {
         Token* tok = this.s->advance();   // consume the operator
 
+        if (tok->type == TokenType.QUESTION) {
+            // cond ? then : else — right-associative (else may be a ternary).
+            Expr* thenE = this.parseExpr(0);
+            this.s->expect(TokenType.COLON);
+            Expr* elseE = this.parseExpr(0);
+            return new Expr.TernaryExpr(left, thenE, elseE);
+        }
         if (tok->type == TokenType.DOT) {
             Token* nameTok = this.s->expect(TokenType.IDENT);
             if (this.s->check(TokenType.LPAREN)) {

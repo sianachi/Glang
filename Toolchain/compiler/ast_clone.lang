@@ -203,6 +203,9 @@ Expr* clone_expr(Expr* e) {
         Expr.BinaryExpr(l, op, r) => {
             return new Expr.BinaryExpr(clone_expr(l), op, clone_expr(r));
         }
+        Expr.TernaryExpr(c, t, e) => {
+            return new Expr.TernaryExpr(clone_expr(c), clone_expr(t), clone_expr(e));
+        }
         Expr.AddressOfExpr(o) => {
             return new Expr.AddressOfExpr(clone_expr(o));
         }

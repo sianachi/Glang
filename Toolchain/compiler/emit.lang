@@ -930,6 +930,7 @@ class CEmit {
             Expr.NullExpr() => { return "NULL"; }
             Expr.UnaryExpr(op, o) => { return "(" + op + this.emitExpr(o) + ")"; }
             Expr.BinaryExpr(l, op, r) => { return this.emitBinary(l, op, r); }
+            Expr.TernaryExpr(c, t, e) => { return "(" + this.emitExpr(c) + " ? " + this.emitExpr(t) + " : " + this.emitExpr(e) + ")"; }
             Expr.CastExpr(ty, x) => { return "((" + cTypeOfNode(ty, this.env) + ")(" + this.emitExpr(x) + "))"; }
             Expr.CallExpr(nm, args, ta) => { return this.emitCall(nm, args); }
             Expr.MethodCallExpr(obj, m, args, arrow) => { return this.emitMethodCall(obj, m, args); }
@@ -1166,6 +1167,11 @@ class CEmit {
                 if (lt != "") { return lt; }
                 return this.infer(r);
             }
+            Expr.TernaryExpr(c, t, e) => {
+                string tt = this.infer(t);
+                if (tt != "") { return tt; }
+                return this.infer(e);
+            }
             Expr.UnaryExpr(op, o) => { if (op == "!") { return "bool"; } return this.infer(o); }
             Expr.CastExpr(ty, x) => { return showType(ty); }
             Expr.CallExpr(nm, args, ta) => {
@@ -1366,6 +1372,7 @@ class CEmit {
             Expr.IdentifierExpr(n) => { used.add(n); }
             Expr.UnaryExpr(op, o) => { this.collectUsedIdents(o, used); }
             Expr.BinaryExpr(l, op, r) => { this.collectUsedIdents(l, used); this.collectUsedIdents(r, used); }
+            Expr.TernaryExpr(c, t, e) => { this.collectUsedIdents(c, used); this.collectUsedIdents(t, used); this.collectUsedIdents(e, used); }
             Expr.CastExpr(t, x) => { this.collectUsedIdents(x, used); }
             Expr.CallExpr(nm, args, ta) => { used.add(nm); this.collectArgIdents(args, used); }
             Expr.IndirectCallExpr(c, args) => { this.collectUsedIdents(c, used); this.collectArgIdents(args, used); }

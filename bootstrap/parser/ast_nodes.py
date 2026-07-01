@@ -680,6 +680,20 @@ class BinaryExpr(Expr):
 
 
 @dataclass
+class TernaryExpr(Expr):
+    """A conditional (ternary) expression.
+
+    Example:
+      cond ? a : b  →  TernaryExpr(cond, a, b)
+    """
+    cond: Expr
+    then_expr: Expr
+    else_expr: Expr
+    line: int = 0
+    col: int = 0
+
+
+@dataclass
 class UnaryExpr(Expr):
     """A prefix unary expression.
 

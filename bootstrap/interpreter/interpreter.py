@@ -28,7 +28,7 @@ from parser.ast_nodes import (
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     MatchStmt, VariantPattern, WildcardPattern,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    BinaryExpr, TernaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
@@ -541,6 +541,12 @@ class Interpreter:
 
         if isinstance(expr, BinaryExpr):
             return self._eval_binary(expr)
+
+        if isinstance(expr, TernaryExpr):
+            cond = self._eval(expr.cond)
+            if cond.raw:
+                return self._eval(expr.then_expr)
+            return self._eval(expr.else_expr)
 
         if isinstance(expr, UnaryExpr):
             return self._eval_unary(expr)

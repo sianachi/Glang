@@ -821,6 +821,9 @@ class Monomorphizer {
             Expr.BinaryExpr(l, op, r) => {
                 return new Expr.BinaryExpr(this.t_expr(l, m), op, this.t_expr(r, m));
             }
+            Expr.TernaryExpr(c, t, e) => {
+                return new Expr.TernaryExpr(this.t_expr(c, m), this.t_expr(t, m), this.t_expr(e, m));
+            }
             Expr.UnaryExpr(op, o) => {
                 return new Expr.UnaryExpr(op, this.t_expr(o, m));
             }
@@ -1289,6 +1292,11 @@ class Monomorphizer {
                 } catch (Exception* ex) {
                     return null;
                 }
+            }
+            Expr.TernaryExpr(c, t, e) => {
+                TypeNode* tt = this.infer_expr_type(t);
+                if (tt != null) { return tt; }
+                return this.infer_expr_type(e);
             }
             Expr.UnaryExpr(op, o) => {
                 TypeNode* operand_t = this.infer_expr_type(o);

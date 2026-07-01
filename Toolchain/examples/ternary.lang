@@ -1,0 +1,35 @@
+// ternary.lang — the conditional (ternary) operator `cond ? a : b`.
+//
+// A ternary is an expression: the condition must be bool and both branches must
+// have a compatible type; the whole thing evaluates to one branch. It binds
+// looser than `??` and is right-associative, so `a ? b : c ? d : e` groups as
+// `a ? b : (c ? d : e)` — handy for if/else-if ladders.
+//
+//   python3 main.py run examples/ternary.lang
+
+int maxOf(int a, int b) { return a > b ? a : b; }
+int absOf(int n)        { return n < 0 ? 0 - n : n; }
+
+// Clamp v into [lo, hi] using nested ternaries.
+int clamp(int v, int lo, int hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+string grade(int score) {
+    return score >= 90 ? "A"
+         : score >= 80 ? "B"
+         : score >= 70 ? "C"
+         : "F";
+}
+
+int main() {
+    print(maxOf(7, 3));         // 7
+    print(absOf(0 - 12));       // 12
+    print(clamp(15, 0, 10));    // 10
+    print(clamp(-4, 0, 10));    // 0
+    print(clamp(5, 0, 10));     // 5
+    print(grade(95));           // A
+    print(grade(83));           // B
+    print(grade(61));           // F
+    return 0;
+}

@@ -668,6 +668,9 @@ class NamespaceResolver {
             Expr.BinaryExpr(left, op, right) => {
                 return new Expr.BinaryExpr(this.r_expr(left, p), op, this.r_expr(right, p));
             }
+            Expr.TernaryExpr(c, t, e) => {
+                return new Expr.TernaryExpr(this.r_expr(c, p), this.r_expr(t, p), this.r_expr(e, p));
+            }
             Expr.UnaryExpr(op, operand) => {
                 return new Expr.UnaryExpr(op, this.r_expr(operand, p));
             }

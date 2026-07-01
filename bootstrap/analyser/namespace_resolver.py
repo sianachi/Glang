@@ -43,7 +43,7 @@ from parser.ast_nodes import (
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt,
     MatchStmt, VariantPattern,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    BinaryExpr, TernaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
     IdentifierExpr,
@@ -396,6 +396,10 @@ class NamespaceResolver:
         elif isinstance(e, BinaryExpr):
             self._r_expr(e.left, p)
             self._r_expr(e.right, p)
+        elif isinstance(e, TernaryExpr):
+            self._r_expr(e.cond, p)
+            self._r_expr(e.then_expr, p)
+            self._r_expr(e.else_expr, p)
         elif isinstance(e, UnaryExpr):
             self._r_expr(e.operand, p)
         elif isinstance(e, CastExpr):

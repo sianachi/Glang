@@ -203,6 +203,7 @@ void collectUsedIdents(Expr* e, List<string> used) {
         Expr.IdentifierExpr(n) => { used.add(n); }
         Expr.UnaryExpr(op, o) => { collectUsedIdents(o, used); }
         Expr.BinaryExpr(l, op, r) => { collectUsedIdents(l, used); collectUsedIdents(r, used); }
+        Expr.TernaryExpr(c, t, e) => { collectUsedIdents(c, used); collectUsedIdents(t, used); collectUsedIdents(e, used); }
         Expr.CastExpr(t, x) => { collectUsedIdents(x, used); }
         Expr.CallExpr(nm, args, ta) => { used.add(nm); collectArgIdents(args, used); }
         Expr.IndirectCallExpr(c, args) => { collectUsedIdents(c, used); collectArgIdents(args, used); }
@@ -828,6 +829,10 @@ class Interp {
                 return t;
             }
             Expr.BinaryExpr(l, op, r) => { return this.evalBinary(l, op, r); }
+            Expr.TernaryExpr(c, t, e) => {
+                if (truthy(this.eval(c))) { return this.eval(t); }
+                return this.eval(e);
+            }
             Expr.UnaryExpr(op, o) => { return this.evalUnary(op, o); }
             Expr.CastExpr(ty, x) => { return this.evalCast(ty, x); }
             Expr.AddressOfExpr(o) => {

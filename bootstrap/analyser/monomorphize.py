@@ -32,7 +32,7 @@ from parser.ast_nodes import (
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     MatchStmt, VariantPattern,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    BinaryExpr, TernaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr, AddressOfExpr, DerefExpr,
     IdentifierExpr, LiteralExpr, NullExpr,
@@ -440,6 +440,10 @@ class Monomorphizer:
         if isinstance(e, BinaryExpr):
             self._t_expr(e.left, m)
             self._t_expr(e.right, m)
+        elif isinstance(e, TernaryExpr):
+            self._t_expr(e.cond, m)
+            self._t_expr(e.then_expr, m)
+            self._t_expr(e.else_expr, m)
         elif isinstance(e, UnaryExpr):
             self._t_expr(e.operand, m)
         elif isinstance(e, CastExpr):
@@ -727,6 +731,11 @@ class Monomorphizer:
                 return binary_result_type(e.op, left_t, right_t)
             except TypeError:
                 return None
+        if isinstance(e, TernaryExpr):
+            t_t = self._infer_expr_type(e.then_expr)
+            if t_t is not None:
+                return t_t
+            return self._infer_expr_type(e.else_expr)
         if isinstance(e, UnaryExpr):
             operand_t = self._infer_expr_type(e.operand)
             if operand_t is None:

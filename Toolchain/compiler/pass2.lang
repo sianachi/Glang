@@ -855,6 +855,20 @@ class Pass2Checker {
                 }
                 return this.check_binary_operation_type(op, lt, rt);
             }
+            Expr.TernaryExpr(cond, thenE, elseE) => {
+                TypeNode* cond_t = this.check_expr(cond);
+                if (!(is_bool(cond_t))) {
+                    throw new AnalyzeError(
+                        "ternary condition must be 'bool', got '" + type_str(cond_t) + "'", 0, 0);
+                }
+                TypeNode* then_t = this.check_expr(thenE);
+                TypeNode* else_t = this.check_expr(elseE);
+                if (this.assignable(then_t, else_t, thenE)) { return else_t; }
+                if (this.assignable(else_t, then_t, elseE)) { return then_t; }
+                throw new AnalyzeError(
+                    "ternary branches have incompatible types '"
+                    + type_str(then_t) + "' and '" + type_str(else_t) + "'", 0, 0);
+            }
             Expr.CallExpr(name, args, typeArgs) => {
                 return this.check_call(expr);
             }

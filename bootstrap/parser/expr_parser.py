@@ -10,7 +10,7 @@ from .ast_nodes import (
     Expr, LiteralExpr, IdentifierExpr, NullExpr, ThisExpr, SuperExpr,
     UnaryExpr, AddressOfExpr, DerefExpr, CastExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
-    BinaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    BinaryExpr, TernaryExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr, FieldAccessExpr,
     ArrowAccessExpr, IndexExpr,
 )
@@ -30,6 +30,7 @@ _ASSIGN_OPS = {
 }
 
 _INFIX_BP: dict[TokenType, Tuple[int, int]] = {
+    TokenType.QUESTION: (7, 8),            # ?: ternary — binds looser than ??
     TokenType.QUESTION_QUESTION: (9, 10),  # ?? — lower than || so it binds loosely
     TokenType.OR:      (11, 12),
     TokenType.AND:     (21, 22),
@@ -316,6 +317,17 @@ class ExprParser:
 
     def _parse_postfix(self, left: Expr, right_bp: int) -> Expr:
         tok = self._s.advance()  # consume the operator
+
+        if tok.type == TokenType.QUESTION:
+            # cond ? then : else — right-associative, so the else branch may be
+            # another ternary (parsed as a full expression).
+            then_e = self.parse_expr(0)
+            self._s.expect(TokenType.COLON)
+            else_e = self.parse_expr(0)
+            return TernaryExpr(
+                cond=left, then_expr=then_e, else_expr=else_e,
+                line=tok.line, col=tok.col,
+            )
 
         if tok.type == TokenType.DOT:
             name_tok = self._s.expect(TokenType.IDENT)

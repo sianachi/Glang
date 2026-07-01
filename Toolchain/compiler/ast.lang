@@ -107,6 +107,7 @@ union Expr {
     SuperExpr { }
     UnaryExpr { string op; Expr* operand; }           // op: ! ~ ++ -- - +
     BinaryExpr { Expr* left; string op; Expr* right; }
+    TernaryExpr { Expr* cond; Expr* thenE; Expr* elseE; }   // cond ? then : else
     AddressOfExpr { Expr* operand; }
     DerefExpr { Expr* operand; }
     CastExpr { TypeNode* targetType; Expr* expr; }
@@ -135,6 +136,7 @@ string showExpr(Expr* e) {
         Expr.SuperExpr()             => { return "super"; }
         Expr.UnaryExpr(op, o)        => { return "(u " + op + " " + showExpr(o) + ")"; }
         Expr.BinaryExpr(l, op, r)    => { return "(b " + op + " " + showExpr(l) + " " + showExpr(r) + ")"; }
+        Expr.TernaryExpr(c, t, e)    => { return "(?: " + showExpr(c) + " " + showExpr(t) + " " + showExpr(e) + ")"; }
         Expr.AddressOfExpr(o)        => { return "(addr " + showExpr(o) + ")"; }
         Expr.DerefExpr(o)            => { return "(deref " + showExpr(o) + ")"; }
         Expr.CastExpr(t, x)          => { return "(cast " + showType(t) + " " + showExpr(x) + ")"; }

@@ -8,7 +8,7 @@ from parser.ast_nodes import (
     Block, VarDecl, AssignStmt, IfStmt, WhileStmt, DoWhileStmt, ForStmt,
     ForeachStmt, ReturnStmt, BreakStmt, ContinueStmt, UsingStmt, ThrowStmt, TryCatchStmt, CatchClause,
     MatchStmt, MatchArm, VariantPattern, WildcardPattern,
-    BinaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
+    BinaryExpr, TernaryExpr, UnaryExpr, CastExpr, CallExpr, IndirectCallExpr, ClosureExpr,
     MethodCallExpr,
     NewExpr, DeleteExpr, AllocExpr, FreeExpr,
     FieldAccessExpr, ArrowAccessExpr, IndexExpr,
@@ -680,6 +680,26 @@ class Pass2Checker:
             )
             return self._check_binary_operation_type(
                 expr.op, left_t, right_t, expr.line, expr.col
+            )
+
+        if isinstance(expr, TernaryExpr):
+            cond_t = self._check_expr(expr.cond)
+            if type_str(cond_t) != "bool":
+                raise TypeError(
+                    f"ternary condition must be 'bool', got '{type_str(cond_t)}'",
+                    expr.line, expr.col,
+                )
+            then_t = self._check_expr(expr.then_expr)
+            else_t = self._check_expr(expr.else_expr)
+            # The result type is whichever branch the other is assignable to.
+            if self._assignable(then_t, else_t, expr.then_expr):
+                return else_t
+            if self._assignable(else_t, then_t, expr.else_expr):
+                return then_t
+            raise TypeError(
+                f"ternary branches have incompatible types "
+                f"'{type_str(then_t)}' and '{type_str(else_t)}'",
+                expr.line, expr.col,
             )
 
         if isinstance(expr, CallExpr):

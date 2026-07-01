@@ -35,6 +35,7 @@ def show_expr(e) -> str:
     if isinstance(e, A.SuperExpr):       return "super"
     if isinstance(e, A.UnaryExpr):       return f"(u {e.op} {show_expr(e.operand)})"
     if isinstance(e, A.BinaryExpr):      return f"(b {e.op} {show_expr(e.left)} {show_expr(e.right)})"
+    if isinstance(e, A.TernaryExpr):     return f"(?: {show_expr(e.cond)} {show_expr(e.then_expr)} {show_expr(e.else_expr)})"
     if isinstance(e, A.AddressOfExpr):   return f"(addr {show_expr(e.operand)})"
     if isinstance(e, A.DerefExpr):       return f"(deref {show_expr(e.operand)})"
     if isinstance(e, A.CastExpr):        return f"(cast {_type_str(e.target_type)} {show_expr(e.expr)})"
