@@ -394,6 +394,10 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
     if (name == "termInterrupted") {
         return check_callable_args(name, arg_types, ps, T("bool"), env);
     }
+    if (name == "shell") {
+        ps.add(T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
     if (name == "nowNanos") {
         return check_callable_args(name, arg_types, ps, T("int"), env);
     }

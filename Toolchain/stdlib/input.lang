@@ -1,0 +1,160 @@
+// std/input.lang — decode a raw byte stream into typed key events.
+//
+// `KeyReader` wraps the readByteTimeout builtin and turns bytes into `Key`
+// values: printable characters, Ctrl-combinations, and the multi-byte escape
+// sequences terminals send for arrows, Home/End, PageUp/Down, Delete, etc.
+// A lone ESC is distinguished from the start of a sequence by a short secondary
+// read timeout (escMs); a one-byte pushback buffer handles "ESC then an
+// unrelated key" without losing input.
+//
+// The reader also surfaces the SIGWINCH / SIGINT flags (termResized /
+// termInterrupted) as KResize / KInterrupt events, and a plain read timeout as
+// KTimeout, so an app loop can poll input and still react to resize/quit.
+
+import "std/string.lang";
+
+// Special (non-character) key codes. Namespaced ints (string-keyword safe).
+namespace keys {
+    int UP()        { return 1; }
+    int DOWN()      { return 2; }
+    int LEFT()      { return 3; }
+    int RIGHT()     { return 4; }
+    int HOME()      { return 5; }
+    int END()       { return 6; }
+    int PAGEUP()    { return 7; }
+    int PAGEDOWN()  { return 8; }
+    int INSERT()    { return 9; }
+    int DELETE()    { return 10; }
+    int ENTER()     { return 11; }
+    int TAB()       { return 12; }
+    int BACKSPACE() { return 13; }
+    int ESC()       { return 14; }
+    int UNKNOWN()   { return 0; }
+
+    string name(int code) {
+        if (code == 1)  { return "Up"; }
+        if (code == 2)  { return "Down"; }
+        if (code == 3)  { return "Left"; }
+        if (code == 4)  { return "Right"; }
+        if (code == 5)  { return "Home"; }
+        if (code == 6)  { return "End"; }
+        if (code == 7)  { return "PageUp"; }
+        if (code == 8)  { return "PageDown"; }
+        if (code == 9)  { return "Insert"; }
+        if (code == 10) { return "Delete"; }
+        if (code == 11) { return "Enter"; }
+        if (code == 12) { return "Tab"; }
+        if (code == 13) { return "Backspace"; }
+        if (code == 14) { return "Esc"; }
+        return "Unknown";
+    }
+}
+
+union Key {
+    KChar      { char c; }     // a printable character
+    KCtrl      { char c; }     // Ctrl-<letter> (letter is lowercase)
+    KSpecial   { int code; }   // one of keys::*
+    KResize    { }             // SIGWINCH since last read
+    KInterrupt { }             // SIGINT since last read
+    KTimeout   { }             // read timed out with no input
+    KEof       { }             // stdin reached EOF
+}
+
+// Human-readable rendering of a key, handy for tests and logging.
+string keyName(Key* k) {
+    match (*k) {
+        Key.KChar(c)     => { return "Char:" + toString(c); }
+        Key.KCtrl(c)     => { return "Ctrl:" + toString(c); }
+        Key.KSpecial(cd) => { return "Special:" + keys::name(cd); }
+        Key.KResize()    => { return "Resize"; }
+        Key.KInterrupt() => { return "Interrupt"; }
+        Key.KTimeout()   => { return "Timeout"; }
+        Key.KEof()       => { return "Eof"; }
+    }
+}
+
+class KeyReader {
+    int timeoutMs;   // primary read timeout (-1 = block until a key)
+    int escMs;       // timeout for the bytes following an ESC
+    int pending;     // one-byte pushback, or -3 when empty
+
+    KeyReader(int timeoutMs) {
+        this.timeoutMs = timeoutMs;
+        this.escMs = 20;
+        this.pending = -3;
+    }
+
+    int readRaw(int ms) {
+        if (this.pending != -3) {
+            int b = this.pending;
+            this.pending = -3;
+            return b;
+        }
+        return readByteTimeout(ms);
+    }
+
+    void pushBack(int b) { this.pending = b; }
+
+    // Read and decode the next key event.
+    Key* next() {
+        int b = this.readRaw(this.timeoutMs);
+        if (b == -1) { return new Key.KEof(); }
+        if (b == -2) {
+            if (termResized())     { return new Key.KResize(); }
+            if (termInterrupted()) { return new Key.KInterrupt(); }
+            return new Key.KTimeout();
+        }
+        if (b == 27) { return this.decodeEsc(); }
+        if (b == 13 || b == 10) { return new Key.KSpecial(keys::ENTER()); }
+        if (b == 9)             { return new Key.KSpecial(keys::TAB()); }
+        if (b == 127 || b == 8) { return new Key.KSpecial(keys::BACKSPACE()); }
+        if (b < 32) {
+            char letter = (char)(b + 96);   // 1 -> 'a', 26 -> 'z'
+            return new Key.KCtrl(letter);
+        }
+        return new Key.KChar((char)b);
+    }
+
+    Key* decodeEsc() {
+        int b = this.readRaw(this.escMs);
+        if (b == -1 || b == -2) { return new Key.KSpecial(keys::ESC()); }
+        if (b == 91 || b == 79) { return this.decodeCsi(); }   // '[' or 'O'
+        this.pushBack(b);
+        return new Key.KSpecial(keys::ESC());
+    }
+
+    Key* decodeCsi() {
+        int b = this.readRaw(this.escMs);
+        if (b == -1 || b == -2) { return new Key.KSpecial(keys::ESC()); }
+        if (b == 65) { return new Key.KSpecial(keys::UP()); }
+        if (b == 66) { return new Key.KSpecial(keys::DOWN()); }
+        if (b == 67) { return new Key.KSpecial(keys::RIGHT()); }
+        if (b == 68) { return new Key.KSpecial(keys::LEFT()); }
+        if (b == 72) { return new Key.KSpecial(keys::HOME()); }
+        if (b == 70) { return new Key.KSpecial(keys::END()); }
+        if (b >= 48 && b <= 57) {
+            int num = b - 48;
+            int c = this.readRaw(this.escMs);
+            while (c >= 48 && c <= 57) {
+                num = num * 10 + (c - 48);
+                c = this.readRaw(this.escMs);
+            }
+            // Skip any modifier section (e.g. ";5") up to the '~' terminator.
+            while (c != 126 && c != -1 && c != -2) {
+                c = this.readRaw(this.escMs);
+            }
+            return this.numTilde(num);
+        }
+        return new Key.KSpecial(keys::UNKNOWN());
+    }
+
+    Key* numTilde(int num) {
+        if (num == 1 || num == 7) { return new Key.KSpecial(keys::HOME()); }
+        if (num == 4 || num == 8) { return new Key.KSpecial(keys::END()); }
+        if (num == 2)             { return new Key.KSpecial(keys::INSERT()); }
+        if (num == 3)             { return new Key.KSpecial(keys::DELETE()); }
+        if (num == 5)             { return new Key.KSpecial(keys::PAGEUP()); }
+        if (num == 6)             { return new Key.KSpecial(keys::PAGEDOWN()); }
+        return new Key.KSpecial(keys::UNKNOWN());
+    }
+}

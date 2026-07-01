@@ -37,6 +37,7 @@ int64_t glang_term_height(void);
 int64_t glang_read_byte_timeout(int64_t ms);
 int64_t glang_term_resized(void);
 int64_t glang_term_interrupted(void);
+char*   glang_shell(const char* cmd);
 void* glang_managed_alloc(size_t size);
 void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
@@ -8401,6 +8402,10 @@ TypeNode* check_builtin_call(char* name, List_TypeNode* arg_types, GlobalEnv* en
     if ((strcmp(name, "termInterrupted") == 0)) {
         return check_callable_args(name, arg_types, ps, T("bool"), env);
     }
+    if ((strcmp(name, "shell") == 0)) {
+        List_TypeNode__add(ps, T("string"));
+        return check_callable_args(name, arg_types, ps, T("string"), env);
+    }
     if ((strcmp(name, "nowNanos") == 0)) {
         return check_callable_args(name, arg_types, ps, T("int"), env);
     }
@@ -14317,7 +14322,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
 }
 
 int Pass2Checker__is_builtin_name(Pass2Checker* self, char* name) {
-    return ((((((((((((((((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "fileSize") == 0)) || (strcmp(name, "readFileInto") == 0)) || (strcmp(name, "writeFileFrom") == 0)) || (strcmp(name, "listDir") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "readByte") == 0)) || (strcmp(name, "writeStdout") == 0)) || (strcmp(name, "termRawOn") == 0)) || (strcmp(name, "termRawOff") == 0)) || (strcmp(name, "termWidth") == 0)) || (strcmp(name, "termHeight") == 0)) || (strcmp(name, "readByteTimeout") == 0)) || (strcmp(name, "termResized") == 0)) || (strcmp(name, "termInterrupted") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
+    return (((((((((((((((((((((((((((((((((((((((((((((((((((((strcmp(name, "print") == 0) || (strcmp(name, "printErr") == 0)) || (strcmp(name, "len") == 0)) || (strcmp(name, "toString") == 0)) || (strcmp(name, "substr") == 0)) || (strcmp(name, "parseInt") == 0)) || (strcmp(name, "parseFloat") == 0)) || (strcmp(name, "startsWith") == 0)) || (strcmp(name, "endsWith") == 0)) || (strcmp(name, "contains") == 0)) || (strcmp(name, "indexOf") == 0)) || (strcmp(name, "readFile") == 0)) || (strcmp(name, "writeFile") == 0)) || (strcmp(name, "fileExists") == 0)) || (strcmp(name, "bytesFromString") == 0)) || (strcmp(name, "fileSize") == 0)) || (strcmp(name, "readFileInto") == 0)) || (strcmp(name, "writeFileFrom") == 0)) || (strcmp(name, "listDir") == 0)) || (strcmp(name, "stringFromBytes") == 0)) || (strcmp(name, "getArgCount") == 0)) || (strcmp(name, "getArg") == 0)) || (strcmp(name, "exit") == 0)) || (strcmp(name, "intToStr") == 0)) || (strcmp(name, "readStdin") == 0)) || (strcmp(name, "readByte") == 0)) || (strcmp(name, "writeStdout") == 0)) || (strcmp(name, "termRawOn") == 0)) || (strcmp(name, "termRawOff") == 0)) || (strcmp(name, "termWidth") == 0)) || (strcmp(name, "termHeight") == 0)) || (strcmp(name, "readByteTimeout") == 0)) || (strcmp(name, "termResized") == 0)) || (strcmp(name, "termInterrupted") == 0)) || (strcmp(name, "shell") == 0)) || (strcmp(name, "nowNanos") == 0)) || (strcmp(name, "wallMillis") == 0)) || (strcmp(name, "sleepMs") == 0)) || (strcmp(name, "netListen") == 0)) || (strcmp(name, "netLocalPort") == 0)) || (strcmp(name, "netAccept") == 0)) || (strcmp(name, "netConnect") == 0)) || (strcmp(name, "netRecv") == 0)) || (strcmp(name, "netSend") == 0)) || (strcmp(name, "netClose") == 0)) || (strcmp(name, "netConnectNb") == 0)) || (strcmp(name, "netSetNonBlocking") == 0)) || (strcmp(name, "netSetNoDelay") == 0)) || (strcmp(name, "netShutdown") == 0)) || (strcmp(name, "netSockError") == 0)) || (strcmp(name, "netErrno") == 0)) || (strcmp(name, "netWouldBlock") == 0)) || (strcmp(name, "netPoll") == 0));
 }
 
 TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
@@ -17468,7 +17473,7 @@ char* CEmit__inferRaw(CEmit* self, Expr* e) {
             if ((((strcmp(nm, "fileSize") == 0) || (strcmp(nm, "readFileInto") == 0)) || (strcmp(nm, "writeFileFrom") == 0))) {
                 return "int";
             }
-            if ((((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0)) || (strcmp(nm, "listDir") == 0))) {
+            if (((((((((strcmp(nm, "toString") == 0) || (strcmp(nm, "substr") == 0)) || (strcmp(nm, "intToStr") == 0)) || (strcmp(nm, "readFile") == 0)) || (strcmp(nm, "readStdin") == 0)) || (strcmp(nm, "getArg") == 0)) || (strcmp(nm, "listDir") == 0)) || (strcmp(nm, "shell") == 0))) {
                 return "string";
             }
             if ((strcmp(nm, "parseFloat") == 0)) {
@@ -17739,6 +17744,9 @@ char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args) {
     }
     if ((strcmp(name, "termInterrupted") == 0)) {
         return "glang_term_interrupted()";
+    }
+    if ((strcmp(name, "shell") == 0)) {
+        return glang_str_concat(glang_str_concat("glang_shell(", CEmit__emitArgs(self, args)), ")");
     }
     if ((strcmp(name, "nowNanos") == 0)) {
         return "glang_now_nanos()";
@@ -18362,6 +18370,7 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "int64_t glang_read_byte_timeout(int64_t ms);");
     StringBuilder__appendLine(f, "int64_t glang_term_resized(void);");
     StringBuilder__appendLine(f, "int64_t glang_term_interrupted(void);");
+    StringBuilder__appendLine(f, "char*   glang_shell(const char* cmd);");
     StringBuilder__appendLine(f, "void* glang_managed_alloc(size_t size);");
     StringBuilder__appendLine(f, "void  glang_managed_sweep(void);");
     StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");

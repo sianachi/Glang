@@ -50,6 +50,7 @@ int64_t glang_term_height(void);
 int64_t glang_read_byte_timeout(int64_t ms);
 int64_t glang_term_resized(void);
 int64_t glang_term_interrupted(void);
+char*   glang_shell(const char* cmd);
 char*   glang_appendfile(const char* path, const char* content);
 int64_t glang_filesize(const char* path);
 int64_t glang_readfile_into(const char* path, uint8_t* buf, int64_t cap);

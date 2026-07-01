@@ -1,0 +1,228 @@
+// std/sysnet.lang — read the host's live network counters and details.
+//
+// Cross-platform, best-effort, read-only. Per-interface cumulative byte
+// counters come from /proc/net/dev on Linux, else `netstat -ib` on macOS/BSD.
+// Device details (default gateway, primary IP, DNS servers) come from the usual
+// CLI tools via the `shell` builtin. Everything degrades to empty/zero if a
+// source is missing, so callers can render whatever is available.
+//
+// Counters are cumulative; sample twice over a known interval and subtract to
+// get a rate (see examples/tui/netmon.lang).
+
+import "std/list.lang";
+import "std/string.lang";
+
+// A network interface with cumulative received/transmitted byte counters.
+class Iface {
+    string name;
+    int rx;
+    int tx;
+    Iface(string name, int rx, int tx) {
+        this.name = name;
+        this.rx = rx;
+        this.tx = tx;
+    }
+}
+
+// A point-in-time view of the host's networking.
+class NetInfo {
+    List<Iface> ifaces;
+    string gateway;
+    string primaryIface;
+    string ip;
+    string dns;
+    NetInfo() {
+        this.ifaces = List<Iface>();
+        this.gateway = "";
+        this.primaryIface = "";
+        this.ip = "";
+        this.dns = "";
+    }
+
+    int totalRx() {
+        int t = 0;
+        for (int i = 0; i < this.ifaces.length(); ++i) { t = t + this.ifaces.get(i)->rx; }
+        return t;
+    }
+    int totalTx() {
+        int t = 0;
+        for (int i = 0; i < this.ifaces.length(); ++i) { t = t + this.ifaces.get(i)->tx; }
+        return t;
+    }
+}
+
+// ── Small parsing helpers ───────────────────────────────────────────────
+
+bool sysnetIsNumeric(string s) {
+    int n = len(s);
+    if (n == 0) { return false; }
+    for (int i = 0; i < n; ++i) {
+        int c = (int)(s[i]);
+        if (c < 48 || c > 57) { return false; }
+    }
+    return true;
+}
+
+// Split on runs of spaces/tabs, dropping empty tokens.
+List<string> sysnetSplitWs(string s) {
+    List<string> out = List<string>();
+    int n = len(s);
+    string cur = "";
+    for (int i = 0; i < n; ++i) {
+        char ch = s[i];
+        if (ch == ' ' || ch == '\t' || ch == '\r') {
+            if (len(cur) > 0) { out.add(cur); cur = ""; }
+        } else {
+            cur = cur + toString(ch);
+        }
+    }
+    if (len(cur) > 0) { out.add(cur); }
+    return out;
+}
+
+List<string> sysnetLines(string s) {
+    return strings::split(s, '\n');
+}
+
+// Find an interface by name (or null).
+Iface* findIface(List<Iface> list, string name) {
+    for (int i = 0; i < list.length(); ++i) {
+        if (list.get(i)->name == name) { return list.get(i); }
+    }
+    return null;
+}
+
+// ── Interface counters ──────────────────────────────────────────────────
+
+// Linux: /proc/net/dev. Lines look like
+//   eth0: <rxbytes> <rxpkts> ... (8 rx cols) <txbytes> <txpkts> ...
+List<Iface> sysnetReadProc() {
+    List<Iface> out = List<Iface>();
+    string data = readFile("/proc/net/dev");
+    List<string> lines = sysnetLines(data);
+    for (int i = 0; i < lines.length(); ++i) {
+        string line = lines.get(i);
+        if (!(contains(line, ":"))) { continue; }
+        List<string> halves = strings::split(line, ':');
+        if (halves.length() < 2) { continue; }
+        string name = strings::trim(halves.get(0));
+        List<string> f = sysnetSplitWs(halves.get(1));
+        if (f.length() < 9) { continue; }
+        if (!(sysnetIsNumeric(f.get(0))) || !(sysnetIsNumeric(f.get(8)))) { continue; }
+        out.add(new Iface(name, parseInt(f.get(0)), parseInt(f.get(8))));
+    }
+    return out;
+}
+
+// macOS/BSD: `netstat -ib`. Use the per-interface <Link#N> rows. The optional
+// Address column shifts positions, so read the counters from the END:
+//   ... Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
+// giving Ibytes at length-5 and Obytes at length-2.
+List<Iface> sysnetReadNetstat() {
+    List<Iface> out = List<Iface>();
+    string data = shell("netstat -ib 2>/dev/null");
+    List<string> lines = sysnetLines(data);
+    for (int i = 0; i < lines.length(); ++i) {
+        string line = lines.get(i);
+        if (!(contains(line, "<Link#"))) { continue; }
+        List<string> f = sysnetSplitWs(line);
+        int n = f.length();
+        if (n < 6) { continue; }
+        string rxs = f.get(n - 5);
+        string txs = f.get(n - 2);
+        if (!(sysnetIsNumeric(rxs)) || !(sysnetIsNumeric(txs))) { continue; }
+        out.add(new Iface(f.get(0), parseInt(rxs), parseInt(txs)));
+    }
+    return out;
+}
+
+List<Iface> readIfaces() {
+    if (fileExists("/proc/net/dev")) { return sysnetReadProc(); }
+    return sysnetReadNetstat();
+}
+
+// ── Device details ──────────────────────────────────────────────────────
+
+// Extract the token after the first occurrence of `key` on any line.
+string sysnetValueAfter(string text, string key) {
+    List<string> lines = sysnetLines(text);
+    for (int i = 0; i < lines.length(); ++i) {
+        string line = lines.get(i);
+        if (contains(line, key)) {
+            int idx = indexOf(line, key);
+            string rest = substr(line, idx + len(key), len(line));
+            List<string> toks = sysnetSplitWs(rest);
+            if (toks.length() > 0) { return toks.get(0); }
+        }
+    }
+    return "";
+}
+
+string defaultGateway() {
+    string r = shell("route -n get default 2>/dev/null");
+    string g = sysnetValueAfter(r, "gateway:");
+    if (len(g) > 0) { return g; }
+    // Linux fallback: `ip route` -> "default via <gw> dev <iface>"
+    string ipr = shell("ip route 2>/dev/null");
+    return sysnetValueAfter(ipr, "via ");
+}
+
+string defaultIface() {
+    string r = shell("route -n get default 2>/dev/null");
+    string iface = sysnetValueAfter(r, "interface:");
+    if (len(iface) > 0) { return iface; }
+    string ipr = shell("ip route 2>/dev/null");
+    return sysnetValueAfter(ipr, "dev ");
+}
+
+string ifaceIp(string iface) {
+    if (len(iface) == 0) { return ""; }
+    string r = shell("ipconfig getifaddr " + iface + " 2>/dev/null");
+    string ip = strings::trim(r);
+    if (len(ip) > 0) { return ip; }
+    // Linux fallback
+    string lr = shell("ip -4 addr show " + iface + " 2>/dev/null");
+    return sysnetValueAfter(lr, "inet ");
+}
+
+string dnsServers() {
+    string r = shell("scutil --dns 2>/dev/null");
+    List<string> lines = sysnetLines(r);
+    List<string> seen = List<string>();
+    for (int i = 0; i < lines.length(); ++i) {
+        string line = lines.get(i);
+        if (contains(line, "nameserver")) {
+            string v = sysnetValueAfter(line, ":");
+            if (len(v) > 0) {
+                bool dup = false;
+                for (int j = 0; j < seen.length(); ++j) {
+                    if (seen.get(j) == v) { dup = true; }
+                }
+                if (!dup) { seen.add(v); }
+            }
+        }
+    }
+    if (seen.length() == 0) {
+        // Linux fallback: /etc/resolv.conf
+        string rc = readFile("/etc/resolv.conf");
+        List<string> rl = sysnetLines(rc);
+        for (int i = 0; i < rl.length(); ++i) {
+            if (contains(rl.get(i), "nameserver")) {
+                string v = sysnetValueAfter(rl.get(i), "nameserver");
+                if (len(v) > 0) { seen.add(v); }
+            }
+        }
+    }
+    return strings::join(seen, ", ");
+}
+
+// Gather everything into one snapshot.
+NetInfo snapshot() {
+    NetInfo info = NetInfo();
+    info.ifaces = readIfaces();
+    info.gateway = defaultGateway();
+    info.primaryIface = defaultIface();
+    info.ip = ifaceIp(info.primaryIface);
+    info.dns = dnsServers();
+    return info;
+}

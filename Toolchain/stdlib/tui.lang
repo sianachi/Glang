@@ -1,0 +1,249 @@
+// std/tui.lang — a small immediate-mode-ish widget layer over term + input.
+//
+// Widgets are a `Widget` union (ADT), rendered and dispatched by `match` rather
+// than an interface vtable. Mutable widget state (list selection, text buffer)
+// lives in small helper classes referenced from the immutable union variants,
+// so state survives across frames while the tree stays cheap to build.
+//
+//   renderWidget(w, screen, rect)  — paint w into rect
+//   handleWidget(w, key)           — deliver a key; returns true if consumed
+//   App                            — owns the terminal + input loop
+//
+// Rendering uses ASCII box characters ('+','-','|'): each Screen cell holds one
+// byte, so multi-byte Unicode glyphs are intentionally avoided.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/term.lang";
+import "std/input.lang";
+
+class Rect {
+    int x;
+    int y;
+    int w;
+    int h;
+    Rect(int x, int y, int w, int h) {
+        this.x = x; this.y = y; this.w = w; this.h = h;
+    }
+}
+
+// Selectable, scrollable list state.
+class ListModel {
+    List<string> items;
+    int selected;
+    int scroll;
+    ListModel(List<string> items) {
+        this.items = items;
+        this.selected = 0;
+        this.scroll = 0;
+    }
+    void moveUp()   { if (this.selected > 0) { this.selected = this.selected - 1; } }
+    void moveDown() { if (this.selected + 1 < this.items.length()) { this.selected = this.selected + 1; } }
+    string current() {
+        if (this.items.length() == 0) { return ""; }
+        return this.items.get(this.selected);
+    }
+}
+
+// Single-line editable text state.
+class InputModel {
+    string text;
+    InputModel() { this.text = ""; }
+    void append(char c) { this.text = this.text + toString(c); }
+    void backspace() {
+        int n = len(this.text);
+        if (n > 0) { this.text = substr(this.text, 0, n - 1); }
+    }
+}
+
+union Widget {
+    WText   { string text; int fg; int bg; int attr; }
+    WBox    { string title; Widget* child; }
+    WVStack { List<Widget*> children; }
+    WList   { ListModel* model; }
+    WInput  { InputModel* model; string label; }
+}
+
+// ── Constructors ────────────────────────────────────────────────────────
+Widget* text(string s)          { return new Widget.WText(s, -1, -1, 0); }
+Widget* styledText(string s, int fg, int bg, int attr) { return new Widget.WText(s, fg, bg, attr); }
+Widget* box(string title, Widget* child) { return new Widget.WBox(title, child); }
+Widget* vstack(List<Widget*> kids)       { return new Widget.WVStack(kids); }
+Widget* listView(ListModel* m)           { return new Widget.WList(m); }
+Widget* inputField(InputModel* m, string label) { return new Widget.WInput(m, label); }
+
+// ── Low-level drawing helpers ───────────────────────────────────────────
+
+// Write `t` at (x,y) using the screen's current pen, clipped to `maxW` columns.
+void putClip(Screen s, int x, int y, int maxW, string t) {
+    int n = len(t);
+    if (n > maxW) { n = maxW; }
+    for (int i = 0; i < n; ++i) {
+        s.setCell(x + i, y, t[i], s.penFg, s.penBg, s.penAttr);
+    }
+}
+
+// Draw an ASCII border inside `r`, with an optional title on the top edge.
+void drawBox(Screen s, Rect r, string title) {
+    if (r.w < 2 || r.h < 2) { return; }
+    int x2 = r.x + r.w - 1;
+    int y2 = r.y + r.h - 1;
+    s.setCell(r.x, r.y, '+', -1, -1, 0);
+    s.setCell(x2,  r.y, '+', -1, -1, 0);
+    s.setCell(r.x, y2,  '+', -1, -1, 0);
+    s.setCell(x2,  y2,  '+', -1, -1, 0);
+    for (int x = r.x + 1; x < x2; ++x) {
+        s.setCell(x, r.y, '-', -1, -1, 0);
+        s.setCell(x, y2,  '-', -1, -1, 0);
+    }
+    for (int y = r.y + 1; y < y2; ++y) {
+        s.setCell(r.x, y, '|', -1, -1, 0);
+        s.setCell(x2,  y, '|', -1, -1, 0);
+    }
+    if (len(title) > 0 && r.w > 4) {
+        s.setPen(-1, -1, 0);
+        putClip(s, r.x + 1, r.y, r.w - 2, " " + title + " ");
+    }
+}
+
+// ── Render ──────────────────────────────────────────────────────────────
+
+void renderWidget(Widget* w, Screen s, Rect r) {
+    match (*w) {
+        Widget.WText(t, fg, bg, attr) => {
+            s.setPen(fg, bg, attr);
+            putClip(s, r.x, r.y, r.w, t);
+        }
+        Widget.WBox(title, child) => {
+            drawBox(s, r, title);
+            if (r.w > 2 && r.h > 2) {
+                renderWidget(child, s, Rect(r.x + 1, r.y + 1, r.w - 2, r.h - 2));
+            }
+        }
+        Widget.WVStack(children) => {
+            int n = children.length();
+            if (n > 0) {
+                int each = r.h / n;
+                if (each < 1) { each = 1; }
+                int y = r.y;
+                for (int i = 0; i < n; ++i) {
+                    int hh = each;
+                    if (i == n - 1) { hh = r.y + r.h - y; }
+                    if (hh < 0) { hh = 0; }
+                    if (y < r.y + r.h) {
+                        renderWidget(children.get(i), s, Rect(r.x, y, r.w, hh));
+                    }
+                    y = y + hh;
+                }
+            }
+        }
+        Widget.WList(model) => {
+            int rows = r.h;
+            // Keep the selection within the visible window.
+            if (model->selected < model->scroll) { model->scroll = model->selected; }
+            if (model->selected >= model->scroll + rows) { model->scroll = model->selected - rows + 1; }
+            for (int i = 0; i < rows; ++i) {
+                int idx = model->scroll + i;
+                if (idx < model->items.length()) {
+                    int attr = 0;
+                    if (idx == model->selected) { attr = 4; }   // reverse video
+                    s.setPen(-1, -1, attr);
+                    putClip(s, r.x, r.y + i, r.w, model->items.get(idx));
+                }
+            }
+        }
+        Widget.WInput(model, label) => {
+            s.setPen(-1, -1, 0);
+            putClip(s, r.x, r.y, r.w, label + model->text);
+            int cx = r.x + len(label) + len(model->text);
+            if (cx < r.x + r.w) {
+                s.setCell(cx, r.y, ' ', -1, -1, 4);   // block cursor
+            }
+        }
+    }
+}
+
+// ── Input dispatch ──────────────────────────────────────────────────────
+
+bool handleWidget(Widget* w, Key* k) {
+    match (*w) {
+        Widget.WList(model) => {
+            match (*k) {
+                Key.KSpecial(code) => {
+                    if (code == keys::UP())   { model->moveUp();   return true; }
+                    if (code == keys::DOWN()) { model->moveDown(); return true; }
+                    return false;
+                }
+                _ => { return false; }
+            }
+        }
+        Widget.WInput(model, label) => {
+            match (*k) {
+                Key.KChar(c) => { model->append(c); return true; }
+                Key.KSpecial(code) => {
+                    if (code == keys::BACKSPACE()) { model->backspace(); return true; }
+                    return false;
+                }
+                _ => { return false; }
+            }
+        }
+        Widget.WBox(title, child) => { return handleWidget(child, k); }
+        Widget.WVStack(children) => {
+            int n = children.length();
+            for (int i = 0; i < n; ++i) {
+                if (handleWidget(children.get(i), k)) { return true; }
+            }
+            return false;
+        }
+        _ => { return false; }
+    }
+}
+
+// ── App loop ────────────────────────────────────────────────────────────
+
+class App {
+    Terminal term;
+    Widget* root;
+    KeyReader keys;
+    bool running;
+    bool quitOnQ;    // treat unconsumed 'q' as quit
+
+    App(Widget* root) {
+        this.term = Terminal();
+        this.root = root;
+        this.keys = KeyReader(0 - 1);   // block until a key
+        this.running = false;
+        this.quitOnQ = true;
+    }
+
+    void draw() {
+        Screen s = this.term.screen;
+        s.clear();
+        renderWidget(this.root, s, Rect(0, 0, s.width, s.height));
+        this.term.render();
+    }
+
+    void run() {
+        this.term.enter();
+        this.running = true;
+        while (this.running) {
+            this.draw();
+            Key* k = this.keys.next();
+            match (*k) {
+                Key.KResize()    => { this.term.syncSize(); }
+                Key.KInterrupt() => { this.running = false; }
+                Key.KEof()       => { this.running = false; }
+                Key.KCtrl(c)     => {
+                    if (c == 'c') { this.running = false; }
+                    else { handleWidget(this.root, k); }
+                }
+                Key.KChar(c) => {
+                    bool consumed = handleWidget(this.root, k);
+                    if (!consumed && this.quitOnQ && c == 'q') { this.running = false; }
+                }
+                _ => { handleWidget(this.root, k); }
+            }
+        }
+        this.term.leave();
+    }
+}

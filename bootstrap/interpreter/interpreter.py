@@ -861,6 +861,7 @@ class Interpreter:
             "readByteTimeout",
             "termResized",
             "termInterrupted",
+            "shell",
             "nowNanos",
             "wallMillis",
             "sleepMs",
@@ -1195,6 +1196,17 @@ class Interpreter:
             v = self._term_intr
             self._term_intr = False
             return Value(NamedType("bool"), v)
+
+        if expr.name == "shell":
+            import subprocess as _sp
+            cmd = str(self._eval(expr.args[0]).raw)
+            try:
+                out = _sp.run(
+                    cmd, shell=True, capture_output=True, text=True, timeout=30
+                ).stdout
+            except Exception:
+                out = ""
+            return Value(NamedType("string"), out)
 
         if expr.name == "nowNanos":
             import time as _time

@@ -1210,6 +1210,7 @@ class Interp {
         if (name == "readByteTimeout") { return mkInt(readByteTimeout(rawInt(this.eval(args.get(0))))); }
         if (name == "termResized")     { return mkBool(termResized()); }
         if (name == "termInterrupted") { return mkBool(termInterrupted()); }
+        if (name == "shell")      { return mkStr(shell(rawStr(this.eval(args.get(0))))); }
         if (name == "nowNanos")   { return mkInt(nowNanos()); }
         if (name == "wallMillis") { return mkInt(wallMillis()); }
         if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }

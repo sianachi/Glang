@@ -1,0 +1,34 @@
+// menu_demo.lang — a tiny interactive TUI built on std/tui.lang.
+//
+// Interactive: needs a real terminal (not part of the golden-file suite).
+// Run from the Toolchain directory so the std/ loader resolves:
+//
+//   python3 ../bootstrap/main.py run examples/tui/menu_demo.lang
+//
+// or compiled:
+//
+//   ./glangc examples/tui/menu_demo.lang /tmp/menu.c
+//   gcc /tmp/menu.c runtime/glang_runtime.c -o /tmp/menu && /tmp/menu
+//
+// Controls: Up/Down to move the selection, q or Ctrl-C to quit.
+
+import "std/tui.lang";
+
+int main() {
+    List<string> items = List<string>();
+    items.add("New file");
+    items.add("Open...");
+    items.add("Save");
+    items.add("Preferences");
+    items.add("Quit");
+    ListModel* menu = new ListModel(items);
+
+    Widget* root = box("glang-tui   (up/down move, q quits)", listView(menu));
+
+    App app = App(root);
+    app.run();
+
+    // Back on the normal screen after the app restores the terminal.
+    print("You selected: " + menu->current());
+    return 0;
+}

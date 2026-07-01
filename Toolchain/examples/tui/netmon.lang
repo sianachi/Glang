@@ -1,0 +1,274 @@
+// netmon.lang — a live network monitor TUI (htop-style) for the local host.
+//
+// Shows every active interface with live download/upload rates and cumulative
+// totals, a selectable row with a scaled bar, device details (IP / gateway /
+// DNS), and aggregate-throughput sparklines. Samples the host's real counters
+// once per second via std/sysnet.lang (which uses netstat/route/ipconfig/scutil
+// or /proc on Linux).
+//
+// Interactive — needs a real terminal. From the Toolchain directory:
+//   python3 ../bootstrap/main.py run examples/tui/netmon.lang
+// or compiled:
+//   ./glangc examples/tui/netmon.lang /tmp/netmon.c
+//   gcc -O2 /tmp/netmon.c runtime/glang_runtime.c -o /tmp/netmon && /tmp/netmon
+//
+// Controls: up/down select an interface, q or Ctrl-C to quit.
+
+import "std/tui.lang";
+import "std/sysnet.lang";
+
+int HIST_MAX() { return 240; }
+
+// ── Formatting ──────────────────────────────────────────────────────────
+
+string oneDecimal(int n, int unit) {
+    int whole = n / unit;
+    int frac = (n % unit) * 10 / unit;
+    return strings::intToStr(whole) + "." + strings::intToStr(frac);
+}
+
+string humanBytes(int n) {
+    if (n < 1024) { return strings::intToStr(n) + " B"; }
+    if (n < 1048576) { return oneDecimal(n, 1024) + " KB"; }
+    if (n < 1073741824) { return oneDecimal(n, 1048576) + " MB"; }
+    return oneDecimal(n, 1073741824) + " GB";
+}
+
+string humanRate(int bps) { return humanBytes(bps) + "/s"; }
+
+// ── Drawing helpers ─────────────────────────────────────────────────────
+
+// Filled bar of `width` cells over a dim track, scaled value/maxv.
+void drawBar(Screen s, int x, int y, int width, int value, int maxv, int color) {
+    if (maxv <= 0) { maxv = 1; }
+    int fill = value * width / maxv;
+    if (fill > width) { fill = width; }
+    if (fill < 0) { fill = 0; }
+    for (int i = 0; i < width; ++i) {
+        int bg = 236;
+        if (i < fill) { bg = color; }
+        s.setCell(x + i, y, ' ', -1, bg, 0);
+    }
+}
+
+// ASCII sparkline of the last `width` history samples, auto-scaled.
+void drawSparkline(Screen s, int x, int y, int width, List<int> hist, int color) {
+    string ramp = " .:-=+*#";
+    int levels = 8;
+    int n = hist.length();
+    int start = 0;
+    if (n > width) { start = n - width; }
+    int mx = 1;
+    for (int i = start; i < n; ++i) { if (hist.get(i) > mx) { mx = hist.get(i); } }
+    int col = 0;
+    for (int i = start; i < n; ++i) {
+        int lvl = hist.get(i) * (levels - 1) / mx;
+        if (lvl < 0) { lvl = 0; }
+        if (lvl > levels - 1) { lvl = levels - 1; }
+        s.setCell(x + col, y, ramp[lvl], color, -1, 0);
+        col = col + 1;
+    }
+}
+
+List<int> zeros(int n) {
+    List<int> z = List<int>();
+    for (int i = 0; i < n; ++i) { z.add(0); }
+    return z;
+}
+
+void pushHist(List<int> h, int v) {
+    h.add(v);
+    if (h.length() > HIST_MAX()) { h.removeAt(0); }
+}
+
+// ── The monitor ─────────────────────────────────────────────────────────
+
+class NetMon {
+    Terminal term;
+    KeyReader keys;
+    NetInfo cur;
+    List<Iface> prevIfaces;
+    List<int> rxRates;     // aligned to cur.ifaces
+    List<int> txRates;
+    int prevMs;
+    int selected;
+    bool running;
+    List<int> rxHist;
+    List<int> txHist;
+
+    NetMon() {
+        this.term = Terminal();
+        this.keys = KeyReader(1000);      // 1s refresh tick
+        this.cur = snapshot();
+        this.prevIfaces = this.cur.ifaces;
+        this.rxRates = zeros(this.cur.ifaces.length());
+        this.txRates = zeros(this.cur.ifaces.length());
+        this.prevMs = wallMillis();
+        this.selected = 0;
+        this.running = false;
+        this.rxHist = List<int>();
+        this.txHist = List<int>();
+    }
+
+    // Re-read counters and recompute per-interface rates + aggregate history.
+    void sample() {
+        int now = wallMillis();
+        NetInfo fresh = snapshot();
+        int elapsed = now - this.prevMs;
+        if (elapsed <= 0) { elapsed = 1; }
+        List<int> rxR = List<int>();
+        List<int> txR = List<int>();
+        int aggRx = 0;
+        int aggTx = 0;
+        for (int i = 0; i < fresh.ifaces.length(); ++i) {
+            Iface* f = fresh.ifaces.get(i);
+            Iface* p = findIface(this.prevIfaces, f->name);
+            int rr = 0;
+            int tr = 0;
+            if (p != null) {
+                int dr = f->rx - p->rx;
+                int dt = f->tx - p->tx;
+                if (dr > 0) { rr = dr * 1000 / elapsed; }
+                if (dt > 0) { tr = dt * 1000 / elapsed; }
+            }
+            rxR.add(rr);
+            txR.add(tr);
+            aggRx = aggRx + rr;
+            aggTx = aggTx + tr;
+        }
+        this.cur = fresh;
+        this.rxRates = rxR;
+        this.txRates = txR;
+        this.prevIfaces = fresh.ifaces;
+        this.prevMs = now;
+        pushHist(this.rxHist, aggRx);
+        pushHist(this.txHist, aggTx);
+    }
+
+    // Indices into cur.ifaces worth showing (any cumulative or live traffic).
+    List<int> visibleIdx() {
+        List<int> v = List<int>();
+        for (int i = 0; i < this.cur.ifaces.length(); ++i) {
+            Iface* f = this.cur.ifaces.get(i);
+            if (f->rx > 0 || f->tx > 0) { v.add(i); }
+        }
+        return v;
+    }
+
+    void draw() {
+        Screen s = this.term.screen;
+        s.clear();
+        int W = s.width;
+        int H = s.height;
+
+        List<int> vis = this.visibleIdx();
+        if (this.selected >= vis.length()) { this.selected = vis.length() - 1; }
+        if (this.selected < 0) { this.selected = 0; }
+
+        // Title bar.
+        for (int x = 0; x < W; ++x) { s.setCell(x, 0, ' ', 15, 4, 1); }
+        s.setPen(15, 4, 1);
+        putClip(s, 1, 0, W - 1,
+            "netmon   " + this.cur.ip + " via " + this.cur.primaryIface
+            + "   gw " + this.cur.gateway);
+        string hint = "[q]uit  up/dn select ";
+        s.setPen(15, 4, 1);
+        putClip(s, W - len(hint), 0, len(hint), hint);
+
+        // Device details.
+        s.setPen(244, -1, 0);
+        putClip(s, 1, 1, W - 2, "DNS: " + this.cur.dns);
+
+        // Table header.
+        s.setPen(11, -1, 1);
+        putClip(s, 1, 2, 11, "IFACE");
+        putClip(s, 13, 2, 12, "DOWN");
+        putClip(s, 26, 2, 12, "UP");
+        putClip(s, 39, 2, 11, "RX TOTAL");
+        putClip(s, 51, 2, 11, "TX TOTAL");
+        if (W > 66) { putClip(s, 63, 2, W - 64, "ACTIVITY"); }
+
+        // Scale for the per-row activity bar: busiest current down-rate.
+        int frameMax = 1;
+        for (int i = 0; i < this.rxRates.length(); ++i) {
+            if (this.rxRates.get(i) > frameMax) { frameMax = this.rxRates.get(i); }
+        }
+
+        int tableBottom = H - 7;
+        int y = 3;
+        for (int vi = 0; vi < vis.length(); ++vi) {
+            if (y >= tableBottom) { vi = vis.length(); }
+            else {
+                int idx = vis.get(vi);
+                Iface* f = this.cur.ifaces.get(idx);
+                int rr = this.rxRates.get(idx);
+                int tr = this.txRates.get(idx);
+                int attr = 0;
+                if (vi == this.selected) { attr = 4; }
+                if (attr == 4) {
+                    for (int x = 0; x < W; ++x) { s.setCell(x, y, ' ', -1, -1, 4); }
+                }
+                s.setPen(15, -1, attr); putClip(s, 1, y, 11, f->name);
+                s.setPen(2, -1, attr);  putClip(s, 13, y, 12, humanRate(rr));
+                s.setPen(6, -1, attr);  putClip(s, 26, y, 12, humanRate(tr));
+                s.setPen(250, -1, attr); putClip(s, 39, y, 11, humanBytes(f->rx));
+                putClip(s, 51, y, 11, humanBytes(f->tx));
+                if (W > 66) { drawBar(s, 63, y, W - 64, rr, frameMax, 2); }
+                y = y + 1;
+            }
+        }
+
+        // Aggregate throughput panel.
+        int py = H - 4;
+        int aggRx = 0;
+        int aggTx = 0;
+        for (int i = 0; i < this.rxRates.length(); ++i) {
+            aggRx = aggRx + this.rxRates.get(i);
+            aggTx = aggTx + this.txRates.get(i);
+        }
+        s.setPen(11, -1, 1);
+        putClip(s, 1, py, W - 2, "TOTAL THROUGHPUT");
+        s.setPen(2, -1, 0);
+        putClip(s, 1, py + 1, 18, "down " + humanRate(aggRx));
+        if (W > 22) { drawSparkline(s, 20, py + 1, W - 21, this.rxHist, 2); }
+        s.setPen(6, -1, 0);
+        putClip(s, 1, py + 2, 18, "up   " + humanRate(aggTx));
+        if (W > 22) { drawSparkline(s, 20, py + 2, W - 21, this.txHist, 6); }
+
+        // Footer.
+        for (int x = 0; x < W; ++x) { s.setCell(x, H - 1, ' ', 244, 236, 0); }
+        s.setPen(250, 236, 0);
+        putClip(s, 1, H - 1, W - 2,
+            strings::intToStr(vis.length()) + " active interfaces   refresh 1s");
+
+        this.term.render();
+    }
+
+    void run() {
+        this.term.enter();
+        this.running = true;
+        while (this.running) {
+            this.draw();
+            Key* k = this.keys.next();
+            match (*k) {
+                Key.KTimeout()   => { this.sample(); }
+                Key.KResize()    => { this.term.syncSize(); }
+                Key.KEof()       => { this.running = false; }
+                Key.KInterrupt() => { this.running = false; }
+                Key.KChar(c)     => { if (c == 'q') { this.running = false; } }
+                Key.KSpecial(code) => {
+                    if (code == keys::UP())   { if (this.selected > 0) { this.selected = this.selected - 1; } }
+                    if (code == keys::DOWN()) { this.selected = this.selected + 1; }
+                }
+                _ => { }
+            }
+        }
+        this.term.leave();
+    }
+}
+
+int main() {
+    NetMon mon = NetMon();
+    mon.run();
+    return 0;
+}

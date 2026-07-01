@@ -1,0 +1,620 @@
+// vim.lang — a small modal text editor (vim clone) on the std TUI library.
+//
+// Modes: NORMAL (move/edit), INSERT (type), COMMAND (':' line). Buffer is a
+// List<string> of lines; the viewport scrolls; a status line and command line
+// sit at the bottom. Files load/save through readFile/writeFile.
+//
+// Interactive — needs a real terminal. From the Toolchain directory:
+//   python3 ../bootstrap/main.py run examples/tui/vim.lang <file>
+// or compiled:
+//   ./glangc examples/tui/vim.lang /tmp/vim.c
+//   gcc -O2 /tmp/vim.c runtime/glang_runtime.c -o /tmp/vim && /tmp/vim <file>
+//
+// NORMAL: h j k l / arrows move · 0 $ line ends · gg G top/bottom · w b words
+//         x delete char · dd delete line · i a A I o O insert · : command
+//         yy yank line · p paste · v / V visual (char / line) select
+// INSERT: type · Enter split · Backspace · ESC back to NORMAL
+// VISUAL: motions extend the highlighted selection · d/x delete · y yank ·
+//         c change · ESC or v/V leave
+// COMMAND: :w write · :q quit · :q! force quit · :wq / :x write & quit
+
+import "std/tui.lang";
+
+int M_NORMAL()  { return 0; }
+int M_INSERT()  { return 1; }
+int M_COMMAND() { return 2; }
+int M_VISUAL()  { return 3; }
+int M_VISUAL_LINE() { return 4; }
+
+int SEL_BG() { return 24; }   // selection highlight background (256-palette)
+
+bool edIsSpace(char c) { return c == ' ' || c == '\t'; }
+
+class Editor {
+    Terminal term;
+    KeyReader keys;
+    List<string> lines;
+    int cx;
+    int cy;
+    int top;
+    int mode;
+    string filename;
+    string cmd;
+    string message;
+    bool modified;
+    bool running;
+    char pending;
+    int ax;            // visual-mode anchor
+    int ay;
+    string yank;       // yank/paste register
+    bool yankLine;     // register is line-wise
+
+    Editor() {
+        this.term = Terminal();
+        this.keys = KeyReader(0 - 1);   // block for input
+        this.lines = List<string>();
+        this.lines.add("");
+        this.cx = 0;
+        this.cy = 0;
+        this.top = 0;
+        this.mode = M_NORMAL();
+        this.filename = "";
+        this.cmd = "";
+        this.message = "";
+        this.modified = false;
+        this.running = false;
+        this.pending = (char) 0;
+        this.ax = 0;
+        this.ay = 0;
+        this.yank = "";
+        this.yankLine = false;
+    }
+
+    string curLine() {
+        if (this.lines.length() == 0) { return ""; }
+        if (this.cy < 0 || this.cy >= this.lines.length()) { return ""; }
+        return this.lines.get(this.cy);
+    }
+
+    void setLine(int i, string s) { this.lines.set(i, s); }
+
+    void insertLineAt(int i, string s) {
+        this.lines.add("");
+        int n = this.lines.length();
+        for (int j = n - 1; j > i; --j) {
+            this.lines.set(j, this.lines.get(j - 1));
+        }
+        this.lines.set(i, s);
+    }
+
+    void clampCursor() {
+        if (this.cy < 0) { this.cy = 0; }
+        if (this.cy >= this.lines.length()) { this.cy = this.lines.length() - 1; }
+        if (this.cy < 0) { this.cy = 0; }
+        int ll = len(this.curLine());
+        int maxc = ll;
+        if (this.mode != M_INSERT() && ll > 0) { maxc = ll - 1; }
+        if (this.cx > maxc) { this.cx = maxc; }
+        if (this.cx < 0) { this.cx = 0; }
+    }
+
+    // ── File ────────────────────────────────────────────────────────────
+    void load(string path) {
+        this.filename = path;
+        if (fileExists(path)) {
+            string body = readFile(path);
+            List<string> ls = strings::split(body, '\n');
+            if (ls.length() > 0 && len(ls.get(ls.length() - 1)) == 0) {
+                ls.removeAt(ls.length() - 1);
+            }
+            if (ls.length() == 0) { ls.add(""); }
+            this.lines = ls;
+            this.message = "\"" + path + "\"  " + strings::intToStr(ls.length()) + "L";
+        } else {
+            this.message = "\"" + path + "\" [New File]";
+        }
+    }
+
+    void save() {
+        if (len(this.filename) == 0) { this.message = "E32: No file name"; return; }
+        string body = strings::join(this.lines, "\n") + "\n";
+        writeFile(this.filename, body);
+        this.modified = false;
+        this.message = "\"" + this.filename + "\" " + strings::intToStr(this.lines.length()) + "L written";
+    }
+
+    // ── Edits ───────────────────────────────────────────────────────────
+    void insertChar(char c) {
+        string l = this.curLine();
+        this.setLine(this.cy, substr(l, 0, this.cx) + toString(c) + substr(l, this.cx, len(l)));
+        this.cx = this.cx + 1;
+        this.modified = true;
+    }
+
+    void splitLine() {
+        string l = this.curLine();
+        string left = substr(l, 0, this.cx);
+        string right = substr(l, this.cx, len(l));
+        this.setLine(this.cy, left);
+        this.insertLineAt(this.cy + 1, right);
+        this.cy = this.cy + 1;
+        this.cx = 0;
+        this.modified = true;
+    }
+
+    void backspaceInsert() {
+        if (this.cx > 0) {
+            string l = this.curLine();
+            this.setLine(this.cy, substr(l, 0, this.cx - 1) + substr(l, this.cx, len(l)));
+            this.cx = this.cx - 1;
+            this.modified = true;
+        } else {
+            if (this.cy > 0) {
+                string prev = this.lines.get(this.cy - 1);
+                string cur = this.curLine();
+                int joinCol = len(prev);
+                this.setLine(this.cy - 1, prev + cur);
+                this.lines.removeAt(this.cy);
+                this.cy = this.cy - 1;
+                this.cx = joinCol;
+                this.modified = true;
+            }
+        }
+    }
+
+    void deleteChar() {
+        string l = this.curLine();
+        if (len(l) > 0 && this.cx < len(l)) {
+            this.setLine(this.cy, substr(l, 0, this.cx) + substr(l, this.cx + 1, len(l)));
+            this.modified = true;
+            this.clampCursor();
+        }
+    }
+
+    void deleteLine() {
+        if (this.lines.length() <= 1) {
+            this.setLine(0, "");
+        } else {
+            this.lines.removeAt(this.cy);
+            if (this.cy >= this.lines.length()) { this.cy = this.lines.length() - 1; }
+        }
+        this.cx = 0;
+        this.modified = true;
+        this.clampCursor();
+    }
+
+    void openBelow() {
+        this.insertLineAt(this.cy + 1, "");
+        this.cy = this.cy + 1;
+        this.cx = 0;
+        this.mode = M_INSERT();
+        this.modified = true;
+    }
+
+    void openAbove() {
+        this.insertLineAt(this.cy, "");
+        this.cx = 0;
+        this.mode = M_INSERT();
+        this.modified = true;
+    }
+
+    // ── Motions ─────────────────────────────────────────────────────────
+    void wordForward() {
+        string l = this.curLine();
+        int n = len(l);
+        int x = this.cx;
+        while (x < n && !(edIsSpace(l[x]))) { x = x + 1; }
+        while (x < n && edIsSpace(l[x])) { x = x + 1; }
+        if (x >= n) {
+            if (this.cy + 1 < this.lines.length()) { this.cy = this.cy + 1; this.cx = 0; }
+        } else {
+            this.cx = x;
+        }
+    }
+
+    void wordBack() {
+        int x = this.cx;
+        if (x == 0) {
+            if (this.cy > 0) { this.cy = this.cy - 1; this.cx = len(this.curLine()); }
+            return;
+        }
+        string l = this.curLine();
+        x = x - 1;
+        while (x > 0 && edIsSpace(l[x])) { x = x - 1; }
+        while (x > 0 && !(edIsSpace(l[x - 1]))) { x = x - 1; }
+        this.cx = x;
+    }
+
+    void moveSpecial(int code) {
+        if (code == keys::LEFT())  { this.cx = this.cx - 1; }
+        if (code == keys::RIGHT()) { this.cx = this.cx + 1; }
+        if (code == keys::UP())    { this.cy = this.cy - 1; }
+        if (code == keys::DOWN())  { this.cy = this.cy + 1; }
+        if (code == keys::HOME())  { this.cx = 0; }
+        if (code == keys::END())   { this.cx = len(this.curLine()); }
+        this.clampCursor();
+    }
+
+    // Cursor motions shared by NORMAL and VISUAL modes. Returns true if `c` was
+    // a motion (and was applied), false otherwise.
+    bool applyMotion(char c) {
+        if (this.pending == 'g') {
+            this.pending = (char) 0;
+            if (c == 'g') { this.cy = 0; this.cx = 0; this.clampCursor(); }
+            return true;
+        }
+        if (c == 'h') { this.cx = this.cx - 1; this.clampCursor(); return true; }
+        if (c == 'l') { this.cx = this.cx + 1; this.clampCursor(); return true; }
+        if (c == 'j') { this.cy = this.cy + 1; this.clampCursor(); return true; }
+        if (c == 'k') { this.cy = this.cy - 1; this.clampCursor(); return true; }
+        if (c == '0') { this.cx = 0; return true; }
+        if (c == '$') {
+            int ll = len(this.curLine());
+            int nx = 0;
+            if (ll > 0) { nx = ll - 1; }
+            this.cx = nx;
+            return true;
+        }
+        if (c == 'G') { this.cy = this.lines.length() - 1; this.clampCursor(); return true; }
+        if (c == 'w') { this.wordForward(); this.clampCursor(); return true; }
+        if (c == 'b') { this.wordBack(); this.clampCursor(); return true; }
+        if (c == 'g') { this.pending = 'g'; return true; }
+        return false;
+    }
+
+    // ── NORMAL mode ─────────────────────────────────────────────────────
+    void normalChar(char c) {
+        if (this.pending == 'd') {
+            this.pending = (char) 0;
+            if (c == 'd') { this.deleteLine(); }
+            return;
+        }
+        if (this.pending == 'y') {
+            this.pending = (char) 0;
+            if (c == 'y') { this.yankLineCmd(); }
+            return;
+        }
+        if (this.applyMotion(c)) { return; }
+        if (c == 'x') { this.deleteChar(); return; }
+        if (c == 'i') { this.mode = M_INSERT(); return; }
+        if (c == 'a') {
+            this.cx = this.cx + 1;
+            if (this.cx > len(this.curLine())) { this.cx = len(this.curLine()); }
+            this.mode = M_INSERT();
+            return;
+        }
+        if (c == 'A') { this.cx = len(this.curLine()); this.mode = M_INSERT(); return; }
+        if (c == 'I') { this.cx = 0; this.mode = M_INSERT(); return; }
+        if (c == 'o') { this.openBelow(); return; }
+        if (c == 'O') { this.openAbove(); return; }
+        if (c == 'v') { this.enterVisual(M_VISUAL()); return; }
+        if (c == 'V') { this.enterVisual(M_VISUAL_LINE()); return; }
+        if (c == 'p') { this.paste(); return; }
+        if (c == 'd') { this.pending = 'd'; return; }
+        if (c == 'y') { this.pending = 'y'; return; }
+        if (c == ':') { this.mode = M_COMMAND(); this.cmd = ""; this.message = ""; return; }
+    }
+
+    void handleNormal(Key* k) {
+        match (*k) {
+            Key.KChar(c)       => { this.normalChar(c); }
+            Key.KSpecial(code) => { this.moveSpecial(code); }
+            _ => { }
+        }
+    }
+
+    // ── VISUAL mode ─────────────────────────────────────────────────────
+    void enterVisual(int m) {
+        this.mode = m;
+        this.ax = this.cx;
+        this.ay = this.cy;
+    }
+
+    // Is document cell (r, c) inside the current visual selection?
+    bool inSelection(int r, int c) {
+        if (this.mode != M_VISUAL() && this.mode != M_VISUAL_LINE()) { return false; }
+        int sy = this.ay;
+        int sx = this.ax;
+        int ey = this.cy;
+        int ex = this.cx;
+        if (sy > ey || (sy == ey && sx > ex)) {
+            int ty = sy; sy = ey; ey = ty;
+            int tx = sx; sx = ex; ex = tx;
+        }
+        if (this.mode == M_VISUAL_LINE()) { return r >= sy && r <= ey; }
+        if (r < sy || r > ey) { return false; }
+        if (sy == ey) { return c >= sx && c <= ex; }
+        if (r == sy) { return c >= sx; }
+        if (r == ey) { return c <= ex; }
+        return true;
+    }
+
+    void yankSelection() {
+        int sy = this.ay;
+        int sx = this.ax;
+        int ey = this.cy;
+        int ex = this.cx;
+        if (sy > ey || (sy == ey && sx > ex)) {
+            int ty = sy; sy = ey; ey = ty;
+            int tx = sx; sx = ex; ex = tx;
+        }
+        if (this.mode == M_VISUAL_LINE()) {
+            List<string> parts = List<string>();
+            for (int i = sy; i <= ey; ++i) { parts.add(this.lines.get(i)); }
+            this.yank = strings::join(parts, "\n");
+            this.yankLine = true;
+        } else {
+            if (sy == ey) {
+                string l = this.lines.get(sy);
+                int e = ex + 1;
+                if (e > len(l)) { e = len(l); }
+                this.yank = substr(l, sx, e);
+            } else {
+                string acc = substr(this.lines.get(sy), sx, len(this.lines.get(sy)));
+                for (int i = sy + 1; i < ey; ++i) { acc = acc + "\n" + this.lines.get(i); }
+                string last = this.lines.get(ey);
+                int e2 = ex + 1;
+                if (e2 > len(last)) { e2 = len(last); }
+                acc = acc + "\n" + substr(last, 0, e2);
+                this.yank = acc;
+            }
+            this.yankLine = false;
+        }
+    }
+
+    void deleteSelection() {
+        int sy = this.ay;
+        int sx = this.ax;
+        int ey = this.cy;
+        int ex = this.cx;
+        if (sy > ey || (sy == ey && sx > ex)) {
+            int ty = sy; sy = ey; ey = ty;
+            int tx = sx; sx = ex; ex = tx;
+        }
+        this.yankSelection();
+        if (this.mode == M_VISUAL_LINE()) {
+            for (int i = ey; i >= sy; --i) {
+                if (this.lines.length() > 1) { this.lines.removeAt(i); }
+                else { this.setLine(0, ""); }
+            }
+            if (this.lines.length() == 0) { this.lines.add(""); }
+            this.cy = sy;
+            this.cx = 0;
+        } else {
+            if (sy == ey) {
+                string l = this.lines.get(sy);
+                int e = ex + 1;
+                if (e > len(l)) { e = len(l); }
+                this.setLine(sy, substr(l, 0, sx) + substr(l, e, len(l)));
+            } else {
+                string first = this.lines.get(sy);
+                string last = this.lines.get(ey);
+                int e = ex + 1;
+                if (e > len(last)) { e = len(last); }
+                string merged = substr(first, 0, sx) + substr(last, e, len(last));
+                for (int i = ey; i > sy; --i) { this.lines.removeAt(i); }
+                this.setLine(sy, merged);
+            }
+            this.cy = sy;
+            this.cx = sx;
+        }
+        this.mode = M_NORMAL();
+        this.modified = true;
+        this.clampCursor();
+    }
+
+    void yankLineCmd() {
+        this.yank = this.curLine();
+        this.yankLine = true;
+        this.message = "1 line yanked";
+    }
+
+    void paste() {
+        if (this.yankLine) {
+            List<string> parts = strings::split(this.yank, '\n');
+            for (int i = 0; i < parts.length(); ++i) {
+                this.insertLineAt(this.cy + 1 + i, parts.get(i));
+            }
+            this.cy = this.cy + 1;
+            this.cx = 0;
+            this.modified = true;
+        } else {
+            if (len(this.yank) > 0) {
+                string l = this.curLine();
+                int p = this.cx + 1;
+                if (len(l) == 0) { p = 0; }
+                if (p > len(l)) { p = len(l); }
+                this.setLine(this.cy, substr(l, 0, p) + this.yank + substr(l, p, len(l)));
+                this.cx = p + len(this.yank) - 1;
+                this.modified = true;
+            }
+        }
+        this.clampCursor();
+    }
+
+    void visualChar(char c) {
+        if (this.applyMotion(c)) { return; }
+        if (c == 'v') { this.mode = M_NORMAL(); this.clampCursor(); return; }
+        if (c == 'V') { this.mode = M_VISUAL_LINE(); return; }
+        if (c == 'd' || c == 'x') { this.deleteSelection(); return; }
+        if (c == 'y') { this.yankSelection(); this.mode = M_NORMAL(); this.clampCursor(); return; }
+        if (c == 'c') { this.deleteSelection(); this.mode = M_INSERT(); return; }
+    }
+
+    void handleVisual(Key* k) {
+        match (*k) {
+            Key.KChar(c) => { this.visualChar(c); }
+            Key.KSpecial(code) => {
+                if (code == keys::ESC()) { this.mode = M_NORMAL(); this.clampCursor(); }
+                else { this.moveSpecial(code); }
+            }
+            _ => { }
+        }
+    }
+
+    // ── INSERT mode ─────────────────────────────────────────────────────
+    void handleInsert(Key* k) {
+        match (*k) {
+            Key.KChar(c) => { this.insertChar(c); }
+            Key.KSpecial(code) => {
+                if (code == keys::ENTER())     { this.splitLine(); }
+                else if (code == keys::BACKSPACE()) { this.backspaceInsert(); }
+                else if (code == keys::ESC())  { this.mode = M_NORMAL(); this.clampCursor(); }
+                else { this.moveSpecial(code); }
+            }
+            _ => { }
+        }
+    }
+
+    // ── COMMAND mode ────────────────────────────────────────────────────
+    void execCommand() {
+        string c = this.cmd;
+        this.mode = M_NORMAL();
+        this.cmd = "";
+        if (c == "w") { this.save(); }
+        else if (c == "q") {
+            if (this.modified) { this.message = "E37: No write since last change (add ! to override)"; }
+            else { this.running = false; }
+        }
+        else if (c == "q!") { this.running = false; }
+        else if (c == "wq" || c == "x") { this.save(); this.running = false; }
+        else if (len(c) > 0) { this.message = "E492: Not an editor command: " + c; }
+    }
+
+    void handleCommand(Key* k) {
+        match (*k) {
+            Key.KChar(c) => { this.cmd = this.cmd + toString(c); }
+            Key.KSpecial(code) => {
+                if (code == keys::ENTER()) { this.execCommand(); }
+                else if (code == keys::BACKSPACE()) {
+                    int n = len(this.cmd);
+                    if (n > 0) { this.cmd = substr(this.cmd, 0, n - 1); }
+                    else { this.mode = M_NORMAL(); }
+                }
+                else if (code == keys::ESC()) { this.mode = M_NORMAL(); this.cmd = ""; }
+            }
+            _ => { }
+        }
+    }
+
+    string modeName() {
+        if (this.mode == M_INSERT()) { return "-- INSERT --"; }
+        if (this.mode == M_VISUAL()) { return "-- VISUAL --"; }
+        if (this.mode == M_VISUAL_LINE()) { return "-- VISUAL LINE --"; }
+        return "-- NORMAL --";
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    void draw() {
+        Screen s = this.term.screen;
+        s.clear();
+        int W = s.width;
+        int H = s.height;
+        int textH = H - 2;
+
+        if (this.cy < this.top) { this.top = this.cy; }
+        if (this.cy >= this.top + textH) { this.top = this.cy - textH + 1; }
+        if (this.top < 0) { this.top = 0; }
+
+        int gutter = 5;
+        for (int r = 0; r < textH; ++r) {
+            int li = this.top + r;
+            if (li < this.lines.length()) {
+                s.setPen(240, -1, 0);
+                putClip(s, 0, r, gutter, strings::padLeft(strings::intToStr(li + 1), gutter - 1, ' ') + " ");
+                s.setPen(252, -1, 0);
+                putClip(s, gutter, r, W - gutter, this.lines.get(li));
+            } else {
+                s.setPen(4, -1, 0);
+                putClip(s, 0, r, 1, "~");
+            }
+        }
+
+        // Visual selection highlight overlay.
+        if (this.mode == M_VISUAL() || this.mode == M_VISUAL_LINE()) {
+            for (int r = 0; r < textH; ++r) {
+                int li = this.top + r;
+                if (li < this.lines.length()) {
+                    string ln = this.lines.get(li);
+                    int llen = len(ln);
+                    int wcols = W - gutter;
+                    for (int cc = 0; cc < wcols; ++cc) {
+                        if (this.inSelection(li, cc)) {
+                            if (this.mode == M_VISUAL_LINE()) {
+                                char ch = ' ';
+                                if (cc < llen) { ch = ln[cc]; }
+                                s.setCell(gutter + cc, r, ch, 15, SEL_BG(), 0);
+                            } else {
+                                if (cc < llen) { s.setCell(gutter + cc, r, ln[cc], 15, SEL_BG(), 0); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Block cursor (in text area).
+        int scrY = this.cy - this.top;
+        int scrX = gutter + this.cx;
+        if (scrY >= 0 && scrY < textH && scrX < W) {
+            char under = ' ';
+            string cl = this.curLine();
+            if (this.cx < len(cl)) { under = cl[this.cx]; }
+            s.setCell(scrX, scrY, under, -1, -1, 4);
+        }
+
+        // Status line.
+        for (int x = 0; x < W; ++x) { s.setCell(x, H - 2, ' ', 15, 240, 1); }
+        s.setPen(15, 240, 1);
+        string fname = this.filename;
+        if (len(fname) == 0) { fname = "[No Name]"; }
+        string modflag = "";
+        if (this.modified) { modflag = " [+]"; }
+        putClip(s, 1, H - 2, W - 2, this.modeName() + "   " + fname + modflag);
+        string pos = "Ln " + strings::intToStr(this.cy + 1) + ", Col " + strings::intToStr(this.cx + 1);
+        putClip(s, W - len(pos) - 1, H - 2, len(pos), pos);
+
+        // Command / message line.
+        if (this.mode == M_COMMAND()) {
+            s.setPen(252, -1, 0);
+            putClip(s, 0, H - 1, W, ":" + this.cmd);
+            s.setCell(1 + len(this.cmd), H - 1, ' ', -1, -1, 4);
+        } else {
+            s.setPen(248, -1, 0);
+            putClip(s, 0, H - 1, W, this.message);
+        }
+
+        this.term.render();
+    }
+
+    void run() {
+        this.term.enter();
+        this.running = true;
+        while (this.running) {
+            this.draw();
+            Key* k = this.keys.next();
+            bool handled = false;
+            match (*k) {
+                Key.KResize()    => { this.term.syncSize(); handled = true; }
+                Key.KEof()       => { this.running = false; handled = true; }
+                Key.KTimeout()   => { handled = true; }
+                Key.KInterrupt() => { handled = true; }
+                _ => { }
+            }
+            if (!handled) {
+                if (this.mode == M_NORMAL())       { this.handleNormal(k); }
+                else if (this.mode == M_INSERT())  { this.handleInsert(k); }
+                else if (this.mode == M_COMMAND()) { this.handleCommand(k); }
+                else                               { this.handleVisual(k); }
+            }
+        }
+        this.term.leave();
+    }
+}
+
+int main() {
+    Editor ed = Editor();
+    if (getArgCount() > 0) { ed.load(getArg(0)); }
+    ed.run();
+    return 0;
+}

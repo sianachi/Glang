@@ -679,6 +679,31 @@ int64_t glang_term_interrupted(void) {
     return 0;
 }
 
+/* ── Shell ────────────────────────────────────────────────────────────────
+   Run `cmd` via /bin/sh, capture its stdout, and return it as a heap string
+   (empty on failure). Intended for local system-introspection tools (reading
+   netstat/ifconfig/route output). The interpreters back this the same way. */
+char* glang_shell(const char* cmd) {
+    if (!cmd) { return strdup(""); }
+    FILE* p = popen(cmd, "r");
+    if (!p) { return strdup(""); }
+    size_t cap = 4096, used = 0;
+    char* buf = (char*)malloc(cap);
+    char chunk[4096];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof(chunk), p)) > 0) {
+        if (used + n + 1 > cap) {
+            while (used + n + 1 > cap) { cap *= 2; }
+            buf = (char*)realloc(buf, cap);
+        }
+        memcpy(buf + used, chunk, n);
+        used += n;
+    }
+    buf[used] = '\0';
+    pclose(p);
+    return buf;
+}
+
 /* ── Print ────────────────────────────────────────────────────────────── */
 
 void glang_print_int(int64_t v)       { printf("%" PRId64 "\n", v); }

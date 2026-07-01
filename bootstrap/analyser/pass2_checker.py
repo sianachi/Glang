@@ -1223,6 +1223,7 @@ class Pass2Checker:
             "readByteTimeout": ([NamedType("int")], NamedType("int")),
             "termResized": ([], NamedType("bool")),
             "termInterrupted": ([], NamedType("bool")),
+            "shell": ([NamedType("string")], NamedType("string")),
             "nowNanos": ([], NamedType("int")),
             "wallMillis": ([], NamedType("int")),
             "sleepMs": ([NamedType("int")], NamedType("void")),

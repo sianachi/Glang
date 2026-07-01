@@ -1040,7 +1040,7 @@ class Pass2Checker {
             || name == "termRawOn" || name == "termRawOff"
             || name == "termWidth" || name == "termHeight"
             || name == "readByteTimeout" || name == "termResized"
-            || name == "termInterrupted"
+            || name == "termInterrupted" || name == "shell"
             || name == "nowNanos" || name == "wallMillis" || name == "sleepMs"
             || name == "netListen" || name == "netLocalPort" || name == "netAccept"
             || name == "netConnect" || name == "netRecv" || name == "netSend"

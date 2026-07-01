@@ -1,0 +1,217 @@
+// std/term.lang — terminal lifecycle + a double-buffered screen with diff flush.
+//
+// `Terminal` owns the raw-mode / alternate-screen lifecycle and re-queries the
+// window size. `Screen` is a grid of `Cell`s held as two buffers: the app draws
+// into `back`, and `flush()` walks the grid emitting the *minimal* escape
+// sequence needed to turn the last-shown `front` into `back` — only changed
+// cells are repainted, so redraws are flicker-free and cheap.
+//
+// Style attributes are a small bitmask on each cell:
+//   1 = bold, 2 = underline, 4 = reverse. Colours are 256-palette indices, or
+//   -1 for "terminal default".
+//
+// Depends only on the term* builtins (via Terminal) and std/ansi.lang.
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/ansi.lang";
+
+// One screen cell: a glyph plus its style. Treated as immutable — the grid is
+// updated by replacing cells, never mutating them, so buffers can share blanks.
+class Cell {
+    char ch;
+    int  fg;
+    int  bg;
+    int  attr;
+
+    Cell(char ch, int fg, int bg, int attr) {
+        this.ch = ch;
+        this.fg = fg;
+        this.bg = bg;
+        this.attr = attr;
+    }
+
+    bool eq(Cell o) {
+        return this.ch == o.ch && this.fg == o.fg
+            && this.bg == o.bg && this.attr == o.attr;
+    }
+}
+
+// A blank cell: space, default colours, no attributes.
+Cell blankCell() { return Cell(' ', -1, -1, 0); }
+
+class Screen {
+    int width;
+    int height;
+    List<Cell> front;    // what the terminal currently shows
+    List<Cell> back;     // what the next flush will show
+    int penFg;           // current pen used by put()
+    int penBg;
+    int penAttr;
+
+    Screen(int w, int h) {
+        this.width = 0;
+        this.height = 0;
+        this.front = List<Cell>();
+        this.back = List<Cell>();
+        this.penFg = -1;
+        this.penBg = -1;
+        this.penAttr = 0;
+        this.resize(w, h);
+    }
+
+    // (Re)allocate both buffers to w*h blanks. Call after a size change; the
+    // caller should also clear the physical screen so front (all blanks) matches
+    // what is on screen.
+    void resize(int w, int h) {
+        this.width = w;
+        this.height = h;
+        int n = w * h;
+        this.front = List<Cell>();
+        this.back = List<Cell>();
+        for (int i = 0; i < n; ++i) {
+            this.front.add(blankCell());
+            this.back.add(blankCell());
+        }
+    }
+
+    // Reset the back buffer to blanks (typical first step of a frame).
+    void clear() {
+        int n = this.width * this.height;
+        for (int i = 0; i < n; ++i) {
+            this.back.set(i, blankCell());
+        }
+    }
+
+    // Set the pen used by put() for subsequent writes.
+    void setPen(int fg, int bg, int attr) {
+        this.penFg = fg;
+        this.penBg = bg;
+        this.penAttr = attr;
+    }
+
+    // Write a single styled glyph (ignored if out of bounds).
+    void setCell(int x, int y, char ch, int fg, int bg, int attr) {
+        if (x < 0 || y < 0 || x >= this.width || y >= this.height) { return; }
+        this.back.set(y * this.width + x, Cell(ch, fg, bg, attr));
+    }
+
+    // Write a string starting at (x, y) using the current pen. Clipped to the
+    // row; embedded newlines are not interpreted.
+    void put(int x, int y, string s) {
+        int n = len(s);
+        for (int i = 0; i < n; ++i) {
+            this.setCell(x + i, y, s[i], this.penFg, this.penBg, this.penAttr);
+        }
+    }
+
+    // Build the SGR sequence for a cell's style: a reset followed by exactly the
+    // attributes/colours it needs. Emitting a reset first keeps stale styles
+    // from bleeding across a discontiguous jump.
+    string styleSeq(Cell c) {
+        StringBuilder s = StringBuilder();
+        s.append(ansi::reset());
+        if ((c.attr & 1) != 0) { s.append(ansi::bold()); }
+        if ((c.attr & 2) != 0) { s.append(ansi::underline()); }
+        if ((c.attr & 4) != 0) { s.append(ansi::reverse()); }
+        if (c.fg >= 0) { s.append(ansi::fg(c.fg)); }
+        if (c.bg >= 0) { s.append(ansi::bg(c.bg)); }
+        return s.build();
+    }
+
+    // Diff back against front and return the escape string that updates the
+    // terminal, copying back into front as we go. Returns "" if nothing changed.
+    // Contiguous runs on a row reuse the terminal's own cursor advance, so only
+    // style changes and row jumps cost an escape.
+    string flush() {
+        StringBuilder sb = StringBuilder();
+        bool dirty = false;
+        int  cursorX = -1;   // where the terminal cursor sits (-1 = unknown)
+        int  cursorY = -1;
+        bool styleKnown = false;
+        int  lastFg = -2;
+        int  lastBg = -2;
+        int  lastAttr = -1;
+        for (int y = 0; y < this.height; ++y) {
+            for (int x = 0; x < this.width; ++x) {
+                int idx = y * this.width + x;
+                Cell b = this.back.get(idx);
+                Cell f = this.front.get(idx);
+                if (b.eq(f)) { continue; }
+                dirty = true;
+                if (cursorX != x || cursorY != y) {
+                    sb.append(ansi::moveTo(y + 1, x + 1));
+                }
+                if (!styleKnown || b.fg != lastFg || b.bg != lastBg || b.attr != lastAttr) {
+                    sb.append(this.styleSeq(b));
+                    lastFg = b.fg; lastBg = b.bg; lastAttr = b.attr;
+                    styleKnown = true;
+                }
+                sb.appendChar(b.ch);
+                cursorX = x + 1;   // terminal advanced past the glyph
+                cursorY = y;
+                this.front.set(idx, b);
+            }
+        }
+        if (!dirty) { return ""; }
+        sb.append(ansi::reset());
+        return sb.build();
+    }
+}
+
+class Terminal {
+    Screen screen;
+    bool rawActive;
+
+    Terminal() {
+        int w = termWidth();
+        int h = termHeight();
+        if (w <= 0) { w = 80; }
+        if (h <= 0) { h = 24; }
+        this.screen = Screen(w, h);
+        this.rawActive = false;
+    }
+
+    // Enter raw mode, switch to the alternate screen, hide the cursor and clear.
+    // Returns true if raw mode engaged (a real tty); false means output still
+    // works but input stays line-buffered (e.g. piped) — callers can still draw.
+    bool enter() {
+        int r = termRawOn();
+        this.rawActive = (r == 0);
+        writeStdout(ansi::enterAlt());
+        writeStdout(ansi::hideCursor());
+        writeStdout(ansi::clearScreen());
+        return this.rawActive;
+    }
+
+    // Restore the terminal: show cursor, leave the alternate screen, reset style
+    // and drop raw mode. Safe to call more than once.
+    void leave() {
+        writeStdout(ansi::showCursor());
+        writeStdout(ansi::leaveAlt());
+        writeStdout(ansi::reset());
+        if (this.rawActive) { termRawOff(); this.rawActive = false; }
+    }
+
+    // Re-query the window size; if it changed, resize the buffers and clear the
+    // physical screen (so the next render repaints in full). Returns true on a
+    // change. Call this when termResized() reports a SIGWINCH.
+    bool syncSize() {
+        int w = termWidth();
+        int h = termHeight();
+        if (w <= 0 || h <= 0) { return false; }
+        if (w != this.screen.width || h != this.screen.height) {
+            this.screen.resize(w, h);
+            writeStdout(ansi::clearScreen());
+            return true;
+        }
+        return false;
+    }
+
+    // Flush the back buffer to the terminal (diffed; no-op if unchanged).
+    void render() {
+        string patch = this.screen.flush();
+        if (len(patch) > 0) { writeStdout(patch); }
+    }
+}
