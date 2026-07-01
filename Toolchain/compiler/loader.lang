@@ -188,7 +188,7 @@ class Loader {
         string src = this.readSource(abspath, hasVia, viaPath, viaLine, viaCol);
         GLexer lex = GLexer(src);
         List<Token*> tokens = lex.tokenize();
-        Parser* parser = new Parser(tokens);
+        Parser* parser = new Parser(tokens, abspath);
         Program* program = parser->parse();
 
         string baseDir = dirname(abspath);

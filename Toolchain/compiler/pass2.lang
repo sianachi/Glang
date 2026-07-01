@@ -120,7 +120,7 @@ class Pass2Checker {
     // body of fn/method is a Stmt.Block; pull stmts and call always_returns.
     bool always_returns_body(Stmt* body) {
         match (*body) {
-            Stmt.Block(stmts) => { return always_returns(stmts); }
+            Stmt.Block(stmts, locs) => { return always_returns(stmts); }
             _ => {
                 List<Stmt*> one = List<Stmt*>();
                 one.add(body);
@@ -311,7 +311,7 @@ class Pass2Checker {
 
     void check_block(Stmt* block) {
         match (*block) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 SymbolTable* saved = this.scope;
                 this.scope = this.scope->child();
                 int n = stmts.length();
@@ -329,7 +329,7 @@ class Pass2Checker {
 
     void check_stmt(Stmt* stmt) {
         match (*stmt) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 this.check_block(stmt);
             }
             Stmt.ExprStmt(e) => {

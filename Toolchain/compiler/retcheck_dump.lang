@@ -27,7 +27,7 @@ import "retcheck.lang";
 // the body is not a block, treat it as a single-element list.
 bool bodyAlwaysReturns(Stmt* body) {
     match (*body) {
-        Stmt.Block(stmts) => {
+        Stmt.Block(stmts, locs) => {
             return always_returns(stmts);
         }
         _ => {

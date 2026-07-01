@@ -470,11 +470,11 @@ class Parser {
     TokenStream* s;
     DeclParser* dp;
 
-    Parser(List<Token*> tokens) {
+    Parser(List<Token*> tokens, string file = "") {
         this.s = new TokenStream(tokens);
         TypeParser* tparser = new TypeParser(this.s);
         ExprParser* eparser = new ExprParser(this.s, tparser);
-        StmtParser* sparser = new StmtParser(this.s, tparser, eparser);
+        StmtParser* sparser = new StmtParser(this.s, tparser, eparser, file);
         eparser->setBlockHook(() -> Stmt* { return sparser->parseBlock(); });
         this.dp = new DeclParser(this.s, tparser, eparser, sparser);
     }

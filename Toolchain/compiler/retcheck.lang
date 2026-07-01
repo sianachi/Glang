@@ -44,7 +44,7 @@ bool stmt_always_returns(Stmt* stmt) {
             bool else_returns = stmt_always_returns(el);
             return then_returns && else_returns;
         }
-        Stmt.Block(stmts) => {
+        Stmt.Block(stmts, locs) => {
             return always_returns(stmts);
         }
         Stmt.UsingStmt(decl, body) => {

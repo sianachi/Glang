@@ -44,7 +44,7 @@ Decl* make_exception_decl() {
     Stmt* assign = new Stmt.AssignStmt(target, "=", value);
     List<Stmt*> ctorStmts = List<Stmt*>();
     ctorStmts.add(assign);
-    Stmt* ctorBody = new Stmt.Block(ctorStmts);
+    Stmt* ctorBody = new Stmt.Block(ctorStmts, List<string>());
 
     List<Param*> ctorParams = List<Param*>();
     ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));

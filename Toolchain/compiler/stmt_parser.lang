@@ -27,11 +27,20 @@ class StmtParser {
     TokenStream* s;
     TypeParser* tp;
     ExprParser* ep;
+    string file;   // source path for #line directives ("" = omit them)
 
-    StmtParser(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser) {
+    StmtParser(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, string file = "") {
         this.s  = stream;
         this.tp = typeParser;
         this.ep = exprParser;
+        this.file = file;
+    }
+
+    // Build the "#line N \"file\"" directive for a statement starting at `line`,
+    // or "" when we have no source path (so the emitter omits it).
+    string locStr(int line) {
+        if (len(this.file) == 0) { return ""; }
+        return "#line " + strings::intToStr(line) + " \"" + this.file + "\"";
     }
 
     // ------------------------------------------------------------------
@@ -41,11 +50,14 @@ class StmtParser {
     Stmt* parseBlock() {
         this.s->expect(TokenType.LBRACE);
         List<Stmt*> stmts = List<Stmt*>();
+        List<string> locs = List<string>();
         while (!(this.s->check(TokenType.RBRACE)) && !(this.s->isAtEnd())) {
+            int ln = this.s->peek(0)->line;
             stmts.add(this.parseStatement());
+            locs.add(this.locStr(ln));
         }
         this.s->expect(TokenType.RBRACE);
-        return new Stmt.Block(stmts);
+        return new Stmt.Block(stmts, locs);
     }
 
     Stmt* parseStatement() {

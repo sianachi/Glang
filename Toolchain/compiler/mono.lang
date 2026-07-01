@@ -678,7 +678,7 @@ class Monomorphizer {
 
     Stmt* t_block(Stmt* block, Map<string, TypeNode*> m) {
         match (*block) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 this.push_scope();
                 List<Stmt*> out = List<Stmt*>();
                 int n = stmts.length();
@@ -686,7 +686,7 @@ class Monomorphizer {
                     out.add(this.t_stmt(stmts.get(i), m));
                 }
                 this.pop_scope();
-                return new Stmt.Block(out);
+                return new Stmt.Block(out, locs);
             }
             _ => {
                 // Defensive: a non-block where a block was expected.
@@ -697,7 +697,7 @@ class Monomorphizer {
 
     Stmt* t_stmt(Stmt* s, Map<string, TypeNode*> m) {
         match (*s) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 return this.t_block(s, m);
             }
             Stmt.ExprStmt(e) => {

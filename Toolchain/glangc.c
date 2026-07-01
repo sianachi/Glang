@@ -934,6 +934,7 @@ struct Stmt {
     union {
         struct {
             List_Stmt* stmts;
+            List_string* locs;
         } as_Block;
         struct {
             Expr* expr;
@@ -999,10 +1000,11 @@ struct Stmt {
     } data;
 };
 
-static Stmt Stmt__Block_new(List_Stmt* stmts) {
+static Stmt Stmt__Block_new(List_Stmt* stmts, List_string* locs) {
     Stmt __v;
     __v.tag = Stmt__Block;
     __v.data.as_Block.stmts = stmts;
+    __v.data.as_Block.locs = locs;
     return __v;
 }
 
@@ -1374,6 +1376,7 @@ struct StmtParser {
     TokenStream* s;
     TypeParser* tp;
     ExprParser* ep;
+    char* file;
 };
 
 struct TypeParams {
@@ -1595,6 +1598,7 @@ struct CEmit {
     int64_t cidCounter;
     List_Stmt* finallyStack;
     int sanitize;
+    int emitLines;
 };
 
 struct List_string {
@@ -2225,9 +2229,10 @@ List_InterpSeg* ExprParser__splitInterp(ExprParser* self, char* raw);
 int64_t ExprParser__decodeInterpEscape(ExprParser* self, char* raw, int64_t i, StringBuilder* buf);
 int isAssignOp(TokenType t);
 int isStmtTypeKw(TokenType t);
-StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser);
-void StmtParser__init(StmtParser* self, TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser);
+StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, char* file);
+void StmtParser__init(StmtParser* self, TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, char* file);
 void StmtParser_delete(StmtParser* self);
+char* StmtParser__locStr(StmtParser* self, int64_t line);
 Stmt* StmtParser__parseBlock(StmtParser* self);
 Stmt* StmtParser__parseStatement(StmtParser* self);
 int StmtParser__isVarDeclStart(StmtParser* self);
@@ -2272,8 +2277,8 @@ char* DeclParser__parseMemberName(DeclParser* self);
 List_Param* DeclParser__parseParamList(DeclParser* self);
 Param* DeclParser__parseOneParam(DeclParser* self);
 int isConstDefault(Expr* e);
-Parser* Parser_new(List_Token* tokens);
-void Parser__init(Parser* self, List_Token* tokens);
+Parser* Parser_new(List_Token* tokens, char* file);
+void Parser__init(Parser* self, List_Token* tokens, char* file);
 void Parser_delete(Parser* self);
 Program* Parser__parse(Parser* self);
 AnalyzeError* AnalyzeError_new(char* msg, int64_t ln, int64_t c);
@@ -5125,6 +5130,7 @@ char* showStmt(Stmt* s) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             return glang_str_concat(glang_str_concat("(block ", showStmtList(stmts)), ")");
             break;
         }
@@ -6502,16 +6508,17 @@ int isStmtTypeKw(TokenType t) {
     return ((isTypeKeyword(t) || (t == TokenType__KW_FN)) || (t == TokenType__KW_VAR));
 }
 
-void StmtParser__init(StmtParser* self, TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser) {
+void StmtParser__init(StmtParser* self, TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, char* file) {
     self->s = stream;
     self->tp = typeParser;
     self->ep = exprParser;
+    self->file = file;
 }
 
-StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser) {
+StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, char* file) {
     StmtParser* self = (StmtParser*)calloc(1, sizeof(StmtParser));
     self->__cid = StmtParser__CID;
-    StmtParser__init(self, stream, typeParser, exprParser);
+    StmtParser__init(self, stream, typeParser, exprParser, file);
     return self;
 }
 
@@ -6520,14 +6527,24 @@ void StmtParser_delete(StmtParser* self) {
     free(self);
 }
 
+char* StmtParser__locStr(StmtParser* self, int64_t line) {
+    if (((int64_t)strlen(self->file) == 0)) {
+        return "";
+    }
+    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("#line ", strings__intToStr(line)), " \""), self->file), "\"");
+}
+
 Stmt* StmtParser__parseBlock(StmtParser* self) {
     TokenStream__expect(self->s, TokenType__LBRACE);
     List_Stmt* stmts = List_Stmt_new();
+    List_string* locs = List_string_new();
     while (((!TokenStream__check(self->s, TokenType__RBRACE)) && (!TokenStream__isAtEnd(self->s)))) {
+        int64_t ln = TokenStream__peek(self->s, 0)->line;
         List_Stmt__add(stmts, StmtParser__parseStatement(self));
+        List_string__add(locs, StmtParser__locStr(self, ln));
     }
     TokenStream__expect(self->s, TokenType__RBRACE);
-    return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(stmts); __up; });
+    return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(stmts, locs); __up; });
 }
 
 Stmt* StmtParser__parseStatement(StmtParser* self) {
@@ -7327,19 +7344,19 @@ int isConstDefault(Expr* e) {
     }
 }
 
-void Parser__init(Parser* self, List_Token* tokens) {
+void Parser__init(Parser* self, List_Token* tokens, char* file) {
     self->s = TokenStream_new(tokens);
     TypeParser* tparser = TypeParser_new(self->s);
     ExprParser* eparser = ExprParser_new(self->s, tparser);
-    StmtParser* sparser = StmtParser_new(self->s, tparser, eparser);
+    StmtParser* sparser = StmtParser_new(self->s, tparser, eparser, file);
     ExprParser__setBlockHook(eparser, ({ __cap_1_t* __cp__ = (__cap_1_t*)malloc(sizeof(__cap_1_t)); __cp__->sparser = sparser; (GlangFn){ (void*)__closure_1_fn, __cp__ }; }));
     self->dp = DeclParser_new(self->s, tparser, eparser, sparser);
 }
 
-Parser* Parser_new(List_Token* tokens) {
+Parser* Parser_new(List_Token* tokens, char* file) {
     Parser* self = (Parser*)calloc(1, sizeof(Parser));
     self->__cid = Parser__CID;
-    Parser__init(self, tokens);
+    Parser__init(self, tokens, file);
     return self;
 }
 
@@ -9318,6 +9335,7 @@ int stmt_always_returns(Stmt* stmt) {
         }
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             return always_returns(stmts);
             break;
         }
@@ -10106,11 +10124,12 @@ Stmt* NamespaceResolver__r_block_stmts(NamespaceResolver* self, Stmt* block, Lis
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             List_Stmt* out = List_Stmt_new();
             for (int64_t i = 0; (i < List_Stmt__length(stmts)); (++i)) {
                 List_Stmt__add(out, NamespaceResolver__r_stmt(self, List_Stmt__get(stmts, i), p));
             }
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(out); __up; });
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(out, locs); __up; });
             break;
         }
         default: {
@@ -10127,6 +10146,7 @@ Stmt* NamespaceResolver__r_stmt(NamespaceResolver* self, Stmt* s, List_string* p
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             return NamespaceResolver__r_block(self, s, p);
             break;
         }
@@ -10821,7 +10841,8 @@ Stmt* clone_stmt(Stmt* s) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(clone_stmt_list(stmts)); __up; });
+            List_string* locs = __match__.data.as_Block.locs;
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(clone_stmt_list(stmts), locs); __up; });
             break;
         }
         case Stmt__ExprStmt: {
@@ -11978,6 +11999,7 @@ Stmt* Monomorphizer__t_block(Monomorphizer* self, Stmt* block, Map_string_TypeNo
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             Monomorphizer__push_scope(self);
             List_Stmt* out = List_Stmt_new();
             int64_t n = List_Stmt__length(stmts);
@@ -11985,7 +12007,7 @@ Stmt* Monomorphizer__t_block(Monomorphizer* self, Stmt* block, Map_string_TypeNo
                 List_Stmt__add(out, Monomorphizer__t_stmt(self, List_Stmt__get(stmts, i), m));
             }
             Monomorphizer__pop_scope(self);
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(out); __up; });
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(out, locs); __up; });
             break;
         }
         default: {
@@ -12002,6 +12024,7 @@ Stmt* Monomorphizer__t_stmt(Monomorphizer* self, Stmt* s, Map_string_TypeNode* m
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             return Monomorphizer__t_block(self, s, m);
             break;
         }
@@ -14030,6 +14053,7 @@ int Pass2Checker__always_returns_body(Pass2Checker* self, Stmt* body) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             return always_returns(stmts);
             break;
         }
@@ -14228,6 +14252,7 @@ void Pass2Checker__check_block(Pass2Checker* self, Stmt* block) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             SymbolTable* saved = self->scope;
             self->scope = SymbolTable__child(self->scope);
             int64_t n = List_Stmt__length(stmts);
@@ -14251,6 +14276,7 @@ void Pass2Checker__check_stmt(Pass2Checker* self, Stmt* stmt) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             Pass2Checker__check_block(self, stmt);
             break;
         }
@@ -16628,7 +16654,7 @@ void Loader__loadFile(Loader* self, char* abspath, int hasVia, char* viaPath, in
     char* src = Loader__readSource(self, abspath, hasVia, viaPath, viaLine, viaCol);
     GLexer* lex = GLexer_new(src);
     List_Token* tokens = GLexer__tokenize(lex);
-    Parser* parser = Parser_new(tokens);
+    Parser* parser = Parser_new(tokens, abspath);
     Program* program = Parser__parse(parser);
     char* baseDir = dirname(abspath);
     List_Decl* imports = program->imports;
@@ -16876,6 +16902,7 @@ void CEmit__init(CEmit* self, GlobalEnv* e) {
     self->cidCounter = 1;
     self->finallyStack = List_Stmt_new();
     self->sanitize = (strcmp(glang_getenv("GLANG_SANITIZE"), "1") == 0);
+    self->emitLines = (strcmp(glang_getenv("GLANG_LINES"), "1") == 0);
 }
 
 CEmit* CEmit_new(GlobalEnv* e) {
@@ -17811,8 +17838,16 @@ void CEmit__emitBlockInner(CEmit* self, Stmt* block) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             int64_t n = List_Stmt__length(stmts);
+            int withLines = (self->emitLines && (List_string__length(locs) == n));
             for (int64_t i = 0; (i < n); (++i)) {
+                if (withLines) {
+                    char* loc = List_string__get(locs, i);
+                    if (((int64_t)strlen(loc) > 0)) {
+                        StringBuilder__appendLine(self->out, loc);
+                    }
+                }
                 CEmit__emitStmt(self, List_Stmt__get(stmts, i));
             }
             break;
@@ -17837,6 +17872,7 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             CEmit__ln(self, "{");
             self->indentLevel = (self->indentLevel + 1);
             CEmit__emitBlock(self, s);
@@ -19221,6 +19257,7 @@ void CEmit__collectStmtIdents(CEmit* self, Stmt* s, List_string* used, List_stri
         switch (__match__.tag) {
         case Stmt__Block: {
             List_Stmt* stmts = __match__.data.as_Block.stmts;
+            List_string* locs = __match__.data.as_Block.locs;
             int64_t n = List_Stmt__length(stmts);
             for (int64_t i = 0; (i < n); (++i)) {
                 CEmit__collectStmtIdents(self, List_Stmt__get(stmts, i), used, declared);
@@ -19721,7 +19758,7 @@ Decl* make_exception_decl(void) {
     List_Stmt__add(ctorStmts, assign);
     List_Param* ctorParams = List_Param_new();
     List_Param__add(ctorParams, Param_new("msg", ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("string"); __up; }), 0));
-    ConstructorDecl* ctor = ConstructorDecl_new(ctorParams, ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(ctorStmts); __up; }), 0, List_Expr_new());
+    ConstructorDecl* ctor = ConstructorDecl_new(ctorParams, ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(ctorStmts, List_string_new()); __up; }), 0, List_Expr_new());
     List_string* ifaces = List_string_new();
     List_string* typeParams = List_string_new();
     Map_string_TypeNode* bounds = Map_string_TypeNode_new();

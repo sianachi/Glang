@@ -223,7 +223,7 @@ void collectUsedIdents(Expr* e, List<string> used) {
 }
 void collectStmtIdents(Stmt* s, List<string> used, List<string> declared) {
     match (*s) {
-        Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { collectStmtIdents(stmts.get(i), used, declared); } }
+        Stmt.Block(stmts, locs) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { collectStmtIdents(stmts.get(i), used, declared); } }
         Stmt.ExprStmt(e) => { collectUsedIdents(e, used); }
         Stmt.VarDecl(nm, ty, init, c) => { collectUsedIdents(init, used); declared.add(nm); }
         Stmt.AssignStmt(t, op, v) => { collectUsedIdents(t, used); collectUsedIdents(v, used); }
@@ -489,7 +489,7 @@ class Interp {
         bool returned = false;
         try {
             match (*body) {
-                Stmt.Block(stmts) => {
+                Stmt.Block(stmts, locs) => {
                     int n = stmts.length();
                     for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); }
                 }
@@ -523,7 +523,7 @@ class Interp {
         this.cur().pushScope();
         try {
             match (*block) {
-                Stmt.Block(stmts) => {
+                Stmt.Block(stmts, locs) => {
                     int n = stmts.length();
                     for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); }
                 }
@@ -538,7 +538,7 @@ class Interp {
     void execStmt(Stmt* s) {
         this.step();   // charge every executed statement (covers recursion)
         match (*s) {
-            Stmt.Block(stmts) => { this.execBlock(s); }
+            Stmt.Block(stmts, locs) => { this.execBlock(s); }
             Stmt.ExprStmt(e) => { this.eval(e); }
             Stmt.VarDecl(nm, ty, init, c) => {
                 RtVal* v = this.coerce(this.eval(init), ty);
@@ -1541,7 +1541,7 @@ class Interp {
 
     void execBody(Stmt* body) {
         match (*body) {
-            Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); } }
+            Stmt.Block(stmts, locs) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.execStmt(stmts.get(i)); } }
             _ => { this.execStmt(body); }
         }
     }

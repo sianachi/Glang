@@ -243,7 +243,7 @@ class MatchArm {
 }
 
 union Stmt {
-    Block { List<Stmt*> stmts; }
+    Block { List<Stmt*> stmts; List<string> locs; }   // locs[i]: opt-in "#line" directive for stmts[i] (empty when unknown)
     ExprStmt { Expr* expr; }
     VarDecl { string name; TypeNode* declType; Expr* initializer; bool isConst; }
     AssignStmt { Expr* target; string op; Expr* value; }
@@ -301,7 +301,7 @@ string showPattern(Pattern* p) {
 
 string showStmt(Stmt* s) {
     match (*s) {
-        Stmt.Block(stmts)            => { return "(block " + showStmtList(stmts) + ")"; }
+        Stmt.Block(stmts, locs)      => { return "(block " + showStmtList(stmts) + ")"; }
         Stmt.ExprStmt(e)             => { return "(expr " + showExpr(e) + ")"; }
         Stmt.VarDecl(nm, ty, init, c) => {
             string pfx = "";

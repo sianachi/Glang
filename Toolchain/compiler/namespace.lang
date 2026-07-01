@@ -542,12 +542,12 @@ class NamespaceResolver {
     // Rewrite a Block's statements without pushing a new scope.
     Stmt* r_block_stmts(Stmt* block, List<string> p) {
         match (*block) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 List<Stmt*> out = List<Stmt*>();
                 for (int i = 0; i < stmts.length(); ++i) {
                     out.add(this.r_stmt(stmts.get(i), p));
                 }
-                return new Stmt.Block(out);
+                return new Stmt.Block(out, locs);
             }
             _ => { return this.r_stmt(block, p); }
         }
@@ -555,7 +555,7 @@ class NamespaceResolver {
 
     Stmt* r_stmt(Stmt* s, List<string> p) {
         match (*s) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 return this.r_block(s, p);
             }
             Stmt.ExprStmt(e) => {

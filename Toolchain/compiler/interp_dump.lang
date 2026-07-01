@@ -44,7 +44,7 @@ Decl* make_exception_decl() {
     ctorStmts.add(assign);
     List<Param*> ctorParams = List<Param*>();
     ctorParams.add(new Param("msg", new TypeNode.NamedType("string"), false));
-    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, new Stmt.Block(ctorStmts), false, List<Expr*>());
+    ConstructorDecl* ctor = new ConstructorDecl(ctorParams, new Stmt.Block(ctorStmts, List<string>()), false, List<Expr*>());
     List<string> ifaces = List<string>();
     List<string> typeParams = List<string>();
     Map<string, TypeNode*> bounds = Map<string, TypeNode*>();

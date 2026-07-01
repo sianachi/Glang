@@ -283,8 +283,8 @@ MatchArm* clone_arm(MatchArm* arm) {
 
 Stmt* clone_stmt(Stmt* s) {
     match (*s) {
-        Stmt.Block(stmts) => {
-            return new Stmt.Block(clone_stmt_list(stmts));
+        Stmt.Block(stmts, locs) => {
+            return new Stmt.Block(clone_stmt_list(stmts), locs);
         }
         Stmt.ExprStmt(e) => {
             return new Stmt.ExprStmt(clone_expr(e));

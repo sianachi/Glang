@@ -144,6 +144,7 @@ class CEmit {
     int cidCounter;
     List<Stmt*> finallyStack;            // enclosing try-finally blocks; null entry = loop boundary
     bool sanitize;                       // GLANG_SANITIZE=1: emit bounds/UAF checks
+    bool emitLines;                      // GLANG_LINES=1: emit #line directives back to .lang source
 
     CEmit(GlobalEnv* e) {
         this.out = StringBuilder();
@@ -163,6 +164,7 @@ class CEmit {
         this.cidCounter = 1;
         this.finallyStack = List<Stmt*>();
         this.sanitize = getEnv("GLANG_SANITIZE") == "1";
+        this.emitLines = getEnv("GLANG_LINES") == "1";
     }
 
     // ── Class-info helpers (from the real GlobalEnv) ─────────────────────
@@ -814,9 +816,16 @@ class CEmit {
     // emit the statements of a Block (without extra braces/scope push beyond what caller set)
     void emitBlockInner(Stmt* block) {
         match (*block) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 int n = stmts.length();
-                for (int i = 0; i < n; ++i) { this.emitStmt(stmts.get(i)); }
+                bool withLines = this.emitLines && locs.length() == n;
+                for (int i = 0; i < n; ++i) {
+                    if (withLines) {
+                        string loc = locs.get(i);
+                        if (len(loc) > 0) { this.out.appendLine(loc); }
+                    }
+                    this.emitStmt(stmts.get(i));
+                }
             }
             _ => { this.emitStmt(block); }
         }
@@ -831,7 +840,7 @@ class CEmit {
     // ── Statements ─────────────────────────────────────────────────────────
     void emitStmt(Stmt* s) {
         match (*s) {
-            Stmt.Block(stmts) => {
+            Stmt.Block(stmts, locs) => {
                 this.ln("{");
                 this.indentLevel = this.indentLevel + 1;
                 this.emitBlock(s);
@@ -1516,7 +1525,7 @@ class CEmit {
     }
     void collectStmtIdents(Stmt* s, List<string> used, List<string> declared) {
         match (*s) {
-            Stmt.Block(stmts) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.collectStmtIdents(stmts.get(i), used, declared); } }
+            Stmt.Block(stmts, locs) => { int n = stmts.length(); for (int i = 0; i < n; ++i) { this.collectStmtIdents(stmts.get(i), used, declared); } }
             Stmt.ExprStmt(e) => { this.collectUsedIdents(e, used); }
             Stmt.VarDecl(nm, ty, init, c) => { this.collectUsedIdents(init, used); declared.add(nm); }
             Stmt.AssignStmt(t, op, v) => { this.collectUsedIdents(t, used); this.collectUsedIdents(v, used); }

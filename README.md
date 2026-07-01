@@ -1404,6 +1404,13 @@ produced by an `alloc` (e.g. `bytesFromString` blocks) pass through unchecked.
 Separately, `GLANG_DEBUG_ALLOC=1` enables a lighter runtime double-free/leak
 check without recompiling.
 
+**Source-level debugging of the compiled backend.** Compiling with
+`GLANG_LINES=1` makes the C emitter prefix each statement with a `#line N
+"<source>"` directive, so gcc warnings/errors and a debugger (gdb/lldb) report
+positions in the original `.lang` file rather than in the generated C. Like the
+sanitizer it is opt-in: without the flag the emitted C carries no directives and
+is byte-for-byte identical to before.
+
 ---
 
 ## 17. Future Work
@@ -1425,11 +1432,14 @@ inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
 type, **method dispatch through interface pointers**, **terminal-control
 built-ins**, **filesystem/environment built-ins** (`makeDir`/`isDir`/
 `renameFile`/`removeFile`/`getEnv`), an opt-in compiled-mode **sanitizer**
-(`GLANG_SANITIZE=1`), and a **`shell`** built-in
+(`GLANG_SANITIZE=1`), opt-in **`#line` directives** (`GLANG_LINES=1`) mapping
+generated C back to `.lang` source, and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal
 editor, and a task manager). The standard library also gained `std/format.lang`
-(printf-style formatting) and `std/hashmap.lang` (a hashed map).
+(printf-style formatting), `std/hashmap.lang` (a hashed map), `std/regex.lang`
+(a regular-expression engine), and `std/test.lang` (an in-language unit-test
+framework).
 The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
