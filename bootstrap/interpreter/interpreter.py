@@ -486,26 +486,38 @@ class Interpreter:
             raise GlangThrowException(exc_val, stmt.line, stmt.col)
 
         elif isinstance(stmt, TryCatchStmt):
+            run_finally = True
             try:
-                self._exec_block(stmt.body)
-            except GlangThrowException as exc:
-                thrown_class = self._exception_class(exc.value)
-                chain = superclass_chain(thrown_class, self._env)
-                handled = False
-                for clause in stmt.catches:
-                    catch_class = clause.catch_type.base.name
-                    if catch_class in chain:
-                        self._frame.push_scope()
-                        try:
-                            box = self._new_box(exc.value)
-                            self._frame.define(clause.var_name, box)
-                            self._exec_block(clause.body)
-                        finally:
-                            self._frame.pop_scope()
-                        handled = True
-                        break
-                if not handled:
-                    raise
+                try:
+                    self._exec_block(stmt.body)
+                except GlangThrowException as exc:
+                    thrown_class = self._exception_class(exc.value)
+                    chain = superclass_chain(thrown_class, self._env)
+                    handled = False
+                    for clause in stmt.catches:
+                        catch_class = clause.catch_type.base.name
+                        if catch_class in chain:
+                            self._frame.push_scope()
+                            try:
+                                box = self._new_box(exc.value)
+                                self._frame.define(clause.var_name, box)
+                                self._exec_block(clause.body)
+                            finally:
+                                self._frame.pop_scope()
+                            handled = True
+                            break
+                    if not handled:
+                        raise
+            except GlangExitException:
+                # exit() terminates without running finally, matching the
+                # compiled backend's C exit().
+                run_finally = False
+                raise
+            finally:
+                # Runs on every other exit path: normal, caught, re-raised, or a
+                # return/break/continue leaving the block.
+                if run_finally and stmt.finally_block is not None:
+                    self._exec_block(stmt.finally_block)
 
         elif isinstance(stmt, MatchStmt):
             self._exec_match(stmt)

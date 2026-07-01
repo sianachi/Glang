@@ -235,10 +235,11 @@ void collectStmtIdents(Stmt* s, List<string> used, List<string> declared) {
         Stmt.ReturnStmt(v) => { if (v != null) { collectUsedIdents(v, used); } }
         Stmt.ThrowStmt(v) => { collectUsedIdents(v, used); }
         Stmt.UsingStmt(decl, body) => { collectStmtIdents(decl, used, declared); collectStmtIdents(body, used, declared); }
-        Stmt.TryCatchStmt(body, catches) => {
+        Stmt.TryCatchStmt(body, catches, finallyBlock) => {
             collectStmtIdents(body, used, declared);
             int n = catches.length();
             for (int i = 0; i < n; ++i) { CatchClause* cc = catches.get(i); declared.add(cc->varName); collectStmtIdents(cc->body, used, declared); }
+            if (finallyBlock != null) { collectStmtIdents(finallyBlock, used, declared); }
         }
         Stmt.MatchStmt(scrut, arms) => {
             collectUsedIdents(scrut, used);
@@ -574,7 +575,7 @@ class Interp {
             Stmt.ContinueStmt() => { throw new ContinueSig(); }
             Stmt.ThrowStmt(v) => { throw new ThrowSig(this.eval(v)); }
             Stmt.MatchStmt(scrut, arms) => { this.execMatch(scrut, arms); }
-            Stmt.TryCatchStmt(body, catches) => { this.execTryCatch(body, catches); }
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => { this.execTryCatch(body, catches, finallyBlock); }
             Stmt.UsingStmt(decl, body) => { this.execUsing(decl, body); }
             _ => { throw new RtError("unsupported statement"); }
         }
@@ -675,7 +676,22 @@ class Interp {
         return "";
     }
 
-    void execTryCatch(Stmt* body, List<CatchClause*> catches) {
+    void execTryCatch(Stmt* body, List<CatchClause*> catches, Stmt* finallyBlock) {
+        if (finallyBlock == null) {
+            this.execTryCatchInner(body, catches);
+            return;
+        }
+        // The finally block runs on every exit path except exit() (which, like
+        // the compiled backend's C exit(), terminates without unwinding).
+        try {
+            this.execTryCatchInner(body, catches);
+        }
+        catch (ExitSig* e) { throw e; }
+        catch (Exception* ex) { this.execBlock(finallyBlock); throw ex; }
+        this.execBlock(finallyBlock);
+    }
+
+    void execTryCatchInner(Stmt* body, List<CatchClause*> catches) {
         try { this.execBlock(body); }
         catch (ThrowSig* ex) {
             string thrown = this.excClass(ex->value);

@@ -623,7 +623,7 @@ class NamespaceResolver {
             Stmt.ThrowStmt(value) => {
                 return new Stmt.ThrowStmt(this.r_expr(value, p));
             }
-            Stmt.TryCatchStmt(body, catches) => {
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => {
                 Stmt* nbody = this.r_block(body, p);
                 List<CatchClause*> ncatches = List<CatchClause*>();
                 for (int i = 0; i < catches.length(); ++i) {
@@ -632,7 +632,9 @@ class NamespaceResolver {
                     Stmt* ccb = this.r_block(cc->body, p);
                     ncatches.add(new CatchClause(nct, cc->varName, ccb));
                 }
-                return new Stmt.TryCatchStmt(nbody, ncatches);
+                Stmt* nfin = null;
+                if (finallyBlock != null) { nfin = this.r_block(finallyBlock, p); }
+                return new Stmt.TryCatchStmt(nbody, ncatches, nfin);
             }
             Stmt.MatchStmt(scrut, arms) => {
                 Expr* nscrut = this.r_expr(scrut, p);

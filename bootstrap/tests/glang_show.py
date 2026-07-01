@@ -89,7 +89,8 @@ def show_stmt(s) -> str:
     if isinstance(s, A.ThrowStmt):       return f"(throw {show_expr(s.value)})"
     if isinstance(s, A.TryCatchStmt):
         cs = " ".join(f"(catch {_type_str(c.catch_type)} {c.var_name} {show_stmt(c.body)})" for c in s.catches)
-        return f"(try {show_stmt(s.body)} [{cs}])"
+        fin = f" (finally {show_stmt(s.finally_block)})" if s.finally_block is not None else ""
+        return f"(try {show_stmt(s.body)} [{cs}]{fin})"
     if isinstance(s, A.MatchStmt):
         arms = " ".join(f"(arm {_pattern(a.pattern)} {show_stmt(a.body)})" for a in s.arms)
         return f"(match {show_expr(s.scrutinee)} [{arms}])"

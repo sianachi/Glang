@@ -23,6 +23,7 @@ _EXPECTED = os.path.join(_ROOT, "Toolchain", "examples", "expected")
 NATIVE_EXAMPLES = [
     "interfaces",
     "ternary",
+    "exceptions_basic",
 ]
 
 

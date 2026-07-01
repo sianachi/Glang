@@ -325,12 +325,22 @@ class StmtParser:
                 line=var_tok.line,
                 col=var_tok.col,
             ))
-        if not catches:
+        # Optional finally block. `finally` is context-sensitive (not a reserved
+        # keyword), so it appears as an identifier immediately after the catches.
+        finally_block = None
+        peek = self._s.peek()
+        if peek.type == TokenType.IDENT and peek.value == "finally":
+            self._s.advance()  # consume 'finally'
+            finally_block = self.parse_block()
+        if not catches and finally_block is None:
             raise ParseError(
-                "try block requires at least one catch clause",
+                "try block requires at least one catch clause or a finally block",
                 tok.line, tok.col,
             )
-        return TryCatchStmt(body=body, catches=catches, line=tok.line, col=tok.col)
+        return TryCatchStmt(
+            body=body, catches=catches, finally_block=finally_block,
+            line=tok.line, col=tok.col,
+        )
 
     def _parse_match(self) -> MatchStmt:
         tok = self._s.advance()  # consume 'match'

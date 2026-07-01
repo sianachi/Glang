@@ -255,7 +255,7 @@ union Stmt {
     ContinueStmt { }
     ReturnStmt { Expr* value; }   // null if no value
     ThrowStmt { Expr* value; }
-    TryCatchStmt { Stmt* body; List<CatchClause*> catches; }
+    TryCatchStmt { Stmt* body; List<CatchClause*> catches; Stmt* finallyBlock; }   // finallyBlock null if absent
     MatchStmt { Expr* scrutinee; List<MatchArm*> arms; }
 }
 
@@ -327,7 +327,7 @@ string showStmt(Stmt* s) {
         Stmt.ContinueStmt()          => { return "(continue)"; }
         Stmt.ReturnStmt(v)           => { return "(return " + showOptExpr(v) + ")"; }
         Stmt.ThrowStmt(v)            => { return "(throw " + showExpr(v) + ")"; }
-        Stmt.TryCatchStmt(body, catches) => {
+        Stmt.TryCatchStmt(body, catches, finallyBlock) => {
             StringBuilder sb = StringBuilder();
             sb.append("(try ");
             sb.append(showStmt(body));
@@ -338,7 +338,9 @@ string showStmt(Stmt* s) {
                 CatchClause* cc = catches.get(i);
                 sb.append("(catch " + showType(cc->catchType) + " " + cc->varName + " " + showStmt(cc->body) + ")");
             }
-            sb.append("])");
+            sb.append("]");
+            if (finallyBlock != null) { sb.append(" (finally " + showStmt(finallyBlock) + ")"); }
+            sb.append(")");
             return sb.build();
         }
         Stmt.MatchStmt(scrut, arms)  => {

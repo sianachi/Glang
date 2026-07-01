@@ -480,7 +480,7 @@ class Pass2Checker {
                 this.checkExceptionPtr(val_t, "'throw' requires a pointer to an Exception subclass, got '",
                                        "'throw' requires a pointer to a class, got '");
             }
-            Stmt.TryCatchStmt(body, catches) => {
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => {
                 this.check_block(body);
                 int cn = catches.length();
                 for (int i = 0; i < cn; ++i) {
@@ -493,6 +493,7 @@ class Pass2Checker {
                     this.check_block(clause->body);
                     this.scope = saved_scope;
                 }
+                if (finallyBlock != null) { this.check_block(finallyBlock); }
             }
             Stmt.MatchStmt(scrutinee, arms) => {
                 this.check_match(stmt);

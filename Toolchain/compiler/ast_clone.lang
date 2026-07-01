@@ -328,8 +328,10 @@ Stmt* clone_stmt(Stmt* s) {
         Stmt.ThrowStmt(v) => {
             return new Stmt.ThrowStmt(clone_expr(v));
         }
-        Stmt.TryCatchStmt(body, catches) => {
-            return new Stmt.TryCatchStmt(clone_stmt(body), clone_catch_list(catches));
+        Stmt.TryCatchStmt(body, catches, finallyBlock) => {
+            Stmt* fb = null;
+            if (finallyBlock != null) { fb = clone_stmt(finallyBlock); }
+            return new Stmt.TryCatchStmt(clone_stmt(body), clone_catch_list(catches), fb);
         }
         Stmt.MatchStmt(scrut, arms) => {
             return new Stmt.MatchStmt(clone_expr(scrut), clone_arm_list(arms));

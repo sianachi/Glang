@@ -23,7 +23,9 @@ bool stmt_always_returns(Stmt* stmt) {
         Stmt.ThrowStmt(v) => {
             return true;
         }
-        Stmt.TryCatchStmt(body, catches) => {
+        Stmt.TryCatchStmt(body, catches, finallyBlock) => {
+            // A finally that always returns makes the whole statement return.
+            if (finallyBlock != null && stmt_always_returns(finallyBlock)) { return true; }
             bool body_returns = stmt_always_returns(body);
             bool handlers_return = true;
             int n = catches.length();

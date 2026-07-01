@@ -414,6 +414,8 @@ class Monomorphizer:
                 clause.catch_type = self._t_type(clause.catch_type, m)
                 with self._scope():
                     self._t_block(clause.body, m)
+            if s.finally_block is not None:
+                self._t_block(s.finally_block, m)
         elif isinstance(s, MatchStmt):
             self._t_expr(s.scrutinee, m)
             for arm in s.arms:

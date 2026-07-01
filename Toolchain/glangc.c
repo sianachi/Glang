@@ -970,6 +970,7 @@ struct Stmt {
         struct {
             Stmt* body;
             List_CatchClause* catches;
+            Stmt* finallyBlock;
         } as_TryCatchStmt;
         struct {
             Expr* scrutinee;
@@ -1091,11 +1092,12 @@ static Stmt Stmt__ThrowStmt_new(Expr* value) {
     return __v;
 }
 
-static Stmt Stmt__TryCatchStmt_new(Stmt* body, List_CatchClause* catches) {
+static Stmt Stmt__TryCatchStmt_new(Stmt* body, List_CatchClause* catches, Stmt* finallyBlock) {
     Stmt __v;
     __v.tag = Stmt__TryCatchStmt;
     __v.data.as_TryCatchStmt.body = body;
     __v.data.as_TryCatchStmt.catches = catches;
+    __v.data.as_TryCatchStmt.finallyBlock = finallyBlock;
     return __v;
 }
 
@@ -1565,6 +1567,7 @@ struct CEmit {
     List_string* thunksEmitted;
     Map_string_int* classCids;
     int64_t cidCounter;
+    List_Stmt* finallyStack;
 };
 
 struct List_string {
@@ -2570,7 +2573,10 @@ void CEmit__emitEnum(CEmit* self, char* rawName, List_EnumVariant* variants);
 void CEmit__emitUnionStruct(CEmit* self, char* rawName, List_UnionVariant* variants);
 List_FieldDecl* CEmit__unionVariantFields(CEmit* self, char* un, char* vn);
 char* CEmit__throwClass(CEmit* self, Expr* v);
-void CEmit__emitTryCatch(CEmit* self, Stmt* body, List_CatchClause* catches);
+void CEmit__emitFinallyBlock(CEmit* self, Stmt* f);
+int CEmit__hasPendingFinally(CEmit* self, int forReturn);
+void CEmit__emitPendingFinally(CEmit* self, int forReturn);
+void CEmit__emitTryCatch(CEmit* self, Stmt* body, List_CatchClause* catches, Stmt* finallyBlock);
 void CEmit__emitMatch(CEmit* self, Expr* scrutinee, List_MatchArm* arms);
 char* CEmit__buildParamListWith(CEmit* self, List_Param* params, char* extraFirst);
 void CEmit__emitPrototype(CEmit* self, Decl* d);
@@ -5050,6 +5056,7 @@ char* showStmt(Stmt* s) {
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
             StringBuilder* sb = StringBuilder_new();
             StringBuilder__append(sb, "(try ");
             StringBuilder__append(sb, showStmt(body));
@@ -5062,7 +5069,11 @@ char* showStmt(Stmt* s) {
                 CatchClause* cc = List_CatchClause__get(catches, i);
                 StringBuilder__append(sb, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(catch ", showType(cc->catchType)), " "), cc->varName), " "), showStmt(cc->body)), ")"));
             }
-            StringBuilder__append(sb, "])");
+            StringBuilder__append(sb, "]");
+            if ((finallyBlock != NULL)) {
+                StringBuilder__append(sb, glang_str_concat(glang_str_concat(" (finally ", showStmt(finallyBlock)), ")"));
+            }
+            StringBuilder__append(sb, ")");
             return StringBuilder__build(sb);
             break;
         }
@@ -6449,10 +6460,16 @@ Stmt* StmtParser__parseTryCatch(StmtParser* self) {
         Stmt* handler = StmtParser__parseBlock(self);
         List_CatchClause__add(catches, CatchClause_new(catchType, varTok->value, handler));
     }
-    if ((List_CatchClause__length(catches) == 0)) {
-        GLANG_THROW(ParseError_new("try block requires at least one catch clause", tok->line, tok->col), "ParseError");
+    Stmt* finallyBlock = NULL;
+    Token* pk = TokenStream__peek(self->s, 0);
+    if (((pk->type == TokenType__IDENT) && (strcmp(pk->value, "finally") == 0))) {
+        TokenStream__advance(self->s);
+        finallyBlock = StmtParser__parseBlock(self);
     }
-    return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(body, catches); __up; });
+    if (((List_CatchClause__length(catches) == 0) && (finallyBlock == NULL))) {
+        GLANG_THROW(ParseError_new("try block requires at least one catch clause or a finally block", tok->line, tok->col), "ParseError");
+    }
+    return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(body, catches, finallyBlock); __up; });
 }
 
 Stmt* StmtParser__parseMatch(StmtParser* self) {
@@ -8800,6 +8817,10 @@ int stmt_always_returns(Stmt* stmt) {
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
+            if (((finallyBlock != NULL) && stmt_always_returns(finallyBlock))) {
+                return 1;
+            }
             int body_returns = stmt_always_returns(body);
             int handlers_return = 1;
             int64_t n = List_CatchClause__length(catches);
@@ -9748,6 +9769,7 @@ Stmt* NamespaceResolver__r_stmt(NamespaceResolver* self, Stmt* s, List_string* p
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
             Stmt* nbody = NamespaceResolver__r_block(self, body, p);
             List_CatchClause* ncatches = List_CatchClause_new();
             for (int64_t i = 0; (i < List_CatchClause__length(catches)); (++i)) {
@@ -9756,7 +9778,11 @@ Stmt* NamespaceResolver__r_stmt(NamespaceResolver* self, Stmt* s, List_string* p
                 Stmt* ccb = NamespaceResolver__r_block(self, cc->body, p);
                 List_CatchClause__add(ncatches, CatchClause_new(nct, cc->varName, ccb));
             }
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(nbody, ncatches); __up; });
+            Stmt* nfin = NULL;
+            if ((finallyBlock != NULL)) {
+                nfin = NamespaceResolver__r_block(self, finallyBlock, p);
+            }
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(nbody, ncatches, nfin); __up; });
             break;
         }
         case Stmt__MatchStmt: {
@@ -10413,7 +10439,12 @@ Stmt* clone_stmt(Stmt* s) {
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(clone_stmt(body), clone_catch_list(catches)); __up; });
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
+            Stmt* fb = NULL;
+            if ((finallyBlock != NULL)) {
+                fb = clone_stmt(finallyBlock);
+            }
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(clone_stmt(body), clone_catch_list(catches), fb); __up; });
             break;
         }
         case Stmt__MatchStmt: {
@@ -11619,6 +11650,7 @@ Stmt* Monomorphizer__t_stmt(Monomorphizer* self, Stmt* s, Map_string_TypeNode* m
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
             Stmt* nbody = Monomorphizer__t_block(self, body, m);
             List_CatchClause* ncatches = List_CatchClause_new();
             int64_t n = List_CatchClause__length(catches);
@@ -11630,7 +11662,11 @@ Stmt* Monomorphizer__t_stmt(Monomorphizer* self, Stmt* s, Map_string_TypeNode* m
                 Monomorphizer__pop_scope(self);
                 List_CatchClause__add(ncatches, CatchClause_new(nct, cc->varName, ccbody));
             }
-            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(nbody, ncatches); __up; });
+            Stmt* nfin = NULL;
+            if ((finallyBlock != NULL)) {
+                nfin = Monomorphizer__t_block(self, finallyBlock, m);
+            }
+            return ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__TryCatchStmt_new(nbody, ncatches, nfin); __up; });
             break;
         }
         case Stmt__MatchStmt: {
@@ -13935,6 +13971,7 @@ void Pass2Checker__check_stmt(Pass2Checker* self, Stmt* stmt) {
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
             Pass2Checker__check_block(self, body);
             int64_t cn = List_CatchClause__length(catches);
             for (int64_t i = 0; (i < cn); (++i)) {
@@ -13946,6 +13983,9 @@ void Pass2Checker__check_stmt(Pass2Checker* self, Stmt* stmt) {
                 SymbolTable__define(self->scope, clause->varName, ct, 0, 0, 0);
                 Pass2Checker__check_block(self, clause->body);
                 self->scope = saved_scope;
+            }
+            if ((finallyBlock != NULL)) {
+                Pass2Checker__check_block(self, finallyBlock);
             }
             break;
         }
@@ -16300,6 +16340,7 @@ void CEmit__init(CEmit* self, GlobalEnv* e) {
     self->thunksEmitted = List_string_new();
     self->classCids = Map_string_int_new();
     self->cidCounter = 1;
+    self->finallyStack = List_Stmt_new();
 }
 
 CEmit* CEmit_new(GlobalEnv* e) {
@@ -16764,12 +16805,64 @@ char* CEmit__throwClass(CEmit* self, Expr* v) {
     }
 }
 
-void CEmit__emitTryCatch(CEmit* self, Stmt* body, List_CatchClause* catches) {
+void CEmit__emitFinallyBlock(CEmit* self, Stmt* f) {
+    CEmit__ln(self, "{");
+    self->indentLevel = (self->indentLevel + 1);
+    CEmit__emitBlock(self, f);
+    self->indentLevel = (self->indentLevel - 1);
+    CEmit__ln(self, "}");
+}
+
+int CEmit__hasPendingFinally(CEmit* self, int forReturn) {
+    int64_t i = (List_Stmt__length(self->finallyStack) - 1);
+    while ((i >= 0)) {
+        Stmt* f = List_Stmt__get(self->finallyStack, i);
+        if ((f == NULL)) {
+            if ((!forReturn)) {
+                return 0;
+            }
+        } else {
+            return 1;
+        }
+        i = (i - 1);
+    }
+    return 0;
+}
+
+void CEmit__emitPendingFinally(CEmit* self, int forReturn) {
+    List_Stmt* saved = List_Stmt_new();
+    int stop = 0;
+    while (((List_Stmt__length(self->finallyStack) > 0) && (!stop))) {
+        int64_t last = (List_Stmt__length(self->finallyStack) - 1);
+        Stmt* f = List_Stmt__get(self->finallyStack, last);
+        List_Stmt__removeAt(self->finallyStack, last);
+        List_Stmt__add(saved, f);
+        if ((f == NULL)) {
+            if ((!forReturn)) {
+                stop = 1;
+            }
+        } else {
+            CEmit__emitFinallyBlock(self, f);
+        }
+    }
+    for (int64_t i = (List_Stmt__length(saved) - 1); (i >= 0); (--i)) {
+        List_Stmt__add(self->finallyStack, List_Stmt__get(saved, i));
+    }
+}
+
+void CEmit__emitTryCatch(CEmit* self, Stmt* body, List_CatchClause* catches, Stmt* finallyBlock) {
+    int hasFin = (finallyBlock != NULL);
+    if (hasFin) {
+        List_Stmt__add(self->finallyStack, finallyBlock);
+    }
     CEmit__ln(self, "GLANG_TRY_BEGIN");
     self->indentLevel = (self->indentLevel + 1);
     CEmit__emitBlock(self, body);
     self->indentLevel = (self->indentLevel - 1);
     CEmit__ln(self, "GLANG_TRY_END");
+    if (hasFin) {
+        List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
+    }
     int64_t nc = List_CatchClause__length(catches);
     for (int64_t i = 0; (i < nc); (++i)) {
         CatchClause* c = List_CatchClause__get(catches, i);
@@ -16783,13 +16876,39 @@ void CEmit__emitTryCatch(CEmit* self, Stmt* body, List_CatchClause* catches) {
         CEmit__ln(self, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(ptrType, " "), c->varName), " = ("), ptrType), ")__exc_frame__.obj;"));
         CEmit__pushScope(self);
         CEmit__define(self, c->varName, glang_str_concat(baseType, "*"));
+        if (hasFin) {
+            List_Stmt__add(self->finallyStack, finallyBlock);
+        }
         CEmit__emitBlockInner(self, c->body);
+        if (hasFin) {
+            List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
+        }
         CEmit__popScope(self);
         self->indentLevel = (self->indentLevel - 1);
         CEmit__ln(self, "}");
     }
-    CEmit__ln(self, "else { GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name); }");
+    char* reThrow = "GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name);";
+    if ((nc == 0)) {
+        if (hasFin) {
+            CEmit__emitFinallyBlock(self, finallyBlock);
+        }
+        CEmit__ln(self, reThrow);
+    } else {
+        if (hasFin) {
+            CEmit__ln(self, "else {");
+            self->indentLevel = (self->indentLevel + 1);
+            CEmit__emitFinallyBlock(self, finallyBlock);
+            CEmit__ln(self, reThrow);
+            self->indentLevel = (self->indentLevel - 1);
+            CEmit__ln(self, "}");
+        } else {
+            CEmit__ln(self, glang_str_concat(glang_str_concat("else { ", reThrow), " }"));
+        }
+    }
     CEmit__ln(self, "GLANG_CATCH_DONE");
+    if (hasFin) {
+        CEmit__emitFinallyBlock(self, finallyBlock);
+    }
 }
 
 void CEmit__emitMatch(CEmit* self, Expr* scrutinee, List_MatchArm* arms) {
@@ -17197,10 +17316,26 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
         }
         case Stmt__ReturnStmt: {
             Expr* v = __match__.data.as_ReturnStmt.value;
-            if ((v == NULL)) {
-                CEmit__ln(self, "return;");
+            if ((!CEmit__hasPendingFinally(self, 1))) {
+                if ((v == NULL)) {
+                    CEmit__ln(self, "return;");
+                } else {
+                    CEmit__ln(self, glang_str_concat(glang_str_concat("return ", CEmit__emitExpr(self, v)), ";"));
+                }
             } else {
-                CEmit__ln(self, glang_str_concat(glang_str_concat("return ", CEmit__emitExpr(self, v)), ";"));
+                if ((v == NULL)) {
+                    CEmit__emitPendingFinally(self, 1);
+                    CEmit__ln(self, "return;");
+                } else {
+                    char* rt = CEmit__infer(self, v);
+                    char* cty = "void*";
+                    if ((strcmp(rt, "") != 0)) {
+                        cty = cTypeStrC(rt, self->env);
+                    }
+                    CEmit__ln(self, glang_str_concat(glang_str_concat(glang_str_concat(cty, " __glang_ret = "), CEmit__emitExpr(self, v)), ";"));
+                    CEmit__emitPendingFinally(self, 1);
+                    CEmit__ln(self, "return __glang_ret;");
+                }
             }
             break;
         }
@@ -17251,7 +17386,9 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
             Stmt* body = __match__.data.as_WhileStmt.body;
             CEmit__ln(self, glang_str_concat(glang_str_concat("while (", CEmit__emitExpr(self, cond)), ") {"));
             self->indentLevel = (self->indentLevel + 1);
+            List_Stmt__add(self->finallyStack, NULL);
             CEmit__emitBlock(self, body);
+            List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
             self->indentLevel = (self->indentLevel - 1);
             CEmit__ln(self, "}");
             break;
@@ -17267,7 +17404,9 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
             char* postStr = CEmit__renderForPost(self, post);
             CEmit__ln(self, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("for (", initStr), "; "), condStr), "; "), postStr), ") {"));
             self->indentLevel = (self->indentLevel + 1);
+            List_Stmt__add(self->finallyStack, NULL);
             CEmit__emitBlockInner(self, body);
+            List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
             self->indentLevel = (self->indentLevel - 1);
             CEmit__ln(self, "}");
             CEmit__popScope(self);
@@ -17278,7 +17417,9 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
             Expr* cond = __match__.data.as_DoWhileStmt.condition;
             CEmit__ln(self, "do {");
             self->indentLevel = (self->indentLevel + 1);
+            List_Stmt__add(self->finallyStack, NULL);
             CEmit__emitBlock(self, body);
+            List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
             self->indentLevel = (self->indentLevel - 1);
             CEmit__ln(self, glang_str_concat(glang_str_concat("} while (", CEmit__emitExpr(self, cond)), ");"));
             break;
@@ -17306,7 +17447,8 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
-            CEmit__emitTryCatch(self, body, catches);
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
+            CEmit__emitTryCatch(self, body, catches, finallyBlock);
             break;
         }
         case Stmt__UsingStmt: {
@@ -17316,10 +17458,12 @@ void CEmit__emitStmt(CEmit* self, Stmt* s) {
             break;
         }
         case Stmt__BreakStmt: {
+            CEmit__emitPendingFinally(self, 0);
             CEmit__ln(self, "break;");
             break;
         }
         case Stmt__ContinueStmt: {
+            CEmit__emitPendingFinally(self, 0);
             CEmit__ln(self, "continue;");
             break;
         }
@@ -17354,6 +17498,7 @@ void CEmit__emitForeach(CEmit* self, TypeNode* varType, char* varName, Expr* ite
     CEmit__define(self, varName, vt);
     CEmit__ln(self, "{");
     self->indentLevel = (self->indentLevel + 1);
+    List_Stmt__add(self->finallyStack, NULL);
     if ((strcmp(iterType, "string") == 0)) {
         CEmit__ln(self, glang_str_concat(glang_str_concat("char* __it__ = ", iterStr), ";"));
         CEmit__ln(self, "int64_t __n__ = (int64_t)strlen(__it__);");
@@ -17393,6 +17538,7 @@ void CEmit__emitForeach(CEmit* self, TypeNode* varType, char* varName, Expr* ite
     }
     self->indentLevel = (self->indentLevel - 1);
     CEmit__ln(self, "}");
+    List_Stmt__removeAt(self->finallyStack, (List_Stmt__length(self->finallyStack) - 1));
     self->indentLevel = (self->indentLevel - 1);
     CEmit__ln(self, "}");
     CEmit__popScope(self);
@@ -18599,12 +18745,16 @@ void CEmit__collectStmtIdents(CEmit* self, Stmt* s, List_string* used, List_stri
         case Stmt__TryCatchStmt: {
             Stmt* body = __match__.data.as_TryCatchStmt.body;
             List_CatchClause* catches = __match__.data.as_TryCatchStmt.catches;
+            Stmt* finallyBlock = __match__.data.as_TryCatchStmt.finallyBlock;
             CEmit__collectStmtIdents(self, body, used, declared);
             int64_t n = List_CatchClause__length(catches);
             for (int64_t i = 0; (i < n); (++i)) {
                 CatchClause* cc = List_CatchClause__get(catches, i);
                 List_string__add(declared, cc->varName);
                 CEmit__collectStmtIdents(self, cc->body, used, declared);
+            }
+            if ((finallyBlock != NULL)) {
+                CEmit__collectStmtIdents(self, finallyBlock, used, declared);
             }
             break;
         }

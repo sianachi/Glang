@@ -369,6 +369,8 @@ class NamespaceResolver:
             for clause in s.catches:
                 clause.catch_type = self._r_type(clause.catch_type, p)
                 self._r_block(clause.body, p)
+            if s.finally_block is not None:
+                self._r_block(s.finally_block, p)
         elif isinstance(s, MatchStmt):
             self._r_expr(s.scrutinee, p)
             for arm in s.arms:

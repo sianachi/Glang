@@ -293,10 +293,18 @@ class StmtParser {
             Stmt* handler = this.parseBlock();
             catches.add(new CatchClause(catchType, varTok->value, handler));
         }
-        if (catches.length() == 0) {
-            throw new ParseError("try block requires at least one catch clause", tok->line, tok->col);
+        // Optional finally block. `finally` is context-sensitive (not a reserved
+        // keyword): it appears as an identifier right after the catches.
+        Stmt* finallyBlock = null;
+        Token* pk = this.s->peek(0);
+        if (pk->type == TokenType.IDENT && pk->value == "finally") {
+            this.s->advance();   // consume 'finally'
+            finallyBlock = this.parseBlock();
         }
-        return new Stmt.TryCatchStmt(body, catches);
+        if (catches.length() == 0 && finallyBlock == null) {
+            throw new ParseError("try block requires at least one catch clause or a finally block", tok->line, tok->col);
+        }
+        return new Stmt.TryCatchStmt(body, catches, finallyBlock);
     }
 
     Stmt* parseMatch() {

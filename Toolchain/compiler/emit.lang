@@ -141,6 +141,7 @@ class CEmit {
     List<string> thunksEmitted;          // free-fn names already given a GlangFn thunk
     Map<string, int> classCids;          // class name -> runtime class id (for iface dispatch)
     int cidCounter;
+    List<Stmt*> finallyStack;            // enclosing try-finally blocks; null entry = loop boundary
 
     CEmit(GlobalEnv* e) {
         this.out = StringBuilder();
@@ -158,6 +159,7 @@ class CEmit {
         this.thunksEmitted = List<string>();
         this.classCids = Map<string, int>();
         this.cidCounter = 1;
+        this.finallyStack = List<Stmt*>();
     }
 
     // ── Class-info helpers (from the real GlobalEnv) ─────────────────────
@@ -447,12 +449,64 @@ class CEmit {
         }
     }
 
-    void emitTryCatch(Stmt* body, List<CatchClause*> catches) {
+    // Emit one finally block wrapped in a C scope, so it can appear at several
+    // exit points of the same function without redeclaring its locals.
+    void emitFinallyBlock(Stmt* f) {
+        this.ln("{");
+        this.indentLevel = this.indentLevel + 1;
+        this.emitBlock(f);
+        this.indentLevel = this.indentLevel - 1;
+        this.ln("}");
+    }
+
+    // Emit the finally blocks that a return/break/continue must run before it
+    // leaves. `forReturn` runs every enclosing finally (return exits the fn);
+    // break/continue stop at the nearest loop boundary (a null stack entry).
+    // Each block is temporarily removed while emitted so a return inside a
+    // finally does not re-emit it.
+    // Would a return (forReturn) or break/continue run any finally block here?
+    bool hasPendingFinally(bool forReturn) {
+        int i = this.finallyStack.length() - 1;
+        while (i >= 0) {
+            Stmt* f = this.finallyStack.get(i);
+            if (f == null) {
+                if (!forReturn) { return false; }   // break/continue stop at the loop
+            } else {
+                return true;
+            }
+            i = i - 1;
+        }
+        return false;
+    }
+
+    void emitPendingFinally(bool forReturn) {
+        List<Stmt*> saved = List<Stmt*>();
+        bool stop = false;
+        while (this.finallyStack.length() > 0 && !stop) {
+            int last = this.finallyStack.length() - 1;
+            Stmt* f = this.finallyStack.get(last);
+            this.finallyStack.removeAt(last);
+            saved.add(f);
+            if (f == null) {
+                if (!forReturn) { stop = true; }   // loop boundary: break/continue stop here
+            } else {
+                this.emitFinallyBlock(f);
+            }
+        }
+        for (int i = saved.length() - 1; i >= 0; --i) { this.finallyStack.add(saved.get(i)); }
+    }
+
+    void emitTryCatch(Stmt* body, List<CatchClause*> catches, Stmt* finallyBlock) {
+        bool hasFin = (finallyBlock != null);
+        // finally active while emitting the try body (return/break/continue in it
+        // must run finally first).
+        if (hasFin) { this.finallyStack.add(finallyBlock); }
         this.ln("GLANG_TRY_BEGIN");
         this.indentLevel = this.indentLevel + 1;
         this.emitBlock(body);
         this.indentLevel = this.indentLevel - 1;
         this.ln("GLANG_TRY_END");
+        if (hasFin) { this.finallyStack.removeAt(this.finallyStack.length() - 1); }
         int nc = catches.length();
         for (int i = 0; i < nc; ++i) {
             CatchClause* c = catches.get(i);
@@ -464,13 +518,32 @@ class CEmit {
             this.ln(ptrType + " " + c->varName + " = (" + ptrType + ")__exc_frame__.obj;");
             this.pushScope();
             this.define(c->varName, baseType + "*");
+            if (hasFin) { this.finallyStack.add(finallyBlock); }   // finally active in the handler
             this.emitBlockInner(c->body);
+            if (hasFin) { this.finallyStack.removeAt(this.finallyStack.length() - 1); }
             this.popScope();
             this.indentLevel = this.indentLevel - 1;
             this.ln("}");
         }
-        this.ln("else { GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name); }");
+        // No handler matched: run finally (if any), then re-propagate. With no
+        // catch clauses there is no leading `if`, so the `else` is omitted.
+        string reThrow = "GLANG_THROW(__exc_frame__.obj, __exc_frame__.class_name);";
+        if (nc == 0) {
+            if (hasFin) { this.emitFinallyBlock(finallyBlock); }
+            this.ln(reThrow);
+        } else if (hasFin) {
+            this.ln("else {");
+            this.indentLevel = this.indentLevel + 1;
+            this.emitFinallyBlock(finallyBlock);
+            this.ln(reThrow);
+            this.indentLevel = this.indentLevel - 1;
+            this.ln("}");
+        } else {
+            this.ln("else { " + reThrow + " }");
+        }
         this.ln("GLANG_CATCH_DONE");
+        // Normal completion / after a handled exception.
+        if (hasFin) { this.emitFinallyBlock(finallyBlock); }
     }
 
     void emitMatch(Expr* scrutinee, List<MatchArm*> arms) {
@@ -764,8 +837,21 @@ class CEmit {
             }
             Stmt.ExprStmt(e) => { this.ln(this.emitExpr(e) + ";"); }
             Stmt.ReturnStmt(v) => {
-                if (v == null) { this.ln("return;"); }
-                else { this.ln("return " + this.emitExpr(v) + ";"); }
+                if (!(this.hasPendingFinally(true))) {
+                    if (v == null) { this.ln("return;"); }
+                    else { this.ln("return " + this.emitExpr(v) + ";"); }
+                } else if (v == null) {
+                    this.emitPendingFinally(true);
+                    this.ln("return;");
+                } else {
+                    // Evaluate the value, run enclosing finally blocks, then return.
+                    string rt = this.infer(v);
+                    string cty = "void*";
+                    if (rt != "") { cty = cTypeStrC(rt, this.env); }
+                    this.ln(cty + " __glang_ret = " + this.emitExpr(v) + ";");
+                    this.emitPendingFinally(true);
+                    this.ln("return __glang_ret;");
+                }
             }
             Stmt.VarDecl(nm, ty, init, c) => {
                 string ts = showType(ty);
@@ -800,7 +886,9 @@ class CEmit {
             Stmt.WhileStmt(cond, body) => {
                 this.ln("while (" + this.emitExpr(cond) + ") {");
                 this.indentLevel = this.indentLevel + 1;
+                this.finallyStack.add(null);   // loop boundary for break/continue
                 this.emitBlock(body);
+                this.finallyStack.removeAt(this.finallyStack.length() - 1);
                 this.indentLevel = this.indentLevel - 1;
                 this.ln("}");
             }
@@ -811,7 +899,9 @@ class CEmit {
                 string postStr = this.renderForPost(post);
                 this.ln("for (" + initStr + "; " + condStr + "; " + postStr + ") {");
                 this.indentLevel = this.indentLevel + 1;
+                this.finallyStack.add(null);
                 this.emitBlockInner(body);
+                this.finallyStack.removeAt(this.finallyStack.length() - 1);
                 this.indentLevel = this.indentLevel - 1;
                 this.ln("}");
                 this.popScope();
@@ -819,17 +909,19 @@ class CEmit {
             Stmt.DoWhileStmt(body, cond) => {
                 this.ln("do {");
                 this.indentLevel = this.indentLevel + 1;
+                this.finallyStack.add(null);
                 this.emitBlock(body);
+                this.finallyStack.removeAt(this.finallyStack.length() - 1);
                 this.indentLevel = this.indentLevel - 1;
                 this.ln("} while (" + this.emitExpr(cond) + ");");
             }
             Stmt.MatchStmt(scrut, arms) => { this.emitMatch(scrut, arms); }
             Stmt.ForeachStmt(vt, vn, it, body, c) => { this.emitForeach(vt, vn, it, body); }
             Stmt.ThrowStmt(v) => { this.ln("GLANG_THROW(" + this.emitExpr(v) + ", \"" + this.throwClass(v) + "\");"); }
-            Stmt.TryCatchStmt(body, catches) => { this.emitTryCatch(body, catches); }
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => { this.emitTryCatch(body, catches, finallyBlock); }
             Stmt.UsingStmt(decl, body) => { this.emitUsing(decl, body); }
-            Stmt.BreakStmt() => { this.ln("break;"); }
-            Stmt.ContinueStmt() => { this.ln("continue;"); }
+            Stmt.BreakStmt() => { this.emitPendingFinally(false); this.ln("break;"); }
+            Stmt.ContinueStmt() => { this.emitPendingFinally(false); this.ln("continue;"); }
             _ => { this.ln("/* TODO stmt */;"); }   // foreach/using/try/throw later
         }
     }
@@ -853,6 +945,7 @@ class CEmit {
         this.define(varName, vt);
         this.ln("{");
         this.indentLevel = this.indentLevel + 1;
+        this.finallyStack.add(null);   // loop boundary for break/continue
         if (iterType == "string") {
             this.ln("char* __it__ = " + iterStr + ";");
             this.ln("int64_t __n__ = (int64_t)strlen(__it__);");
@@ -886,6 +979,7 @@ class CEmit {
         }
         this.indentLevel = this.indentLevel - 1;
         this.ln("}");
+        this.finallyStack.removeAt(this.finallyStack.length() - 1);
         this.indentLevel = this.indentLevel - 1;
         this.ln("}");
         this.popScope();
@@ -1408,10 +1502,11 @@ class CEmit {
             Stmt.ReturnStmt(v) => { if (v != null) { this.collectUsedIdents(v, used); } }
             Stmt.ThrowStmt(v) => { this.collectUsedIdents(v, used); }
             Stmt.UsingStmt(decl, body) => { this.collectStmtIdents(decl, used, declared); this.collectStmtIdents(body, used, declared); }
-            Stmt.TryCatchStmt(body, catches) => {
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => {
                 this.collectStmtIdents(body, used, declared);
                 int n = catches.length();
                 for (int i = 0; i < n; ++i) { CatchClause* cc = catches.get(i); declared.add(cc->varName); this.collectStmtIdents(cc->body, used, declared); }
+                if (finallyBlock != null) { this.collectStmtIdents(finallyBlock, used, declared); }
             }
             Stmt.MatchStmt(scrut, arms) => {
                 this.collectUsedIdents(scrut, used);

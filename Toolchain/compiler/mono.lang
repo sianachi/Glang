@@ -773,7 +773,7 @@ class Monomorphizer {
             Stmt.ThrowStmt(v) => {
                 return new Stmt.ThrowStmt(this.t_expr(v, m));
             }
-            Stmt.TryCatchStmt(body, catches) => {
+            Stmt.TryCatchStmt(body, catches, finallyBlock) => {
                 Stmt* nbody = this.t_block(body, m);
                 List<CatchClause*> ncatches = List<CatchClause*>();
                 int n = catches.length();
@@ -785,7 +785,9 @@ class Monomorphizer {
                     this.pop_scope();
                     ncatches.add(new CatchClause(nct, cc->varName, ccbody));
                 }
-                return new Stmt.TryCatchStmt(nbody, ncatches);
+                Stmt* nfin = null;
+                if (finallyBlock != null) { nfin = this.t_block(finallyBlock, m); }
+                return new Stmt.TryCatchStmt(nbody, ncatches, nfin);
             }
             Stmt.MatchStmt(scrut, arms) => {
                 Expr* nscrut = this.t_expr(scrut, m);

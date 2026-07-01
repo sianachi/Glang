@@ -566,6 +566,25 @@ try {
 - `throw` inside a `catch` re-throws or throws a new exception.
 - A `try`/`catch` satisfies the always-returns requirement only when both the try body and every catch handler always return.
 
+**`finally`** — an optional block that runs on every exit path from the
+`try`/`catch`: normal completion, a caught or uncaught exception, and a
+`return`/`break`/`continue` leaving the block. A value returned from the try is
+evaluated first, then `finally` runs, then the value is returned. `exit()` does
+not run `finally` (the process terminates immediately). A `try` may pair with a
+`finally` alone (no `catch`), which is the idiom for guaranteed cleanup:
+
+```c
+try {
+    acquire();
+    work();          // may throw
+} finally {
+    release();       // runs whether work() succeeds, throws, or returns
+}
+```
+
+`finally` is context-sensitive, not a reserved keyword, so it remains usable as
+an ordinary identifier elsewhere.
+
 ---
 
 ## 7. Functions
@@ -688,8 +707,8 @@ The original terminal settings are saved and restored on `termRawOff` and,
 defensively, at process exit, so a crash never leaves the shell in raw mode. The
 `std/ansi.lang`, `std/term.lang`, `std/input.lang`, and `std/tui.lang` modules
 build a full widget toolkit on top of these (see the Standard Library section);
-the `examples/tui/` programs (a `netmon` network monitor and a modal `vim`
-clone) are complete apps built with them.
+the `real-world-applications/` programs (a `netmon` network monitor and a modal
+`vim` clone) are complete apps built with them.
 
 **Process introspection.** `shell` runs a command through `/bin/sh` and returns
 its stdout — intended for local, read-only system queries:
@@ -1349,16 +1368,17 @@ the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views,
 declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 **object modifiers** (section 12) with LINQ-style collection operations via
 `std/linq.lang`, **nullable types** (`T?` with `??` null-coalescing, section 3.5),
-**exception handling** (`throw`/`try`/`catch`, section 6.6), **generic bounds**
-(`<T extends Named>`) with **inferred generic calls** and `var` local inference,
-**terminal-control built-ins** and a **`shell`** built-in (section 7.5), and a
-**terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`) with example apps
-(`examples/tui/netmon.lang` network monitor, `examples/tui/vim.lang` modal editor).
+**exception handling** (`throw`/`try`/`catch`/`finally`, section 6.6), **generic
+bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
+inference, the **ternary operator** (`cond ? a : b`), **method dispatch through
+interface pointers**, **terminal-control built-ins** and a **`shell`** built-in
+(section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
+with example apps under `real-world-applications/` (a network monitor and a modal
+editor).
 The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
-| `finally`            | `throw`/`try`/`catch` shipped (§6.6); no `finally` clause yet |
 | Garbage collection   | Planned as a pure-Glang standard-library module; `using` blocks (section 8.6) already provide deterministic scope-exit disposal |
 | `main(argc, argv)`   | Real argv signature; the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
@@ -1464,9 +1484,10 @@ built-ins (§7.5):
 | `std/tui.lang`    | `Widget` ADT + `Box`/`Text`/`VStack`/`ListView`/`TextInput` and an `App` event loop |
 | `std/sysnet.lang` | host network introspection (per-interface rx/tx counters, gateway, IP, DNS) via `/proc` or `netstat`/`route`/`scutil` |
 
-Two complete apps live under `examples/tui/`: **`netmon.lang`**, a live network
-monitor (per-interface throughput, bar gauges, sparklines), and **`vim.lang`**, a
-modal editor with NORMAL/INSERT/COMMAND/VISUAL modes, yank/paste, and file I/O.
+Two complete apps live under `real-world-applications/`: **`netmon.lang`**, a live
+network monitor (per-interface throughput, bar gauges, sparklines), and
+**`vim.lang`**, a modal editor with NORMAL/INSERT/COMMAND/VISUAL modes,
+yank/paste, and file I/O.
 
 The collections are growable and generic: each one is backed by a contiguous
 `alloc(T, cap)` block that doubles when full. The map uses linear search, so it

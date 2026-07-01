@@ -502,6 +502,8 @@ class Pass2Checker:
                 self._scope.define(clause.var_name, ct, clause.line, clause.col, False)
                 self._check_block(clause.body)
                 self._scope = saved_scope
+            if stmt.finally_block is not None:
+                self._check_block(stmt.finally_block)
 
         elif isinstance(stmt, MatchStmt):
             self._check_match(stmt)

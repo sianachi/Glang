@@ -1028,9 +1028,15 @@ class TryCatchStmt(Stmt):
       try { risky(); }
       catch (IOException* e) { ... }
       catch (Exception* e) { ... }
+      finally { cleanup(); }
+
+    ``finally_block`` is None when absent. It runs on every exit path from the
+    try/catch — normal completion, a caught or uncaught throw, or a
+    return/break/continue leaving the block.
     """
     body: 'Block'
     catches: 'List[CatchClause]'
+    finally_block: 'Optional[Block]' = None
     line: int = 0
     col: int = 0
 

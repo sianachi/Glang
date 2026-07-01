@@ -1,4 +1,4 @@
-// exceptions_basic.lang — basic throw / try / catch demo.
+// exceptions_basic.lang — throw / try / catch / finally demo.
 //
 // Run with:
 //     python3 main.py run examples/exceptions_basic.lang
@@ -24,6 +24,15 @@ int safeDivide(int a, int b) {
         throw new DivisionByZeroException();
     }
     return a / b;
+}
+
+// A value returned from inside a try still runs the finally block first.
+int computeWithCleanup() {
+    try {
+        return 42;
+    } finally {
+        print("cleanup before return");
+    }
 }
 
 int safeSqrt(int n) {
@@ -83,6 +92,19 @@ int main() {
         print("caught via MathException handler:");
         print(e->message);
     }
+
+    // --- finally always runs ---
+    print("--- finally ---");
+    try {
+        print("work");
+        throw new MathException("oops");
+    } catch (MathException* e) {
+        print("handled:");
+        print(e->message);
+    } finally {
+        print("cleanup runs either way");
+    }
+    print(computeWithCleanup());
 
     return 0;
 }
