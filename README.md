@@ -1373,16 +1373,25 @@ bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
 inference, the **ternary operator** (`cond ? a : b`), **method dispatch through
 interface pointers**, **terminal-control built-ins** and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
-with example apps under `real-world-applications/` (a network monitor and a modal
-editor).
+with example apps under `real-world-applications/` (a network monitor, a modal
+editor, and a task manager). The standard library also gained `std/format.lang`
+(printf-style formatting) and `std/hashmap.lang` (a hashed map).
 The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
 | Garbage collection   | Planned as a pure-Glang standard-library module; `using` blocks (section 8.6) already provide deterministic scope-exit disposal |
 | `main(argc, argv)`   | Real argv signature; the `getArgCount`/`getArg` builtins cover this meanwhile |
-| Variadic functions   | Needed for printf-style stdlib functions           |
-| Hashed `Map`         | The current `Map<K,V>` uses linear search pending a generic hashing mechanism |
+| True variadic parameters | `fn(string, ...)`; `std/format.lang` provides printf-style formatting via a fluent builder in the meantime |
+
+**Intentionally omitted.** Ad-hoc **function overloading** (two functions with
+the same name and different parameter types) is deliberately not supported.
+Name-based resolution is central to both implementations and the C emitter, so
+overloading would thread signature mangling and overload resolution through the
+core of a self-hosting compiler for a convenience already covered by **default
+arguments** and distinct, descriptive names — contrary to the language's "one
+obvious way" minimalism (a choice shared with Go). This keeps every call site
+resolvable by name alone.
 
 ---
 
