@@ -1,0 +1,191 @@
+// todo.lang — a small command-line task manager with file persistence.
+//
+// Demonstrates several language features working together in a real program:
+//   * interface-pointer dispatch — each subcommand is a `Command` implementation,
+//     selected at parse time and run polymorphically through a `Command*`;
+//   * `finally` — the store is saved on the way out no matter how the command
+//     ends, so a task is never lost to an error mid-command;
+//   * the ternary operator — concise status formatting.
+//
+// Tasks persist to a tab-separated file (default: todo.data in the working
+// directory), one task per line: "<id>\t<done>\t<text>".
+//
+// From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/todo.lang add "buy milk"
+//   python3 bootstrap/main.py run real-world-applications/todo.lang list
+//   python3 bootstrap/main.py run real-world-applications/todo.lang done 1
+//   python3 bootstrap/main.py run real-world-applications/todo.lang rm 1
+//
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/todo.lang /tmp/todo.c
+//   gcc -O2 /tmp/todo.c runtime/glang_runtime.c -o /tmp/todo && /tmp/todo list
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+string DATA_FILE() { return "todo.data"; }
+
+class Task {
+    int id;
+    bool done;
+    string text;
+    Task(int id, bool done, string text) {
+        this.id = id;
+        this.done = done;
+        this.text = text;
+    }
+}
+
+class TodoStore {
+    List<Task*> tasks;
+    int nextId;
+    bool dirty;
+
+    TodoStore() {
+        this.tasks = List<Task*>();
+        this.nextId = 1;
+        this.dirty = false;
+    }
+
+    void load(string path) {
+        if (!(fileExists(path))) { return; }
+        List<string> lines = strings::split(readFile(path), '\n');
+        for (int i = 0; i < lines.length(); ++i) {
+            string line = lines.get(i);
+            if (len(strings::trim(line)) == 0) { continue; }
+            List<string> parts = strings::split(line, '\t');
+            if (parts.length() < 3) { continue; }
+            int id = parseInt(parts.get(0));
+            bool done = parts.get(1) == "1";
+            // Rejoin any tabs that were part of the text itself.
+            string text = parts.get(2);
+            for (int j = 3; j < parts.length(); ++j) { text = text + "\t" + parts.get(j); }
+            this.tasks.add(new Task(id, done, text));
+            if (id >= this.nextId) { this.nextId = id + 1; }
+        }
+    }
+
+    void save(string path) {
+        StringBuilder sb = StringBuilder();
+        for (int i = 0; i < this.tasks.length(); ++i) {
+            Task* t = this.tasks.get(i);
+            string d = t->done ? "1" : "0";
+            sb.append(strings::intToStr(t->id) + "\t" + d + "\t" + t->text + "\n");
+        }
+        writeFile(path, sb.build());
+    }
+
+    Task* find(int id) {
+        for (int i = 0; i < this.tasks.length(); ++i) {
+            if (this.tasks.get(i)->id == id) { return this.tasks.get(i); }
+        }
+        return null;
+    }
+
+    void add(string text) {
+        this.dirty = true;
+        this.tasks.add(new Task(this.nextId, false, text));
+        print("added #" + strings::intToStr(this.nextId));
+        this.nextId = this.nextId + 1;
+    }
+
+    void markDone(int id) {
+        this.dirty = true;
+        Task* t = this.find(id);
+        if (t == null) { print("no task #" + strings::intToStr(id)); return; }
+        t->done = true;
+        print("done #" + strings::intToStr(id));
+    }
+
+    void remove(int id) {
+        this.dirty = true;
+        for (int i = 0; i < this.tasks.length(); ++i) {
+            if (this.tasks.get(i)->id == id) {
+                this.tasks.removeAt(i);
+                print("removed #" + strings::intToStr(id));
+                return;
+            }
+        }
+        print("no task #" + strings::intToStr(id));
+    }
+
+    void list() {
+        if (this.tasks.length() == 0) { print("(no tasks)"); return; }
+        int open = 0;
+        for (int i = 0; i < this.tasks.length(); ++i) {
+            Task* t = this.tasks.get(i);
+            string mark = t->done ? "[x]" : "[ ]";
+            if (!(t->done)) { open = open + 1; }
+            print(mark + " " + strings::intToStr(t->id) + " " + t->text);
+        }
+        print(strings::intToStr(open) + " open, "
+            + strings::intToStr(this.tasks.length()) + " total");
+    }
+}
+
+// ── Commands (dispatched polymorphically through a Command*) ────────────
+
+interface Command {
+    void run(TodoStore* store);
+}
+
+class AddCmd implements Command {
+    string text;
+    AddCmd(string text) { this.text = text; }
+    void run(TodoStore* store) { store->add(this.text); }
+}
+
+class ListCmd implements Command {
+    ListCmd() { }
+    void run(TodoStore* store) { store->list(); }
+}
+
+class DoneCmd implements Command {
+    int id;
+    DoneCmd(int id) { this.id = id; }
+    void run(TodoStore* store) { store->markDone(this.id); }
+}
+
+class RemoveCmd implements Command {
+    int id;
+    RemoveCmd(int id) { this.id = id; }
+    void run(TodoStore* store) { store->remove(this.id); }
+}
+
+class HelpCmd implements Command {
+    HelpCmd() { }
+    void run(TodoStore* store) {
+        print("usage: todo <command>");
+        print("  add TEXT   add a task");
+        print("  list       show all tasks");
+        print("  done ID    mark a task complete");
+        print("  rm ID      remove a task");
+    }
+}
+
+Command* parseCommand() {
+    if (getArgCount() == 0) { return new HelpCmd(); }
+    string cmd = getArg(0);
+    if (cmd == "add" && getArgCount() >= 2)  { return new AddCmd(getArg(1)); }
+    if (cmd == "list")                        { return new ListCmd(); }
+    if (cmd == "done" && getArgCount() >= 2) { return new DoneCmd(parseInt(getArg(1))); }
+    if (cmd == "rm" && getArgCount() >= 2)   { return new RemoveCmd(parseInt(getArg(1))); }
+    return new HelpCmd();
+}
+
+int main() {
+    string path = DATA_FILE();
+    TodoStore* store = new TodoStore();
+    store->load(path);
+
+    Command* cmd = parseCommand();
+    // finally guarantees the store is persisted whenever a command mutated it,
+    // even if run() were to fail partway through.
+    try {
+        cmd->run(store);
+    } finally {
+        if (store->dirty) { store->save(path); }
+    }
+    return 0;
+}
