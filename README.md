@@ -1404,7 +1404,8 @@ The library has grown to ~50 modules. The tables below group them by area.
 | Module | Provides |
 |---|---|
 | `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `clear`, `span` |
-| `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length` |
+| `std/map.lang`    | `Map<K,V>` — small linear-scan association map: `set`, `getOr`, `has`, `remove`, `length` |
+| `std/hashmap.lang`| `HashMap<K,V>` — hashed map (chaining), average O(1): `set`, `getOr`, `has`, `remove`, `keys`, `length` |
 | `std/set.lang`    | `Set<T>` — unordered set membership |
 | `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek` |
 | `std/queue.lang`  | `Queue<T>` — ring-buffer FIFO |

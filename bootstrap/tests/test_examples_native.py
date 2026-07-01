@@ -25,6 +25,7 @@ NATIVE_EXAMPLES = [
     "ternary",
     "exceptions_basic",
     "format_demo",
+    "hashmap_demo",
 ]
 
 

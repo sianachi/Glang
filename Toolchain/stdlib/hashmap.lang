@@ -1,0 +1,121 @@
+// std/hashmap.lang — a hashed association map with average O(1) operations.
+//
+// Complements std/map.lang (which is a simple linear-scan map). HashMap<K,V>
+// hashes any key via toString(key) + FNV-1a and resolves collisions by chaining,
+// so lookups stay fast as the map grows. Keys are compared with ==, so the key
+// type only needs `==` and `toString` — which every primitive, enum, and object
+// pointer already has. The public API mirrors Map: set / getOr / getOrDefault /
+// has / remove / length / isEmpty, plus keys() for iteration.
+
+import "std/list.lang";
+import "std/hash.lang";
+
+class Entry<K, V> {
+    K key;
+    V value;
+    int next;       // index of the next entry in the same bucket, or -1
+    bool deleted;
+    Entry(K key, V value) {
+        this.key = key;
+        this.value = value;
+        this.next = -1;
+        this.deleted = false;
+    }
+}
+
+class HashMap<K, V> {
+    List<Entry<K, V>*> entries;   // every entry ever inserted (tombstoned on remove)
+    int* heads;                    // heads[b] = first entry index in bucket b, or -1
+    int nbuckets;
+    int size;                      // live (non-deleted) entries
+
+    HashMap() {
+        this.entries = List<Entry<K, V>*>();
+        this.nbuckets = 16;
+        this.heads = alloc(int, 16);
+        for (int i = 0; i < 16; ++i) { this.heads[i] = -1; }
+        this.size = 0;
+    }
+
+    int length() { return this.size; }
+    bool isEmpty() { return this.size == 0; }
+
+    int _bucketFor(K key) {
+        int h = fnv1a32Str(toString(key));
+        int b = h % this.nbuckets;
+        if (b < 0) { b = b + this.nbuckets; }
+        return b;
+    }
+
+    // Index of the live entry for `key`, or -1.
+    int _find(K key) {
+        int b = this._bucketFor(key);
+        int i = this.heads[b];
+        while (i != -1) {
+            Entry<K, V>* e = this.entries.get(i);
+            if (!(e->deleted) && e->key == key) { return i; }
+            i = e->next;
+        }
+        return -1;
+    }
+
+    bool has(K key) { return this._find(key) != -1; }
+
+    V getOr(K key, V fallback) {
+        int i = this._find(key);
+        if (i == -1) { return fallback; }
+        return this.entries.get(i)->value;
+    }
+
+    V getOrDefault(K key, V defaultValue) { return this.getOr(key, defaultValue); }
+
+    void set(K key, V value) {
+        // Hash the key once: search this key's bucket chain, updating in place if
+        // present, otherwise prepending a new entry.
+        int b = this._bucketFor(key);
+        int i = this.heads[b];
+        while (i != -1) {
+            Entry<K, V>* cur = this.entries.get(i);
+            if (!(cur->deleted) && cur->key == key) { cur->value = value; return; }
+            i = cur->next;
+        }
+        Entry<K, V>* e = new Entry<K, V>(key, value);
+        e->next = this.heads[b];
+        this.heads[b] = this.entries.length();
+        this.entries.add(e);
+        this.size = this.size + 1;
+        if (this.size > this.nbuckets * 2) { this._rehash(); }
+    }
+
+    void remove(K key) {
+        int i = this._find(key);
+        if (i == -1) { return; }
+        this.entries.get(i)->deleted = true;
+        this.size = this.size - 1;
+    }
+
+    // Live keys, in insertion order.
+    List<K> keys() {
+        List<K> out = List<K>();
+        for (int i = 0; i < this.entries.length(); ++i) {
+            Entry<K, V>* e = this.entries.get(i);
+            if (!(e->deleted)) { out.add(e->key); }
+        }
+        return out;
+    }
+
+    void _rehash() {
+        int newn = this.nbuckets * 2;
+        free(this.heads);
+        this.heads = alloc(int, newn);
+        for (int i = 0; i < newn; ++i) { this.heads[i] = -1; }
+        this.nbuckets = newn;
+        for (int i = 0; i < this.entries.length(); ++i) {
+            Entry<K, V>* e = this.entries.get(i);
+            if (e->deleted) { e->next = -1; continue; }
+            int b = this._bucketFor(e->key);
+            e->next = this.heads[b];
+            this.heads[b] = i;
+        }
+    }
+}

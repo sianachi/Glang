@@ -1,0 +1,31 @@
+// hashmap_demo.lang — word-frequency counting with std/hashmap.lang.
+//
+// Uses HashMap<string,int> for average O(1) counting, keys() for stable
+// first-seen iteration, and std/format.lang to print an aligned table.
+//
+//   python3 main.py run examples/hashmap_demo.lang
+
+import "std/hashmap.lang";
+import "std/string.lang";
+import "std/format.lang";
+
+int main() {
+    string text = "the quick brown fox the lazy dog the fox";
+
+    HashMap<string, int> counts = HashMap<string, int>();
+    List<string> words = strings::split(text, ' ');
+    for (int i = 0; i < words.length(); ++i) {
+        string w = words.get(i);
+        counts.set(w, counts.getOr(w, 0) + 1);
+    }
+
+    // keys() preserves first-seen order, so the report is deterministic.
+    List<string> ks = counts.keys();
+    for (int i = 0; i < ks.length(); ++i) {
+        string k = ks.get(i);
+        print(fmt("{:<8}{:>2}")->argStr(k)->argInt(counts.getOr(k, 0))->build());
+    }
+    print(fmt("{} distinct words, {} total")
+        ->argInt(counts.length())->argInt(words.length())->build());
+    return 0;
+}
