@@ -3,7 +3,7 @@
 
 ## Table of Contents
 
-1. [Overview](#1-overview) — including [Implementation & Toolchain](#implementation--toolchain)
+1. [Overview](#1-overview) — including [Glang versus C](#glang-versus-c) and [Implementation & Toolchain](#implementation--toolchain)
 2. [Lexical Structure](#2-lexical-structure)
 3. [Types](#3-types) — including [Nullable types (§3.5)](#35-nullable-types-t)
 4. [Variables & Declarations](#4-variables--declarations)
@@ -13,7 +13,7 @@
 8. [Memory Model](#8-memory-model)
 9. [Classes](#9-classes)
 10. [Interfaces](#10-interfaces)
-11. [Enums](#11-enums)
+11. [Enums](#11-enums) — followed by [Tagged Unions & Pattern Matching](#tagged-unions--pattern-matching)
 12. [Object Modifiers](#12-object-modifiers)
 13. [Scope & Lifetime](#13-scope--lifetime)
 14. [Modules](#14-modules)
@@ -27,13 +27,59 @@
 
 ## 1. Overview
 
-A statically-typed, manually-managed, C-style language with single inheritance and interface-based polymorphism. The runtime is intentionally minimal — no garbage collector, no implicit allocations. The only built-in I/O is `print` for diagnostics (§7.5); richer I/O and higher-level facilities (dynamic arrays, GC allocators, string builders, etc.) are provided by a standard library written in the language itself.
+A statically-typed, manually-managed, C-style language with single inheritance and interface-based polymorphism. The runtime is intentionally minimal — no garbage collector, no implicit allocations. It exposes a small, fixed set of built-ins (§7.5) — `print`, string and file I/O, standard streams, terminal control, sockets, time, and a `shell` escape hatch — while higher-level facilities (dynamic arrays, string builders, JSON, HTTP, a terminal-UI toolkit, etc.) are provided by a standard library written in the language itself.
 
 **Design goals:**
 - Simple, unambiguous syntax close to C/Java
 - Explicit control over memory
 - A type system expressive enough to write a standard library
 - A small, auditable runtime
+
+---
+
+## Glang versus C
+
+Glang is deliberately C-shaped: the same manual memory model, the same pointer
+and value semantics, the same primitive types and control flow — and it **emits C
+and compiles it with the system's C compiler**, so a Glang program is as portable
+as the C it becomes. What Glang adds is a modern static type system on top of that
+model, and what it removes is the preprocessor.
+
+**Same as C.** Manual memory (`alloc`/`free`, no garbage collector, no hidden
+allocations); raw pointers with `*`/`&` and `->` field access; stack vs heap is
+explicit; `int` is 64-bit, plus `float`, `char`, `byte`, `bool`; C-style `if`/
+`while`/`for`/`break`/`continue`/`return`; integer/bitwise/logical operators with
+C precedence; struct-like aggregates; the compiled output is ordinary C linked
+against a small runtime (`glang_runtime.c`).
+
+**Added over C.** A real type system and safer constructs:
+
+| Feature | C | Glang |
+|---|---|---|
+| Aggregates | `struct` (data only) | `class` with fields, methods, single inheritance, constructors/destructors, vtables |
+| Polymorphism | function pointers by hand | `interface` types with vtable dispatch |
+| Generics | macros / `void*` | monomorphized generics (`List<T>`, `Map<K,V>`, `Option<T>`, …) |
+| Sum types | untagged `union` | tagged `union` (ADTs) with `match` and compile-time exhaustiveness |
+| Enums | integer constants | distinct enum types (not implicitly `int`) |
+| Null | any pointer may be null | nullable types `T?`, checked before use |
+| Errors | return codes / `errno` | `throw` / `try` / `catch` (setjmp-based runtime) |
+| Strings | `char*` you manage | first-class immutable `string` type (compiles to `char*`) |
+| Closures | none | first-class function values that capture their environment |
+| Cleanup | manual `goto cleanup:` | destructors + `using` resource blocks (scope-exit disposal) |
+| Modules | textual `#include` | real `import` with namespaces; no preprocessor |
+| Overloading | none | operator/method overloading via `modifier` blocks |
+| Multiple returns | out-params | native multiple return values |
+| Type inference | none | `var` local inference |
+| Execution | compile only | tree-walking **interpreter** *and* compile-to-C, kept in lockstep |
+
+**Removed from C.** No preprocessor or macros (`#define`/`#include`/`#ifdef`); no
+untagged unions; no `typedef`, `goto`, `switch` fallthrough, comma operator, or
+varargs; no unsigned integer types or `short`/`long` size zoo (`int` is always
+64-bit, `byte` is the 8-bit type). The intent is one obvious way to write each
+thing, and a grammar small enough that the whole compiler is written in Glang.
+
+**In one line:** Glang is "C with classes, interfaces, generics, tagged unions,
+pattern matching, exceptions, and modules — that transpiles back to C."
 
 ---
 
@@ -130,13 +176,19 @@ Identifiers start with a letter or underscore, followed by any number of letters
 
 ```
 alloc     bool      break     byte      catch     char
-class     const     continue  delete    else      enum
-extends   false     float     fn        for       free
-if        implements  import  int       interface modifier
-namespace new       null      private   protected public
-return    static    string    super     this      throw
-true      try       using     void      while
+class     const     continue  delete    do        else
+enum      extends   false     float     fn        for
+foreach   free      if        implements import   in
+int       interface managed   modifier  namespace new
+null      private   protected public    return    static
+string    super     this      throw     true      try
+using     var       void      while
 ```
+
+`match` and `union` are **context-sensitive**: they act as keywords in statement
+and declaration position (a `match (...)` statement, a `union Name { … }`
+declaration) but remain usable as ordinary identifiers (e.g. method names)
+elsewhere, so they are not in the reserved list above.
 
 ### 2.4 Literals
 
@@ -600,6 +652,52 @@ runtime error).
 
 Higher-level, line-oriented helpers built on these live in `std/io.lang` (see the Standard Library section).
 
+**Complete built-in reference.** Every built-in is always available (no import),
+and all live in the global function namespace. Grouped by area:
+
+| Group | Built-ins | Signatures |
+|---|---|---|
+| Output | `print`, `printErr` | `(primitive) -> void` (stdout / stderr, with newline) |
+| Strings | `len`, `substr`, `indexOf`, `startsWith`, `endsWith`, `contains` | string queries (`substr` is start-inclusive, end-exclusive) |
+| Conversions | `toString`, `intToStr`, `parseInt`, `parseFloat` | value ⇄ string |
+| Files | `readFile`, `writeFile`, `fileExists`, `fileSize`, `listDir` | `(string) -> …`; `listDir` returns newline-joined names |
+| Binary files | `readFileInto`, `writeFileFrom` | `(string, byte*, int) -> int` (bounded blocks) |
+| Byte interop | `bytesFromString`, `stringFromBytes` | `string ⇄ byte*` |
+| Standard streams | `readStdin`, `readByte`, `writeStdout` | full stdin / one byte (`-1` at EOF) / raw stdout, no newline |
+| Terminal control | `termRawOn`, `termRawOff`, `termWidth`, `termHeight`, `readByteTimeout`, `termResized`, `termInterrupted` | raw mode, size, timed read, resize/interrupt flags (see below) |
+| Process | `shell` | `(string) -> string` — run a command, capture stdout |
+| Time | `nowNanos`, `wallMillis`, `sleepMs` | monotonic ns, wall ms, sleep |
+| Networking | `netListen`, `netAccept`, `netConnect`, `netRecv`, `netSend`, `netClose`, `netConnectNb`, `netSetNonBlocking`, `netPoll`, … | blocking or non-blocking BSD-style sockets |
+| Program | `getArgCount`, `getArg`, `exit` | command-line args and process exit |
+| Memory | `alloc`, `free`, `delete` | heap block / release / destruct-and-free (see §8) |
+
+**Terminal control (for TUIs).** These wrap the host terminal so a program can
+read keystrokes as they happen and drive the screen with escape sequences:
+
+```c
+int ok  = termRawOn();          // enter raw mode: no echo, no line buffering (0 ok, -1 if not a TTY)
+int w   = termWidth();          // columns, or -1
+int h   = termHeight();         // rows, or -1
+int b   = readByteTimeout(50);  // one byte, or -1 at EOF, or -2 on timeout (ms; <0 blocks)
+bool rz = termResized();        // true once per SIGWINCH (window resized)
+bool iq = termInterrupted();    // true once per SIGINT
+termRawOff();                   // restore; also restored automatically at exit
+```
+
+The original terminal settings are saved and restored on `termRawOff` and,
+defensively, at process exit, so a crash never leaves the shell in raw mode. The
+`std/ansi.lang`, `std/term.lang`, `std/input.lang`, and `std/tui.lang` modules
+build a full widget toolkit on top of these (see the Standard Library section);
+the `examples/tui/` programs (a `netmon` network monitor and a modal `vim`
+clone) are complete apps built with them.
+
+**Process introspection.** `shell` runs a command through `/bin/sh` and returns
+its stdout — intended for local, read-only system queries:
+
+```c
+string ifaces = shell("netstat -ib");   // capture a command's output
+```
+
 ---
 
 ## 8. Memory Model
@@ -894,6 +992,77 @@ HttpStatus s = (HttpStatus) 500;         // SERVER_ERROR
 
 ---
 
+## Tagged Unions & Pattern Matching
+
+A `union` is a **tagged** sum type (an algebraic data type): a value is exactly
+one of several named variants, each carrying its own fields. Unlike a C `union`,
+the active variant is tracked, so reading the wrong one is impossible — you
+destructure with `match`, and the analyser requires the arms to be exhaustive.
+
+### Declaration
+
+Each variant lists its fields in braces; an empty brace pair is a payload-less
+variant:
+
+```c
+union Shape {
+    Circle    { float r; }
+    Rect      { float w; float h; }
+    Point     { }
+}
+```
+
+Unions may be **generic** and **recursive** (a variant can hold a pointer to the
+union type), which is how the standard library models `Json`, the compiler models
+its AST, and `std/tui.lang` models `Widget`:
+
+```c
+union Tree<T> {
+    Leaf { T value; }
+    Node { Tree<T>* left; Tree<T>* right; }
+}
+```
+
+### Construction
+
+Construct a variant with `new UnionName.Variant(args...)`; the result is a
+pointer to the union (`Shape*`):
+
+```c
+Shape* a = new Shape.Circle(2.0);
+Shape* b = new Shape.Point();
+```
+
+### Matching
+
+`match` dispatches on the active variant and binds its fields. Match on the
+dereferenced value (`*ptr`); arms use `Variant(bindings) => { … }`, and `_` is the
+wildcard. Every variant must be covered (or a `_` provided):
+
+```c
+float area(Shape* s) {
+    match (*s) {
+        Shape.Circle(r)  => { return 3.14159 * r * r; }
+        Shape.Rect(w, h) => { return w * h; }
+        Shape.Point()    => { return 0.0; }
+    }
+}
+```
+
+### Semantics & rules
+
+- **Exhaustiveness is checked** — a missing variant with no `_` arm is a compile
+  error, so adding a variant surfaces every site that must handle it.
+- **Variant fields are immutable.** You cannot assign through a matched binding to
+  mutate a union value in place; produce a fresh value (`new …`) or store mutable
+  state in a referenced `class` instead. (This is why passes in the self-hosted
+  compiler rebuild nodes rather than editing them.)
+- Bind a dereferenced pointer field to a local before matching — `match (*p->x)`
+  parses as `(*p)->x`; write `SomeT v = p->x; match (*v) { … }`.
+- `union` and `match` are context-sensitive (section 2.3), not reserved words.
+
+---
+
 ## 12. Object Modifiers
 
 An **object modifier** adds methods to an existing type from outside its definition — similar to extension methods in C# or extensions in Swift. The type being extended does not need to be modified.
@@ -1180,17 +1349,20 @@ the non-owning `Span<T>` / owning `MemoryOwner<T>` memory views,
 declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 **object modifiers** (section 12) with LINQ-style collection operations via
 `std/linq.lang`, **nullable types** (`T?` with `??` null-coalescing, section 3.5),
-and **exception handling** (`throw`/`try`/`catch`, section 6.6).
+**exception handling** (`throw`/`try`/`catch`, section 6.6), **generic bounds**
+(`<T extends Named>`) with **inferred generic calls** and `var` local inference,
+**terminal-control built-ins** and a **`shell`** built-in (section 7.5), and a
+**terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`) with example apps
+(`examples/tui/netmon.lang` network monitor, `examples/tui/vim.lang` modal editor).
 The remaining items reserved for later versions:
 
 | Feature              | Notes                                              |
 |----------------------|----------------------------------------------------|
-| Generic bounds       | `<T extends Comparable>` — type params are unconstrained today |
-| Generic type inference | Generic *function* calls need explicit `f<int>(x)` for now |
-| Exceptions           | Object-based `throw`/`try`/`catch` shipped (§6.6); no `finally` in v1 |
+| `finally`            | `throw`/`try`/`catch` shipped (§6.6); no `finally` clause yet |
 | Garbage collection   | Planned as a pure-Glang standard-library module; `using` blocks (section 8.6) already provide deterministic scope-exit disposal |
-| Command-line args    | `main(int argc, string[] argv)` — the `getArgCount`/`getArg` builtins cover this meanwhile |
+| `main(argc, argv)`   | Real argv signature; the `getArgCount`/`getArg` builtins cover this meanwhile |
 | Variadic functions   | Needed for printf-style stdlib functions           |
+| Hashed `Map`         | The current `Map<K,V>` uses linear search pending a generic hashing mechanism |
 
 ---
 
@@ -1205,20 +1377,96 @@ The function modules are wrapped in namespaces — `math`, `chars`, `strings`,
 type keywords) — so their members are called as `math::abs(x)`,
 `chars::isDigit(c)`, and so on. The collection classes remain global.
 
-| Module            | Provides                                                                 |
-|-------------------|--------------------------------------------------------------------------|
-| `std/math.lang`   | `math::` — `abs`, `fabs`, `min`/`max`, `fmin`/`fmax`, `clamp`, `sign`, `ipow`, `gcd`, `lcm`, `isqrt`, `factorial` |
-| `std/char.lang`   | `chars::` — `isDigit`/`isAlpha`/`isAlnum`/`isSpace`/`isUpper`/`isLower`, `toUpper`/`toLower`, `digitToInt` |
-| `std/string.lang` | `strings::` — `toUpperStr`/`toLowerStr`, `reverse`, `repeat`, `trim`, `padLeft`, `count`, `replaceChar`, `equalsIgnoreCase` |
-| `std/io.lang`     | `io::` — `appendFile`, `readLineCount`, `dieWith` (built on the I/O built-ins) |
-| `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `isEmpty`, `clear`, `span` |
-| `std/linq.lang`   | Modifier methods on `List<T>`, `Span<T>`, and `string`: `where`, `any`, `all`, `countWhere`, `first`, `forEach`, `reduce`; free functions `select<T,U>`, `spanSelect<T,U>`, `strReduce<T>` (see §12.4) |
-| `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek`, `length`, `isEmpty`                   |
-| `std/queue.lang`  | `Queue<T>` — ring buffer: `enqueue`, `dequeue`, `peek`, `length`, `isEmpty` |
-| `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length`  |
-| `std/option.lang` | `Option<T>` — `setSome`/`setNone`, `isSome`/`isNone`, `get`, `getOr`      |
-| `std/span.lang`   | `Span<T>` — non-owning bounds-checked view: `get`, `set`, `slice`, `length`, `isEmpty` |
-| `std/memory.lang` | `MemoryOwner<T>` — owning heap block: `get`, `set`, `span`, `length`, `dispose` (frees; also `~MemoryOwner` on `delete`) |
+The library has grown to ~50 modules. The tables below group them by area.
+
+**Collections & data structures**
+
+| Module | Provides |
+|---|---|
+| `std/list.lang`   | `List<T>` — growable list: `add`, `get`, `set`, `contains`, `removeAt`, `length`, `clear`, `span` |
+| `std/map.lang`    | `Map<K,V>` — association map: `set`, `getOr`, `has`, `remove`, `length` |
+| `std/set.lang`    | `Set<T>` — unordered set membership |
+| `std/stack.lang`  | `Stack<T>` — `push`, `pop`, `peek` |
+| `std/queue.lang`  | `Queue<T>` — ring-buffer FIFO |
+| `std/deque.lang`  | `Deque` — double-ended queue |
+| `std/heap.lang`   | binary min-heap / priority queue |
+| `std/option.lang` | `Option<T>` — optional value |
+| `std/result.lang` | `Result<T,E>` — success-or-error value |
+| `std/span.lang`   | `Span<T>` — non-owning bounds-checked view (`slice`, `get`, `set`) |
+| `std/slice.lang`  | `Slice<T>` — non-owning slice view |
+| `std/bitset.lang` | fixed-size bit set over a byte buffer |
+| `std/arena.lang`  | `Arena<T>` — typed bump allocator |
+| `std/bytes.lang`  | growable, bounds-checked byte buffer |
+| `std/lru.lang`    | LRU cache |
+
+**Memory**
+
+| Module | Provides |
+|---|---|
+| `std/memory.lang` | `MemoryOwner<T>` — owning heap block (`dispose`, `~MemoryOwner`) |
+| `std/rc.lang`     | `Rc<T>` — manually reference-counted handle |
+
+**Strings, text & encodings**
+
+| Module | Provides |
+|---|---|
+| `std/string.lang`        | `strings::` — `trim`, `split`, `join`, `padLeft`, `repeat`, `reverse`, `replaceChar`, `equalsIgnoreCase`, … |
+| `std/stringbuilder.lang` | `StringBuilder` — O(n) mutable string accumulation |
+| `std/char.lang`          | `chars::` — classification/conversion (`isDigit`, `toUpper`, …) |
+| `std/hash.lang`          | CRC32 and FNV-1a checksums |
+| `std/hex.lang` · `std/base64.lang` | hex and RFC 4648 Base64 encoding |
+| `std/sha1.lang`          | SHA-1 digest |
+| `std/uuid.lang`          | RFC 4122 UUIDs |
+
+**Data formats**
+
+| Module | Provides |
+|---|---|
+| `std/json.lang` | JSON parse/serialize (`Json` ADT) |
+| `std/csv.lang`  | RFC 4180 CSV read/write |
+| `std/url.lang`  | percent-encoding and query strings |
+| `std/html.lang` | safe HTML generation |
+
+**Math & utility**
+
+| Module | Provides |
+|---|---|
+| `std/math.lang`   | `math::` — `abs`, `min`/`max`, `clamp`, `ipow`, `gcd`, `isqrt`, `factorial`, … |
+| `std/random.lang` | fast deterministic PRNG |
+| `std/linq.lang`   | LINQ-style ops on `List<T>`/`Span<T>`/`string` (`where`, `any`, `all`, `reduce`, `select`) |
+| `std/cli.lang`    | command-line argument parser |
+| `std/log.lang`    | leveled logging to stderr |
+| `std/path.lang`   | POSIX path manipulation |
+| `std/time.lang`   | time helpers |
+| `std/io.lang`     | `io::` — `appendFile`, `readLineCount`, `readLines`, `dieWith` |
+
+**Networking & web**
+
+| Module | Provides |
+|---|---|
+| `std/net.lang`         | blocking TCP sockets |
+| `std/http.lang`        | HTTP/1.1 request parser + response builder |
+| `std/http_client.lang` | blocking HTTP/1.1 client |
+| `std/websocket.lang`   | RFC 6455 WebSocket server |
+| `std/server.lang`      | single-threaded event-loop HTTP server |
+| `std/router.lang`      | method + path routing |
+| `std/static.lang`      | static-file serving helpers |
+| `std/multipart.lang`   | `multipart/form-data` parser |
+
+**Terminal UI (TUI)** — the widget toolkit built on the terminal-control
+built-ins (§7.5):
+
+| Module | Provides |
+|---|---|
+| `std/ansi.lang`   | `ansi::` — escape sequences: cursor moves, 256-colour, clear, alternate screen |
+| `std/term.lang`   | `Terminal` (raw-mode + alternate-screen lifecycle) and `Screen`, a double-buffered cell grid that diffs frames for flicker-free redraws |
+| `std/input.lang`  | `KeyReader` — decodes raw bytes into a `Key` ADT (characters, Ctrl-combos, arrows, Home/End, PageUp/Down, Delete, resize/interrupt) |
+| `std/tui.lang`    | `Widget` ADT + `Box`/`Text`/`VStack`/`ListView`/`TextInput` and an `App` event loop |
+| `std/sysnet.lang` | host network introspection (per-interface rx/tx counters, gateway, IP, DNS) via `/proc` or `netstat`/`route`/`scutil` |
+
+Two complete apps live under `examples/tui/`: **`netmon.lang`**, a live network
+monitor (per-interface throughput, bar gauges, sparklines), and **`vim.lang`**, a
+modal editor with NORMAL/INSERT/COMMAND/VISUAL modes, yank/paste, and file I/O.
 
 The collections are growable and generic: each one is backed by a contiguous
 `alloc(T, cap)` block that doubles when full. The map uses linear search, so it
