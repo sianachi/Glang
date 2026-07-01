@@ -1,0 +1,102 @@
+// logstats.lang — count the frequency of a column across a file's lines.
+//
+// A small `cut -fN | sort | uniq -c | sort -rn` in one program: it reads a file
+// (or stdin with "-"), splits each line on a delimiter, tallies how often each
+// value of the chosen column appears, and prints a report sorted by count.
+//
+// Showcases std/hashmap.lang for O(1) counting and std/format.lang for the
+// aligned output.
+//
+//   logstats <file> [column] [delimiter]
+//
+// From the repository root (count HTTP status codes in column 5, space-delimited):
+//   python3 bootstrap/main.py run real-world-applications/logstats.lang access.log 5
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/logstats.lang /tmp/logstats.c
+//   gcc -O2 /tmp/logstats.c runtime/glang_runtime.c -o /tmp/logstats
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/hashmap.lang";
+import "std/format.lang";
+
+class Count {
+    string key;
+    int n;
+    Count(string key, int n) { this.key = key; this.n = n; }
+}
+
+// Lexicographic string comparison (Glang '<' is numeric only).
+bool strLess(string a, string b) {
+    int an = len(a);
+    int bn = len(b);
+    int m = an < bn ? an : bn;
+    for (int i = 0; i < m; ++i) {
+        int ca = (int)(a[i]);
+        int cb = (int)(b[i]);
+        if (ca != cb) { return ca < cb; }
+    }
+    return an < bn;
+}
+
+// Sort descending by count, breaking ties by key ascending (deterministic).
+bool countBefore(Count* a, Count* b) {
+    if (a->n != b->n) { return a->n > b->n; }
+    return strLess(a->key, b->key);
+}
+
+void sortCounts(List<Count*> xs) {
+    int n = xs.length();
+    for (int i = 0; i < n; ++i) {
+        int best = i;
+        for (int j = i + 1; j < n; ++j) {
+            if (countBefore(xs.get(j), xs.get(best))) { best = j; }
+        }
+        if (best != i) {
+            Count* tmp = xs.get(i);
+            xs.set(i, xs.get(best));
+            xs.set(best, tmp);
+        }
+    }
+}
+
+int main() {
+    if (getArgCount() == 0) {
+        print("usage: logstats <file|-> [column] [delimiter]");
+        return 1;
+    }
+    string path = getArg(0);
+    int column = getArgCount() >= 2 ? parseInt(getArg(1)) : 0;
+    char delim = ' ';
+    if (getArgCount() >= 3 && len(getArg(2)) > 0) { delim = getArg(2)[0]; }
+
+    string data = path == "-" ? readStdin() : readFile(path);
+    List<string> lines = strings::split(data, '\n');
+
+    HashMap<string, int> counts = HashMap<string, int>();
+    int total = 0;
+    for (int i = 0; i < lines.length(); ++i) {
+        string line = strings::trim(lines.get(i));
+        if (len(line) == 0) { continue; }
+        List<string> fields = strings::split(line, delim);
+        string key = column < fields.length() ? fields.get(column) : "";
+        if (len(key) == 0) { continue; }
+        counts.set(key, counts.getOr(key, 0) + 1);
+        total = total + 1;
+    }
+
+    List<string> ks = counts.keys();
+    List<Count*> rows = List<Count*>();
+    for (int i = 0; i < ks.length(); ++i) {
+        rows.add(new Count(ks.get(i), counts.getOr(ks.get(i), 0)));
+    }
+    sortCounts(rows);
+
+    for (int i = 0; i < rows.length(); ++i) {
+        Count* c = rows.get(i);
+        int pct = total > 0 ? (c->n * 100) / total : 0;
+        print(fmt("{:>7}  {:>3}%  {}")->argInt(c->n)->argInt(pct)->argStr(c->key)->build());
+    }
+    print(fmt("{:>7}         {} distinct")->argInt(total)->argInt(rows.length())->build());
+    return 0;
+}
