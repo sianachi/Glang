@@ -1,0 +1,9 @@
+  PASS  addTwo adds
+  PASS  len counts characters
+  PASS  toUpper uppercases
+  PASS  concatenation
+  PASS  comparison is true
+  PASS  string equality
+  PASS  inequality
+  PASS  boom throws
+8/8 passed

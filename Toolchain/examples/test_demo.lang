@@ -1,0 +1,28 @@
+// test_demo.lang — using std/test.lang, the in-language unit-test framework.
+//
+// Builds a Test, exercises each kind of assertion (all passing here), and
+// returns report()'s exit code so the process exits 0 when the suite is green.
+
+import "std/test.lang";
+import "std/string.lang";
+
+int addTwo(int a, int b) { return a + b; }
+
+void boom() {
+    throw new Exception("boom");
+}
+
+int main() {
+    Test t = Test();
+
+    t.eqInt(addTwo(2, 3), 5, "addTwo adds");
+    t.eqInt(len("glang"), 5, "len counts characters");
+    t.eqStr(strings::toUpperStr("hi"), "HI", "toUpper uppercases");
+    t.eqStr("a" + "b" + "c", "abc", "concatenation");
+    t.eqBool(3 > 2, true, "comparison is true");
+    t.isTrue("abc" == "abc", "string equality");
+    t.isFalse(1 == 2, "inequality");
+    t.throws(() -> void { boom(); }, "boom throws");
+
+    return t.report();
+}

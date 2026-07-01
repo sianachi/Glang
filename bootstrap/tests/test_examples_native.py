@@ -31,6 +31,7 @@ NATIVE_EXAMPLES = [
     "interp_demo",
     "fs_demo",
     "regex_demo",
+    "test_demo",
 ]
 
 

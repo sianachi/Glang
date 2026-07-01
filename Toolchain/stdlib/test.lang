@@ -1,0 +1,79 @@
+// std/test.lang — a tiny unit-test framework written in Glang.
+//
+// Create one Test, make assertions, and call report() which prints a summary
+// and returns a process exit code (0 iff everything passed):
+//
+//   import "std/test.lang";
+//   int main() {
+//       Test t = Test();
+//       t.eqInt(2 + 2, 4, "addition");
+//       t.isTrue("abc" == "abc", "string equality");
+//       t.throws(() -> void { throw new Exception("boom"); }, "throws");
+//       return t.report();
+//   }
+//
+// Since Glang has no overloading, the equality assertions are type-specific
+// (eqInt / eqStr / eqBool); isTrue / isFalse cover everything else, and throws
+// checks that a closure raises an exception.
+
+import "std/string.lang";
+
+class Test {
+    int passed;
+    int failed;
+
+    Test() {
+        this.passed = 0;
+        this.failed = 0;
+    }
+
+    void pass(string label) {
+        this.passed = this.passed + 1;
+        print("  PASS  " + label);
+    }
+
+    void fail(string label, string detail) {
+        this.failed = this.failed + 1;
+        if (len(detail) > 0) { print("  FAIL  " + label + " (" + detail + ")"); }
+        else { print("  FAIL  " + label); }
+    }
+
+    void isTrue(bool cond, string label) {
+        if (cond) { this.pass(label); } else { this.fail(label, ""); }
+    }
+
+    void isFalse(bool cond, string label) {
+        if (!cond) { this.pass(label); } else { this.fail(label, ""); }
+    }
+
+    void eqInt(int got, int want, string label) {
+        if (got == want) { this.pass(label); }
+        else { this.fail(label, "want " + strings::intToStr(want) + ", got " + strings::intToStr(got)); }
+    }
+
+    void eqStr(string got, string want, string label) {
+        if (got == want) { this.pass(label); }
+        else { this.fail(label, "want \"" + want + "\", got \"" + got + "\""); }
+    }
+
+    void eqBool(bool got, bool want, string label) {
+        if (got == want) { this.pass(label); }
+        else { this.fail(label, "want " + toString(want) + ", got " + toString(got)); }
+    }
+
+    // Assert that calling `body` raises an exception.
+    void throws(fn() -> void body, string label) {
+        fn() -> void b = body;
+        bool threw = false;
+        try { b(); } catch (Exception* e) { threw = true; }
+        this.isTrue(threw, label);
+    }
+
+    // Print a summary; return 0 if all passed, else 1 (a usable exit code).
+    int report() {
+        int total = this.passed + this.failed;
+        print(strings::intToStr(this.passed) + "/" + strings::intToStr(total) + " passed");
+        if (this.failed > 0) { return 1; }
+        return 0;
+    }
+}

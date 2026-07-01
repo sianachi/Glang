@@ -1525,6 +1525,7 @@ The library has grown to ~50 modules. The tables below group them by area.
 | `std/path.lang`   | POSIX path manipulation |
 | `std/time.lang`   | time helpers |
 | `std/io.lang`     | `io::` — `appendFile`, `readLineCount`, `readLines`, `dieWith` |
+| `std/test.lang`   | `Test` — in-language unit tests: `eqInt`/`eqStr`/`eqBool`, `isTrue`/`isFalse`, `throws`, `report` (exit code) |
 
 **Networking & web**
 
