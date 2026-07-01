@@ -630,7 +630,9 @@ class Monomorphizer {
         int n = params.length();
         for (int i = 0; i < n; ++i) {
             Param* p = params.get(i);
-            out.add(new Param(p->name, this.t_type(p->type, m), p->isConst));
+            Param* np = new Param(p->name, this.t_type(p->type, m), p->isConst);
+            np->defaultVal = p->defaultVal;   // const literal; carries no type params
+            out.add(np);
         }
         return out;
     }

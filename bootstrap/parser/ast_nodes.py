@@ -157,6 +157,7 @@ class Param:
     name: str
     type: TypeNode
     is_const: bool = False
+    default: 'Optional[Expr]' = None   # default value expression, or None
     line: int = 0
     col: int = 0
 

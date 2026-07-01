@@ -26,6 +26,7 @@ NATIVE_EXAMPLES = [
     "exceptions_basic",
     "format_demo",
     "hashmap_demo",
+    "default_args",
 ]
 
 

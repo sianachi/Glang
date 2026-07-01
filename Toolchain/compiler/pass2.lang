@@ -995,6 +995,7 @@ class Pass2Checker {
 
                 FunctionInfo* fn_info = this.env->functions.getOr(name, null);
                 if (fn_info != null) {
+                    this.apply_defaults(args, fn_info->params);
                     List<TypeNode*> ptypes = List<TypeNode*>();
                     int pn = fn_info->params.length();
                     for (int i = 0; i < pn; ++i) {
@@ -1008,6 +1009,7 @@ class Pass2Checker {
                 if (class_info != null) {
                     ConstructorDecl* ctor = class_info->constructor;
                     if (ctor != null) {
+                        this.apply_defaults(args, ctor->params);
                         int expected = ctor->params.length();
                         int got = args.length();
                         if (expected != got) {
@@ -1204,6 +1206,7 @@ class Pass2Checker {
                         this.check_access(class_name, mmethod->access, method);
                     }
                 }
+                this.apply_defaults(args, mmethod->params);
                 int expected = mmethod->params.length();
                 int got = args.length();
                 if (expected != got) {
@@ -1403,6 +1406,7 @@ class Pass2Checker {
                 ClassInfo* class_info = this.env->classes.getOr(className, null);
                 this.check_class_access(new TypeNode.NamedType(className));
                 if (class_info->constructor != null) {
+                    this.apply_defaults(args, class_info->constructor->params);
                     int expected = class_info->constructor->params.length();
                     int got = args.length();
                     if (expected != got) {
@@ -1709,6 +1713,20 @@ class Pass2Checker {
                     ctx->captureOrder.add(name);
                 }
             }
+        }
+    }
+
+    // Splice default-value expressions for omitted trailing parameters into the
+    // call's argument list, so the usual checks (and the emitter/interpreter,
+    // which run on the same list) see a complete argument list.
+    void apply_defaults(List<Expr*> args, List<Param*> params) {
+        int have = args.length();
+        int need = params.length();
+        if (have >= need) { return; }
+        for (int i = have; i < need; ++i) {
+            Param* p = params.get(i);
+            if (p->defaultVal == null) { return; }   // missing param w/o default -> arity error
+            args.add(p->defaultVal);
         }
     }
 

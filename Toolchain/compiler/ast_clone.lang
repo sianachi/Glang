@@ -175,7 +175,9 @@ TypeNode* clone_type(TypeNode* t) {
 // ── Param ─────────────────────────────────────────────────────────────────
 
 Param* clone_param(Param* p) {
-    return new Param(p->name, clone_type(p->type), p->isConst);
+    Param* np = new Param(p->name, clone_type(p->type), p->isConst);
+    if (p->defaultVal != null) { np->defaultVal = clone_expr(p->defaultVal); }
+    return np;
 }
 
 // ── Expr ────────────────────────────────────────────────────────────────────

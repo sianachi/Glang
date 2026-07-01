@@ -724,6 +724,7 @@ class Pass2Checker:
 
             fn_info = self._env.functions.get(expr.name)
             if fn_info is not None:
+                self._apply_defaults(expr.args, fn_info.params)
                 return self._check_callable_args(
                     expr.name, expr.args, [p.type for p in fn_info.params],
                     fn_info.return_type, expr.line, expr.col,
@@ -734,6 +735,7 @@ class Pass2Checker:
             if class_info is not None:
                 ctor = class_info.constructor
                 if ctor is not None:
+                    self._apply_defaults(expr.args, ctor.params)
                     expected = len(ctor.params)
                     got = len(expr.args)
                     if expected != got:
@@ -816,6 +818,7 @@ class Pass2Checker:
                         f"'{expr.object.name}' has no method '{expr.method}'",
                         expr.line, expr.col,
                     )
+                self._apply_defaults(expr.args, method.params)
                 expected = len(method.params)
                 got = len(expr.args)
                 if expected != got:
@@ -888,6 +891,7 @@ class Pass2Checker:
                 if method in class_info.instance_methods.values():
                     self._check_access(class_t.name, method.access, expr.method,
                                        expr.line, expr.col)
+            self._apply_defaults(expr.args, method.params)
             expected = len(method.params)
             got = len(expr.args)
             if expected != got:
@@ -1064,6 +1068,7 @@ class Pass2Checker:
                                                line=expr.line, col=expr.col),
                                      expr.line, expr.col)
             if class_info.constructor is not None:
+                self._apply_defaults(expr.args, class_info.constructor.params)
                 expected = len(class_info.constructor.params)
                 got = len(expr.args)
                 if expected != got:
@@ -1625,6 +1630,17 @@ class Pass2Checker:
             line=line,
             col=col,
         )
+
+    def _apply_defaults(self, args, params) -> None:
+        """Splice default-value expressions for omitted trailing parameters into
+        the call's argument list, so the usual arity/type checks (and the
+        interpreter and emitter) see a complete argument list."""
+        if len(args) >= len(params):
+            return
+        for param in params[len(args):]:
+            if getattr(param, "default", None) is None:
+                break   # a missing parameter with no default — arity check reports it
+            args.append(param.default)
 
     def _check_callable_args(
         self,

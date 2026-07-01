@@ -86,11 +86,13 @@ class Param {
     string name;
     TypeNode* type;
     bool isConst;
+    Expr* defaultVal;   // default-value expression, or null
 
     Param(string n, TypeNode* t, bool c) {
         this.name    = n;
         this.type    = t;
         this.isConst = c;
+        this.defaultVal = null;
     }
 }
 

@@ -434,7 +434,31 @@ class DeclParser {
         bool isConst = this.s->accept(TokenType.KW_CONST);
         TypeNode* t = this.tp->parseType();
         Token* n = this.s->expect(TokenType.IDENT);
-        return new Param(n->value, t, isConst);
+        Param* p = new Param(n->value, t, isConst);
+        if (this.s->accept(TokenType.ASSIGN)) {
+            Expr* dv = this.ep->parseExpr(0);
+            if (!(isConstDefault(dv))) {
+                throw new ParseError(
+                    "default value for '" + n->value + "' must be a constant expression",
+                    n->line, n->col);
+            }
+            p->defaultVal = dv;
+        }
+        return p;
+    }
+}
+
+// Defaults are restricted to constant expressions (literals / null / signed
+// numeric literals) so they need no namespace or monomorphization processing.
+bool isConstDefault(Expr* e) {
+    match (*e) {
+        Expr.LiteralExpr(kind, value) => { return true; }
+        Expr.NullExpr() => { return true; }
+        Expr.UnaryExpr(op, operand) => {
+            if (op == "-" || op == "+") { return isConstDefault(operand); }
+            return false;
+        }
+        _ => { return false; }
     }
 }
 

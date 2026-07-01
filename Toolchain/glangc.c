@@ -557,6 +557,7 @@ struct Param {
     char* name;
     TypeNode* type;
     int isConst;
+    Expr* defaultVal;
 };
 
 typedef enum {
@@ -2221,6 +2222,7 @@ Decl* DeclParser__parseModifier(DeclParser* self);
 char* DeclParser__parseMemberName(DeclParser* self);
 List_Param* DeclParser__parseParamList(DeclParser* self);
 Param* DeclParser__parseOneParam(DeclParser* self);
+int isConstDefault(Expr* e);
 Parser* Parser_new(List_Token* tokens);
 void Parser__init(Parser* self, List_Token* tokens);
 void Parser_delete(Parser* self);
@@ -2507,6 +2509,7 @@ TypeNode* Pass2Checker__foreach_element_type(Pass2Checker* self, TypeNode* itera
 char* Pass2Checker__iterable_class_name(Pass2Checker* self, TypeNode* t);
 TypeNode* Pass2Checker__check_closure(Pass2Checker* self, Expr* expr);
 void Pass2Checker__record_capture(Pass2Checker* self, char* name, SymbolTable* defining_scope);
+void Pass2Checker__apply_defaults(Pass2Checker* self, List_Expr* args, List_Param* params);
 TypeNode* Pass2Checker__check_callable_args(Pass2Checker* self, char* name, List_Expr* args, List_TypeNode* param_types, TypeNode* return_type);
 void Pass2Checker__check_access(Pass2Checker* self, char* defining_class, char* access, char* member);
 void Pass2Checker__check_class_access(Pass2Checker* self, TypeNode* type_node);
@@ -4653,6 +4656,7 @@ void Param__init(Param* self, char* n, TypeNode* t, int c) {
     self->name = n;
     self->type = t;
     self->isConst = c;
+    self->defaultVal = NULL;
 }
 
 Param* Param_new(char* n, TypeNode* t, int c) {
@@ -6935,7 +6939,46 @@ Param* DeclParser__parseOneParam(DeclParser* self) {
     int isConst = TokenStream__accept(self->s, TokenType__KW_CONST);
     TypeNode* t = TypeParser__parseType(self->tp);
     Token* n = TokenStream__expect(self->s, TokenType__IDENT);
-    return Param_new(n->value, t, isConst);
+    Param* p = Param_new(n->value, t, isConst);
+    if (TokenStream__accept(self->s, TokenType__ASSIGN)) {
+        Expr* dv = ExprParser__parseExpr(self->ep, 0);
+        if ((!isConstDefault(dv))) {
+            GLANG_THROW(ParseError_new(glang_str_concat(glang_str_concat("default value for '", n->value), "' must be a constant expression"), n->line, n->col), "ParseError");
+        }
+        p->defaultVal = dv;
+    }
+    return p;
+}
+
+int isConstDefault(Expr* e) {
+    {
+        Expr __match__ = (*e);
+        switch (__match__.tag) {
+        case Expr__LiteralExpr: {
+            char* kind = __match__.data.as_LiteralExpr.kind;
+            char* value = __match__.data.as_LiteralExpr.value;
+            return 1;
+            break;
+        }
+        case Expr__NullExpr: {
+            return 1;
+            break;
+        }
+        case Expr__UnaryExpr: {
+            char* op = __match__.data.as_UnaryExpr.op;
+            Expr* operand = __match__.data.as_UnaryExpr.operand;
+            if (((strcmp(op, "-") == 0) || (strcmp(op, "+") == 0))) {
+                return isConstDefault(operand);
+            }
+            return 0;
+            break;
+        }
+        default: {
+            return 0;
+            break;
+        }
+        }
+    }
 }
 
 void Parser__init(Parser* self, List_Token* tokens) {
@@ -10168,7 +10211,11 @@ TypeNode* clone_type(TypeNode* t) {
 }
 
 Param* clone_param(Param* p) {
-    return Param_new(p->name, clone_type(p->type), p->isConst);
+    Param* np = Param_new(p->name, clone_type(p->type), p->isConst);
+    if ((p->defaultVal != NULL)) {
+        np->defaultVal = clone_expr(p->defaultVal);
+    }
+    return np;
 }
 
 Expr* clone_expr(Expr* e) {
@@ -11452,7 +11499,9 @@ List_Param* Monomorphizer__t_params(Monomorphizer* self, List_Param* params, Map
     int64_t n = List_Param__length(params);
     for (int64_t i = 0; (i < n); (++i)) {
         Param* p = List_Param__get(params, i);
-        List_Param__add(out, Param_new(p->name, Monomorphizer__t_type(self, p->type, m), p->isConst));
+        Param* np = Param_new(p->name, Monomorphizer__t_type(self, p->type, m), p->isConst);
+        np->defaultVal = p->defaultVal;
+        List_Param__add(out, np);
     }
     return out;
 }
@@ -14664,6 +14713,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
             }
             FunctionInfo* fn_info = Map_string_FunctionInfo__getOr(self->env->functions, name, NULL);
             if ((fn_info != NULL)) {
+                Pass2Checker__apply_defaults(self, args, fn_info->params);
                 List_TypeNode* ptypes = List_TypeNode_new();
                 int64_t pn = List_Param__length(fn_info->params);
                 for (int64_t i = 0; (i < pn); (++i)) {
@@ -14675,6 +14725,7 @@ TypeNode* Pass2Checker__check_call(Pass2Checker* self, Expr* expr) {
             if ((class_info != NULL)) {
                 ConstructorDecl* ctor = class_info->constructor;
                 if ((ctor != NULL)) {
+                    Pass2Checker__apply_defaults(self, args, ctor->params);
                     int64_t expected = List_Param__length(ctor->params);
                     int64_t got = List_Expr__length(args);
                     if ((expected != got)) {
@@ -14869,6 +14920,7 @@ TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
                     }
                 }
             }
+            Pass2Checker__apply_defaults(self, args, mmethod->params);
             int64_t expected = List_Param__length(mmethod->params);
             int64_t got = List_Expr__length(args);
             if ((expected != got)) {
@@ -15102,6 +15154,7 @@ TypeNode* Pass2Checker__check_new(Pass2Checker* self, Expr* expr) {
             ClassInfo* class_info = Map_string_ClassInfo__getOr(self->env->classes, className, NULL);
             Pass2Checker__check_class_access(self, ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new(className); __up; }));
             if ((class_info->constructor != NULL)) {
+                Pass2Checker__apply_defaults(self, args, class_info->constructor->params);
                 int64_t expected = List_Param__length(class_info->constructor->params);
                 int64_t got = List_Expr__length(args);
                 if ((expected != got)) {
@@ -15508,6 +15561,21 @@ void Pass2Checker__record_capture(Pass2Checker* self, char* name, SymbolTable* d
                 List_string__add(ctx->captureOrder, name);
             }
         }
+    }
+}
+
+void Pass2Checker__apply_defaults(Pass2Checker* self, List_Expr* args, List_Param* params) {
+    int64_t have = List_Expr__length(args);
+    int64_t need = List_Param__length(params);
+    if ((have >= need)) {
+        return;
+    }
+    for (int64_t i = have; (i < need); (++i)) {
+        Param* p = List_Param__get(params, i);
+        if ((p->defaultVal == NULL)) {
+            return;
+        }
+        List_Expr__add(args, p->defaultVal);
     }
 }
 

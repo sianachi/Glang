@@ -1,0 +1,44 @@
+// default_args.lang — optional parameters with default values.
+//
+// A parameter may declare `= <constant>`; callers that omit trailing arguments
+// get the defaults spliced in. Defaults are restricted to constant expressions
+// (literals, null, signed numeric literals). Works for free functions, methods,
+// and constructors.
+//
+//   python3 main.py run examples/default_args.lang
+
+import "std/string.lang";
+
+// Free function with two defaulted parameters.
+string connect(string host, int port = 8080, bool tls = false) {
+    string scheme = tls ? "https" : "http";
+    return scheme + "://" + host + ":" + strings::intToStr(port);
+}
+
+class Logger {
+    string prefix;
+    int level;
+    // Constructor default: most loggers want level 1.
+    Logger(string prefix, int level = 1) {
+        this.prefix = prefix;
+        this.level = level;
+    }
+    // Method default: log at the logger's own level unless told otherwise.
+    void log(string msg, int at = 1) {
+        if (at <= this.level) { print("[" + this.prefix + "] " + msg); }
+    }
+}
+
+int main() {
+    print(connect("example.com"));                 // http://example.com:8080
+    print(connect("example.com", 443));            // http://example.com:443
+    print(connect("example.com", 443, true));      // https://example.com:443
+
+    Logger* log = new Logger("app");               // level defaults to 1
+    log->log("starting");                          // shown (at defaults to 1)
+    log->log("verbose detail", 2);                 // suppressed (2 > level 1)
+
+    Logger* dbg = new Logger("dbg", 3);            // explicit level 3
+    dbg->log("verbose detail", 2);                 // shown (2 <= 3)
+    return 0;
+}

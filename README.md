@@ -601,7 +601,25 @@ void log(string msg) {
 }
 ```
 
-Return type is required. Parameter types are required. No default parameters. No overloading — each function name must be unique within its scope.
+Return type is required. Parameter types are required. There is no overloading —
+each function name is unique within its scope (see §17 for the rationale).
+
+**Default parameters.** A trailing parameter may declare `= <constant>`; callers
+that omit it get the default. Defaults are restricted to constant expressions
+(literals, `null`, signed numeric literals), and once one parameter has a
+default every parameter after it must too. This works for free functions,
+methods, and constructors:
+
+```c
+string connect(string host, int port = 8080, bool tls = false) { ... }
+
+connect("h");            // port 8080, tls false
+connect("h", 443);       // tls false
+connect("h", 443, true);
+```
+
+Omitted arguments are filled with the default expressions at the call site, so a
+default is evaluated in the caller's context.
 
 ### 7.2 Multiple return values
 
@@ -1370,8 +1388,9 @@ declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 `std/linq.lang`, **nullable types** (`T?` with `??` null-coalescing, section 3.5),
 **exception handling** (`throw`/`try`/`catch`/`finally`, section 6.6), **generic
 bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
-inference, the **ternary operator** (`cond ? a : b`), **method dispatch through
-interface pointers**, **terminal-control built-ins** and a **`shell`** built-in
+inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
+**method dispatch through interface pointers**, **terminal-control built-ins**
+and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal
 editor, and a task manager). The standard library also gained `std/format.lang`

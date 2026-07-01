@@ -11,7 +11,7 @@ from .ast_nodes import (
     Decl, Param, ImportDecl, FunctionDecl, ClassDecl, InterfaceDecl,
     FieldDecl, StaticFieldDecl, ConstructorDecl, DestructorDecl, MethodDecl,
     EnumDecl, EnumVariant, NamespaceDecl, UsingDecl, ModifierDecl,
-    UnionDecl, UnionVariant,
+    UnionDecl, UnionVariant, LiteralExpr, NullExpr, UnaryExpr,
 )
 
 
@@ -481,18 +481,47 @@ class DeclParser:
         self._s.advance()
         return f"operator{op_tok.value}", name_tok.line, name_tok.col
 
+    @staticmethod
+    def _is_const_default(e) -> bool:
+        # Defaults are restricted to constant expressions so they need no
+        # namespace/monomorphization processing when spliced into call sites.
+        if isinstance(e, (LiteralExpr, NullExpr)):
+            return True
+        if isinstance(e, UnaryExpr) and e.op in ("-", "+"):
+            return DeclParser._is_const_default(e.operand)
+        return False
+
+    def _parse_one_param(self) -> Param:
+        is_const = bool(self._s.match(TokenType.KW_CONST))
+        t = self._tp.parse_type()
+        n = self._s.expect(TokenType.IDENT)
+        default = None
+        if self._s.match(TokenType.ASSIGN):
+            default = self._ep.parse_expr()
+            if not self._is_const_default(default):
+                raise ParseError(
+                    f"default value for '{n.value}' must be a constant expression",
+                    n.line, n.col,
+                )
+        return Param(name=n.value, type=t, is_const=is_const, default=default,
+                     line=n.line, col=n.col)
+
     def _parse_param_list(self) -> List[Param]:
         self._s.expect(TokenType.LPAREN)
         params: List[Param] = []
         if not self._s.check(TokenType.RPAREN):
-            is_const = bool(self._s.match(TokenType.KW_CONST))
-            t = self._tp.parse_type()
-            n = self._s.expect(TokenType.IDENT)
-            params.append(Param(name=n.value, type=t, is_const=is_const, line=n.line, col=n.col))
+            params.append(self._parse_one_param())
             while self._s.match(TokenType.COMMA):
-                is_const = bool(self._s.match(TokenType.KW_CONST))
-                t = self._tp.parse_type()
-                n = self._s.expect(TokenType.IDENT)
-                params.append(Param(name=n.value, type=t, is_const=is_const, line=n.line, col=n.col))
+                params.append(self._parse_one_param())
         self._s.expect(TokenType.RPAREN)
+        # A parameter with a default may not be followed by one without.
+        seen_default = False
+        for p in params:
+            if p.default is not None:
+                seen_default = True
+            elif seen_default:
+                raise ParseError(
+                    f"non-default parameter '{p.name}' follows a default parameter",
+                    p.line, p.col,
+                )
         return params
