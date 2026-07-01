@@ -1,0 +1,48 @@
+// grep.lang — print lines matching a regular expression.
+//
+// A small grep built on std/regex.lang: it reads a file (or stdin with "-"),
+// tests each line against the pattern, and prints the matching lines with their
+// line numbers, followed by a match count. Showcases the regex engine, file/stdin
+// I/O, and string interpolation.
+//
+//   grep <pattern> <file|->
+//
+// From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/grep.lang "[0-9]+" access.log
+//   cat file | python3 bootstrap/main.py run real-world-applications/grep.lang "error" -
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/grep.lang /tmp/grep.c
+//   gcc -O2 /tmp/grep.c runtime/glang_runtime.c -o /tmp/grep && /tmp/grep "TODO" src.txt
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/regex.lang";
+
+int main() {
+    if (getArgCount() < 2) {
+        print("usage: grep <pattern> <file|->");
+        return 1;
+    }
+    string pattern = getArg(0);
+    string path = getArg(1);
+
+    Regex* re = new Regex(pattern);
+
+    string data = path == "-" ? readStdin() : readFile(path);
+    List<string> lines = strings::split(data, '\n');
+
+    int matches = 0;
+    int total = lines.length();
+    // A trailing newline yields an empty final segment; don't scan it.
+    if (total > 0 && len(lines.get(total - 1)) == 0) { total = total - 1; }
+
+    for (int i = 0; i < total; i = i + 1) {
+        string line = lines.get(i);
+        if (re->test(line)) {
+            print($"{i + 1}: {line}");
+            matches = matches + 1;
+        }
+    }
+    print($"-- {matches} match(es) for /{pattern}/ in {total} line(s)");
+    return 0;
+}
