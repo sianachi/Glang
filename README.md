@@ -1432,6 +1432,7 @@ The library has grown to ~50 modules. The tables below group them by area.
 |---|---|
 | `std/string.lang`        | `strings::` — `trim`, `split`, `join`, `padLeft`, `repeat`, `reverse`, `replaceChar`, `equalsIgnoreCase`, … |
 | `std/stringbuilder.lang` | `StringBuilder` — O(n) mutable string accumulation |
+| `std/format.lang`        | `Fmt` — printf-style formatting: `{}`/`{N}` placeholders, width/align/fill specs |
 | `std/char.lang`          | `chars::` — classification/conversion (`isDigit`, `toUpper`, …) |
 | `std/hash.lang`          | CRC32 and FNV-1a checksums |
 | `std/hex.lang` · `std/base64.lang` | hex and RFC 4648 Base64 encoding |

@@ -1,0 +1,25 @@
+// format_demo.lang — printf-style formatting with std/format.lang.
+//
+// Builds an aligned report table using width/alignment specs, showing how the
+// fluent formatter replaces hand-rolled string concatenation.
+//
+//   python3 main.py run examples/format_demo.lang
+
+import "std/format.lang";
+
+// One right-aligned numeric column and one left-aligned label column.
+void row(string name, int score, int outof) {
+    print(fmt("{:<10}{:>4} / {:<4}")->argStr(name)->argInt(score)->argInt(outof)->build());
+}
+
+int main() {
+    print(fmt("{:<10}{:>4}   {:<4}")->argStr("NAME")->argStr("PTS")->argStr("MAX")->build());
+    print(fmt("{:->20}")->argStr("")->build());   // a rule of dashes
+    row("Ada", 95, 100);
+    row("Grace", 8, 10);
+    row("Katherine", 143, 150);
+
+    // Indexed arguments and literal braces.
+    print(fmt("{0} = {1}, {1} squared via {{macro}}")->argStr("x")->argInt(9)->build());
+    return 0;
+}

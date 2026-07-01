@@ -24,6 +24,7 @@ NATIVE_EXAMPLES = [
     "interfaces",
     "ternary",
     "exceptions_basic",
+    "format_demo",
 ]
 
 

@@ -1,0 +1,108 @@
+// std/format.lang — printf-style string formatting with a fluent builder.
+//
+// Glang has no variadic functions, so arguments are supplied by chained,
+// type-specific `arg*` calls; each returns the builder so calls read like one
+// expression:
+//
+//   print(fmt("{} scored {}/{}")->argStr("Ada")->argInt(95)->argInt(100)->build());
+//   // Ada scored 95/100
+//
+// Template syntax:
+//   {}        next positional argument
+//   {N}       argument N (0-based)
+//   {:spec}   / {N:spec}   apply an alignment/width spec
+//   {{  }}    literal braces
+//
+// A spec is `[fill][align]width`, where align is `<` (left), `>` (right), or
+// `^` (centre); fill defaults to a space and align to left:
+//
+//   fmt("[{:>6}]")->argInt(42)->build()      // [    42]
+//   fmt("[{:*^7}]")->argStr("hi")->build()   // [**hi***]
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+
+class Fmt {
+    string template;
+    List<string> args;
+
+    Fmt(string template) {
+        this.template = template;
+        this.args = List<string>();
+    }
+
+    Fmt* argStr(string s)  { this.args.add(s); return this; }
+    Fmt* argInt(int n)     { this.args.add(strings::intToStr(n)); return this; }
+    Fmt* argFloat(float f) { this.args.add(toString(f)); return this; }
+    Fmt* argBool(bool b)   { this.args.add(b ? "true" : "false"); return this; }
+    Fmt* argChar(char c)   { this.args.add(toString(c)); return this; }
+
+    string build() {
+        StringBuilder out = StringBuilder();
+        int n = len(this.template);
+        int argIdx = 0;
+        int i = 0;
+        while (i < n) {
+            char c = this.template[i];
+            if (c == '{') {
+                if (i + 1 < n && this.template[i + 1] == '{') { out.appendChar('{'); i = i + 2; continue; }
+                int j = i + 1;
+                while (j < n && this.template[j] != '}') { j = j + 1; }
+                string inner = substr(this.template, i + 1, j);
+                string idxStr = inner;
+                string spec = "";
+                int colon = strings::indexOf(inner, ':');
+                if (colon >= 0) {
+                    idxStr = substr(inner, 0, colon);
+                    spec = substr(inner, colon + 1, len(inner));
+                }
+                int useIdx = argIdx;
+                if (len(idxStr) > 0) { useIdx = parseInt(idxStr); }
+                else { argIdx = argIdx + 1; }
+                string val = "";
+                if (useIdx >= 0 && useIdx < this.args.length()) { val = this.args.get(useIdx); }
+                out.append(fmtApplySpec(val, spec));
+                i = j + 1;
+            } else if (c == '}') {
+                if (i + 1 < n && this.template[i + 1] == '}') { out.appendChar('}'); i = i + 2; continue; }
+                out.appendChar('}');
+                i = i + 1;
+            } else {
+                out.appendChar(c);
+                i = i + 1;
+            }
+        }
+        return out.build();
+    }
+}
+
+Fmt* fmt(string template) { return new Fmt(template); }
+
+// ── Spec handling ───────────────────────────────────────────────────────
+
+bool fmtIsAlign(char c) { return c == '<' || c == '>' || c == '^'; }
+
+string fmtApplySpec(string val, string spec) {
+    if (len(spec) == 0) { return val; }
+    char fill = ' ';
+    char align = '<';
+    int p = 0;
+    int sn = len(spec);
+    if (sn >= 2 && fmtIsAlign(spec[1])) { fill = spec[0]; align = spec[1]; p = 2; }
+    else if (sn >= 1 && fmtIsAlign(spec[0])) { align = spec[0]; p = 1; }
+    string wStr = substr(spec, p, sn);
+    int width = 0;
+    if (len(wStr) > 0) { width = parseInt(wStr); }
+    int slen = len(val);
+    if (slen >= width) { return val; }
+    int total = width - slen;
+    string f = toString(fill);
+    if (align == '>') { return strings::repeat(f, total) + val; }
+    if (align == '^') {
+        int left = total / 2;
+        int right = total - left;
+        return strings::repeat(f, left) + val + strings::repeat(f, right);
+    }
+    return val + strings::repeat(f, total);
+}
