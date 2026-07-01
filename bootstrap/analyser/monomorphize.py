@@ -620,16 +620,18 @@ class Monomorphizer:
     ) -> None:
         mapping = dict(zip(template.type_params, args))
         for type_param, arg in zip(template.type_params, args):
-            bound = template.type_param_bounds.get(type_param)
-            if bound is None:
+            bounds = template.type_param_bounds.get(type_param)
+            if not bounds:
                 continue
-            concrete_bound = self._t_type(copy.deepcopy(bound), mapping)
-            if not self._type_satisfies_bound(arg, concrete_bound):
-                raise TypeError(
-                    f"type argument '{type_str(arg)}' does not satisfy "
-                    f"bound '{type_str(concrete_bound)}' for '{type_param}'",
-                    line, col,
-                )
+            # `T extends A & B` requires the argument to satisfy every bound.
+            for bound in bounds:
+                concrete_bound = self._t_type(copy.deepcopy(bound), mapping)
+                if not self._type_satisfies_bound(arg, concrete_bound):
+                    raise TypeError(
+                        f"type argument '{type_str(arg)}' does not satisfy "
+                        f"bound '{type_str(concrete_bound)}' for '{type_param}'",
+                        line, col,
+                    )
 
     def _type_satisfies_bound(self, arg: TypeNode, bound: TypeNode) -> bool:
         # A class value and a pointer to it are the same handle; compare the

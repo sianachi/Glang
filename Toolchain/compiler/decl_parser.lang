@@ -26,8 +26,8 @@ bool isOverloadableOp(TokenType t) {
 // Result of parsing a `<T, U extends Bound, ...>` type-parameter list.
 class TypeParams {
     List<string> names;
-    Map<string, TypeNode*> bounds;
-    TypeParams(List<string> n, Map<string, TypeNode*> b) { this.names = n; this.bounds = b; }
+    Map<string, List<TypeNode*>> bounds;   // T -> [A, B] for `T extends A & B`
+    TypeParams(List<string> n, Map<string, List<TypeNode*>> b) { this.names = n; this.bounds = b; }
 }
 
 class DeclParser {
@@ -195,7 +195,7 @@ class DeclParser {
 
     TypeParams* parseTypeParams() {
         List<string> names = List<string>();
-        Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+        Map<string, List<TypeNode*>> bounds = Map<string, List<TypeNode*>>();
         if (!(this.s->accept(TokenType.LT))) {
             return new TypeParams(names, bounds);
         }
@@ -207,11 +207,16 @@ class DeclParser {
         return new TypeParams(names, bounds);
     }
 
-    void parseOneTypeParam(List<string> names, Map<string, TypeNode*> bounds) {
+    void parseOneTypeParam(List<string> names, Map<string, List<TypeNode*>> bounds) {
         Token* nameTok = this.s->expect(TokenType.IDENT);
         names.add(nameTok->value);
         if (this.s->accept(TokenType.KW_EXTENDS)) {
-            bounds.set(nameTok->value, this.tp->parseType());
+            List<TypeNode*> bs = List<TypeNode*>();
+            bs.add(this.tp->parseType());
+            while (this.s->accept(TokenType.AMP)) {   // `T extends A & B & ...`
+                bs.add(this.tp->parseType());
+            }
+            bounds.set(nameTok->value, bs);
         }
     }
 

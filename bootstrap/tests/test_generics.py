@@ -74,8 +74,8 @@ class TestGenericParsing:
         decl = prog.declarations[0]
         assert isinstance(decl, ClassDecl)
         assert decl.type_params == ["T"]
-        assert isinstance(decl.type_param_bounds["T"], NamedType)
-        assert decl.type_param_bounds["T"].name == "Named"
+        assert isinstance(decl.type_param_bounds["T"][0], NamedType)
+        assert decl.type_param_bounds["T"][0].name == "Named"
 
     def test_generic_function_records_type_params(self):
         prog = parse("T identity<T>(T x) { return x; }")
@@ -88,8 +88,8 @@ class TestGenericParsing:
         decl = prog.declarations[0]
         assert isinstance(decl, FunctionDecl)
         assert decl.type_params == ["T"]
-        assert isinstance(decl.type_param_bounds["T"], NamedType)
-        assert decl.type_param_bounds["T"].name == "Named"
+        assert isinstance(decl.type_param_bounds["T"][0], NamedType)
+        assert decl.type_param_bounds["T"][0].name == "Named"
 
     def test_generic_type_in_field(self):
         prog = parse("class C { List<int> xs; C() {} }")
@@ -246,6 +246,47 @@ class TestGenericExecution:
         """
         code, out = run_out(src)
         assert out == ["Ada"]
+
+    def test_multiple_bounds_parse_as_a_list(self):
+        prog = parse("T d<T extends Named & Aged>(T x) { return x; }")
+        bounds = prog.declarations[0].type_param_bounds["T"]
+        assert [b.name for b in bounds] == ["Named", "Aged"]
+
+    def test_multiple_bounds_accept_type_satisfying_all(self):
+        src = """
+        interface Named { string name(); }
+        interface Aged { int age(); }
+        class Person implements Named, Aged {
+            Person() {}
+            string name() { return "Ada"; }
+            int age() { return 36; }
+        }
+        string describe<T extends Named & Aged>(T x) {
+            return x.name() + toString(x.age());
+        }
+        int main() {
+            print(describe(Person()));
+            return 0;
+        }
+        """
+        code, out = run_out(src)
+        assert out == ["Ada36"]
+
+    def test_multiple_bounds_reject_type_missing_one(self):
+        # OnlyNamed satisfies Named but not Aged, so it fails the Aged bound.
+        err(
+            """
+            interface Named { string name(); }
+            interface Aged { int age(); }
+            class OnlyNamed implements Named {
+                OnlyNamed() {}
+                string name() { return "x"; }
+            }
+            string describe<T extends Named & Aged>(T x) { return x.name(); }
+            int main() { print(describe(OnlyNamed())); return 0; }
+            """,
+            "does not satisfy bound 'Aged'",
+        )
 
     def test_growable_generic_list(self):
         src = """

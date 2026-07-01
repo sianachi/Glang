@@ -209,7 +209,7 @@ class FunctionDecl(Decl):
     return_type: TypeNode
     body: Block
     type_params: List[str] = field(default_factory=list)
-    type_param_bounds: Dict[str, TypeNode] = field(default_factory=dict)
+    type_param_bounds: Dict[str, List[TypeNode]] = field(default_factory=dict)
     line: int = 0
     col: int = 0
 
@@ -341,7 +341,7 @@ class ClassDecl(Decl):
     access: str = "public"
     is_managed: bool = False
     type_params: List[str] = field(default_factory=list)
-    type_param_bounds: Dict[str, TypeNode] = field(default_factory=dict)
+    type_param_bounds: Dict[str, List[TypeNode]] = field(default_factory=dict)
     line: int = 0
     col: int = 0
 

@@ -1,22 +1,31 @@
 // generic_inference.lang - generic bounds, inferred generic calls, and var.
 //
+// Covers single bounds (`T extends Named`), multiple bounds
+// (`T extends Named & Aged` — the argument must satisfy every interface),
+// type-argument inference at call sites, and `var` local inference.
+//
 // Run:
-//   python3 main.py run examples/generic_inference.lang
+//   python3 bootstrap/main.py run Toolchain/examples/generic_inference.lang
 
 interface Named {
     string name();
 }
 
-class Person implements Named {
+interface Aged {
+    int age();
+}
+
+class Person implements Named, Aged {
     string label;
+    int years;
 
-    Person(string label) {
+    Person(string label, int years) {
         this.label = label;
+        this.years = years;
     }
 
-    string name() {
-        return this.label;
-    }
+    string name() { return this.label; }
+    int age() { return this.years; }
 }
 
 class Box<T extends Named> {
@@ -39,9 +48,14 @@ T choose<T extends Named>(T first, T second) {
     return first;
 }
 
+// A multi-bounded type parameter: T must be BOTH Named and Aged.
+string describe<T extends Named & Aged>(T who) {
+    return who.name() + " (" + toString(who.age()) + ")";
+}
+
 int main() {
-    var ada = Person("Ada");
-    var grace = Person("Grace");
+    var ada = Person("Ada", 36);
+    var grace = Person("Grace", 45);
 
     var chosen = choose(ada, grace);
     print(chosen.name());
@@ -49,8 +63,12 @@ int main() {
     var boxed = Box(chosen);
     print(boxed.get().name());
 
+    // Inference picks T = Person, which satisfies Named & Aged.
+    print(describe(ada));
+    print(describe<Person>(grace));
+
     var answer = identity(42);
     print(answer);
 
-    return answer;
+    return 0;
 }

@@ -1426,8 +1426,9 @@ declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 **object modifiers** (section 12) with LINQ-style collection operations via
 `std/linq.lang`, **nullable types** (`T?` with `??` null-coalescing, section 3.5),
 **exception handling** (`throw`/`try`/`catch`/`finally`, section 6.6), **generic
-bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
-inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
+bounds** — single and **multiple** (`<T extends Named & Aged>`, satisfied only by
+a type implementing every listed interface) — with **inferred generic calls** and
+`var` local inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
 **string interpolation** (`$"...{expr}..."`), the **`uint`** unsigned 64-bit
 type, **method dispatch through interface pointers**, **terminal-control
 built-ins**, **filesystem/environment built-ins** (`makeDir`/`isDir`/

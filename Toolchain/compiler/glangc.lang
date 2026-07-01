@@ -47,7 +47,7 @@ Decl* make_exception_decl() {
     ConstructorDecl* ctor = new ConstructorDecl(ctorParams, new Stmt.Block(ctorStmts, List<string>()), false, List<Expr*>());
     List<string> ifaces = List<string>();
     List<string> typeParams = List<string>();
-    Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+    Map<string, List<TypeNode*>> bounds = Map<string, List<TypeNode*>>();
     return new Decl.ClassDecl("Exception", fields, sfields, methods, "", ifaces,
                               ctor, null, "public", typeParams, bounds, false);
 }

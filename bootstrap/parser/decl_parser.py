@@ -224,7 +224,11 @@ class DeclParser:
         name_tok = self._s.expect(TokenType.IDENT)
         params.append(name_tok.value)
         if self._s.match(TokenType.KW_EXTENDS):
-            bounds[name_tok.value] = self._tp.parse_type()
+            # `T extends A & B & ...` — a type parameter may carry several bounds.
+            bs = [self._tp.parse_type()]
+            while self._s.match(TokenType.AMP):
+                bs.append(self._tp.parse_type())
+            bounds[name_tok.value] = bs
 
     # ------------------------------------------------------------------
     # Classes

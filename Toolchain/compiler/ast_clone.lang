@@ -134,12 +134,16 @@ List<string> clone_str_list(List<string> xs) {
 }
 
 // A Map<string, TypeNode*> cloned into a fresh Map with cloned values.
-Map<string, TypeNode*> clone_bounds(Map<string, TypeNode*> m) {
-    Map<string, TypeNode*> out = Map<string, TypeNode*>();
+Map<string, List<TypeNode*>> clone_bounds(Map<string, List<TypeNode*>> m) {
+    Map<string, List<TypeNode*>> out = Map<string, List<TypeNode*>>();
     int n = m.size;
     for (int i = 0; i < n; ++i) {
         string k = m.keys[i];
-        out.set(k, clone_type(m.vals[i]));
+        List<TypeNode*> src = m.vals[i];
+        List<TypeNode*> dst = List<TypeNode*>();
+        int bn = src.length();
+        for (int j = 0; j < bn; ++j) { dst.add(clone_type(src.get(j))); }
+        out.set(k, dst);
     }
     return out;
 }

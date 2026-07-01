@@ -437,13 +437,13 @@ union Decl {
     ImportDecl { string path; }
     FunctionDecl {
         string name; List<Param*> params; TypeNode* returnType; Stmt* body;
-        List<string> typeParams; Map<string, TypeNode*> bounds;
+        List<string> typeParams; Map<string, List<TypeNode*>> bounds;   // T -> [A, B] for `T extends A & B`
     }
     ClassDecl {
         string name; List<FieldDecl*> fields; List<StaticFieldDecl*> staticFields;
         List<MethodDecl*> methods; string superclass; List<string> interfaces;
         ConstructorDecl* constructor; DestructorDecl* destructor; string access;
-        List<string> typeParams; Map<string, TypeNode*> bounds;
+        List<string> typeParams; Map<string, List<TypeNode*>> bounds;
         bool isManaged;
     }
     InterfaceDecl { string name; List<MethodDecl*> methods; }
@@ -474,7 +474,7 @@ string showStrList(List<string> xs) {
     return sb.build();
 }
 
-string showTypeParams(List<string> tps, Map<string, TypeNode*> bounds) {
+string showTypeParams(List<string> tps, Map<string, List<TypeNode*>> bounds) {
     StringBuilder sb = StringBuilder();
     sb.appendChar('[');
     int n = tps.length();
@@ -484,7 +484,12 @@ string showTypeParams(List<string> tps, Map<string, TypeNode*> bounds) {
         sb.append(tp);
         if (bounds.has(tp)) {
             sb.appendChar(':');
-            sb.append(showType(bounds.getOr(tp, null)));
+            List<TypeNode*> bs = bounds.getOr(tp, null);
+            int bn = bs.length();
+            for (int j = 0; j < bn; ++j) {
+                if (j > 0) { sb.appendChar('&'); }
+                sb.append(showType(bs.get(j)));
+            }
         }
     }
     sb.appendChar(']');

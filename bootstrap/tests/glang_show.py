@@ -105,7 +105,8 @@ def _type_params(tps, bounds):
     parts = []
     for tp in tps:
         if tp in bounds:
-            parts.append(f"{tp}:{_type_str(bounds[tp])}")
+            joined = "&".join(_type_str(b) for b in bounds[tp])
+            parts.append(f"{tp}:{joined}")
         else:
             parts.append(tp)
     return "[" + " ".join(parts) + "]"

@@ -474,11 +474,15 @@ class NamespaceResolver {
     // Resolve each type-parameter bound in place.  Bound keys are exactly the
     // type-parameter names, so we iterate `tps` rather than the map's keys
     // (Map exposes no key iteration).
-    void r_bounds(List<string> tps, Map<string, TypeNode*> bounds, List<string> p) {
+    void r_bounds(List<string> tps, Map<string, List<TypeNode*>> bounds, List<string> p) {
         for (int i = 0; i < tps.length(); ++i) {
             string k = tps.get(i);
             if (bounds.has(k)) {
-                bounds.set(k, this.r_type(bounds.getOr(k, null), p));
+                List<TypeNode*> bs = bounds.getOr(k, null);
+                List<TypeNode*> out = List<TypeNode*>();
+                int bn = bs.length();
+                for (int j = 0; j < bn; ++j) { out.add(this.r_type(bs.get(j), p)); }
+                bounds.set(k, out);
             }
         }
     }

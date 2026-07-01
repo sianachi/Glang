@@ -32,6 +32,7 @@ NATIVE_EXAMPLES = [
     "fs_demo",
     "regex_demo",
     "test_demo",
+    "generic_inference",
 ]
 
 

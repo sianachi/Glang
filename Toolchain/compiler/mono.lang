@@ -590,7 +590,7 @@ class Monomorphizer {
                 Stmt* nbody = this.t_stmt(body, m);
                 this.pop_scope();
                 return new Decl.FunctionDecl(mangled, nparams, nret, nbody,
-                    List<string>(), Map<string, TypeNode*>());
+                    List<string>(), Map<string, List<TypeNode*>>());
             }
             Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bounds, mgd) => {
                 List<FieldDecl*> nfields = List<FieldDecl*>();
@@ -619,7 +619,7 @@ class Monomorphizer {
                 }
                 return new Decl.ClassDecl(mangled, nfields, nsfields, nmethods, superName,
                     clone_str_list(ifaces), nctor, ndtor, access,
-                    List<string>(), Map<string, TypeNode*>(), mgd);
+                    List<string>(), Map<string, List<TypeNode*>>(), mgd);
             }
             _ => { return clone_decl(d); }
         }
@@ -1096,7 +1096,7 @@ class Monomorphizer {
 
     void check_type_arg_bounds(Decl* template, List<TypeNode*> args, int line, int col) {
         List<string> tparams = List<string>();
-        Map<string, TypeNode*> bounds = Map<string, TypeNode*>();
+        Map<string, List<TypeNode*>> bounds = Map<string, List<TypeNode*>>();
         match (*template) {
             Decl.ClassDecl(name, fields, sfields, methods, superName, ifaces, ctor, dtor, access, tps, bnds, mgd) => {
                 tparams = tps; bounds = bnds;
@@ -1115,13 +1115,17 @@ class Monomorphizer {
             string tp = tparams.get(i);
             TypeNode* arg = args.get(i);
             if (!(bounds.has(tp))) { continue; }
-            TypeNode* bound = bounds.getOr(tp, null);
-            TypeNode* concrete_bound = this.t_type(clone_type(bound), mapping);
-            if (!(this.type_satisfies_bound(arg, concrete_bound))) {
-                throw new AnalyzeError(
-                    "type argument '" + type_str(arg) + "' does not satisfy bound '"
-                    + type_str(concrete_bound) + "' for '" + tp + "'",
-                    line, col);
+            List<TypeNode*> bs = bounds.getOr(tp, null);
+            int bn = bs.length();
+            // A multi-bound `T extends A & B` requires the argument to satisfy every part.
+            for (int j = 0; j < bn; ++j) {
+                TypeNode* concrete_bound = this.t_type(clone_type(bs.get(j)), mapping);
+                if (!(this.type_satisfies_bound(arg, concrete_bound))) {
+                    throw new AnalyzeError(
+                        "type argument '" + type_str(arg) + "' does not satisfy bound '"
+                        + type_str(concrete_bound) + "' for '" + tp + "'",
+                        line, col);
+                }
             }
         }
     }

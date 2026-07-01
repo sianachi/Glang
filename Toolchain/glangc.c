@@ -225,8 +225,8 @@ typedef struct List_MatchArm List_MatchArm;
 #define List_MatchArm__CID ((int64_t)57)
 typedef struct List_FieldDecl List_FieldDecl;
 #define List_FieldDecl__CID ((int64_t)58)
-typedef struct Map_string_TypeNode Map_string_TypeNode;
-#define Map_string_TypeNode__CID ((int64_t)59)
+typedef struct Map_string_List_TypeNode Map_string_List_TypeNode;
+#define Map_string_List_TypeNode__CID ((int64_t)59)
 typedef struct List_StaticFieldDecl List_StaticFieldDecl;
 #define List_StaticFieldDecl__CID ((int64_t)60)
 typedef struct List_MethodDecl List_MethodDecl;
@@ -271,64 +271,66 @@ typedef struct List_List_string List_List_string;
 #define List_List_string__CID ((int64_t)80)
 typedef struct List_FlatDecl List_FlatDecl;
 #define List_FlatDecl__CID ((int64_t)81)
+typedef struct Map_string_TypeNode Map_string_TypeNode;
+#define Map_string_TypeNode__CID ((int64_t)82)
 typedef struct Map_string_Decl Map_string_Decl;
-#define Map_string_Decl__CID ((int64_t)82)
+#define Map_string_Decl__CID ((int64_t)83)
 typedef struct Map_string_List_string Map_string_List_string;
-#define Map_string_List_string__CID ((int64_t)83)
+#define Map_string_List_string__CID ((int64_t)84)
 typedef struct Map_string_InstanceArgs Map_string_InstanceArgs;
-#define Map_string_InstanceArgs__CID ((int64_t)84)
+#define Map_string_InstanceArgs__CID ((int64_t)85)
 typedef struct List_Map_string_TypeNode List_Map_string_TypeNode;
-#define List_Map_string_TypeNode__CID ((int64_t)85)
+#define List_Map_string_TypeNode__CID ((int64_t)86)
 typedef struct List_WorkItem List_WorkItem;
-#define List_WorkItem__CID ((int64_t)86)
+#define List_WorkItem__CID ((int64_t)87)
 typedef struct Map_string_List_Decl Map_string_List_Decl;
-#define Map_string_List_Decl__CID ((int64_t)87)
+#define Map_string_List_Decl__CID ((int64_t)88)
 typedef struct List_ClosureContext List_ClosureContext;
-#define List_ClosureContext__CID ((int64_t)88)
+#define List_ClosureContext__CID ((int64_t)89)
 typedef struct List_Map_string_string List_Map_string_string;
-#define List_Map_string_string__CID ((int64_t)89)
+#define List_Map_string_string__CID ((int64_t)90)
 typedef struct Span_string Span_string;
-#define Span_string__CID ((int64_t)90)
+#define Span_string__CID ((int64_t)91)
 typedef struct Span_Token Span_Token;
-#define Span_Token__CID ((int64_t)91)
+#define Span_Token__CID ((int64_t)92)
 typedef struct Span_TypeNode Span_TypeNode;
-#define Span_TypeNode__CID ((int64_t)92)
+#define Span_TypeNode__CID ((int64_t)93)
 typedef struct Span_Expr Span_Expr;
-#define Span_Expr__CID ((int64_t)93)
+#define Span_Expr__CID ((int64_t)94)
 typedef struct Span_Param Span_Param;
-#define Span_Param__CID ((int64_t)94)
+#define Span_Param__CID ((int64_t)95)
 typedef struct Span_Stmt Span_Stmt;
-#define Span_Stmt__CID ((int64_t)95)
+#define Span_Stmt__CID ((int64_t)96)
 typedef struct Span_CatchClause Span_CatchClause;
-#define Span_CatchClause__CID ((int64_t)96)
+#define Span_CatchClause__CID ((int64_t)97)
 typedef struct Span_MatchArm Span_MatchArm;
-#define Span_MatchArm__CID ((int64_t)97)
+#define Span_MatchArm__CID ((int64_t)98)
 typedef struct Span_FieldDecl Span_FieldDecl;
-#define Span_FieldDecl__CID ((int64_t)98)
+#define Span_FieldDecl__CID ((int64_t)99)
 typedef struct Span_StaticFieldDecl Span_StaticFieldDecl;
-#define Span_StaticFieldDecl__CID ((int64_t)99)
+#define Span_StaticFieldDecl__CID ((int64_t)100)
 typedef struct Span_MethodDecl Span_MethodDecl;
-#define Span_MethodDecl__CID ((int64_t)100)
+#define Span_MethodDecl__CID ((int64_t)101)
 typedef struct Span_EnumVariant Span_EnumVariant;
-#define Span_EnumVariant__CID ((int64_t)101)
+#define Span_EnumVariant__CID ((int64_t)102)
 typedef struct Span_Decl Span_Decl;
-#define Span_Decl__CID ((int64_t)102)
+#define Span_Decl__CID ((int64_t)103)
 typedef struct Span_UnionVariant Span_UnionVariant;
-#define Span_UnionVariant__CID ((int64_t)103)
+#define Span_UnionVariant__CID ((int64_t)104)
 typedef struct Span_InterpSeg Span_InterpSeg;
-#define Span_InterpSeg__CID ((int64_t)104)
+#define Span_InterpSeg__CID ((int64_t)105)
 typedef struct Span_List_string Span_List_string;
-#define Span_List_string__CID ((int64_t)105)
+#define Span_List_string__CID ((int64_t)106)
 typedef struct Span_FlatDecl Span_FlatDecl;
-#define Span_FlatDecl__CID ((int64_t)106)
+#define Span_FlatDecl__CID ((int64_t)107)
 typedef struct Span_Map_string_TypeNode Span_Map_string_TypeNode;
-#define Span_Map_string_TypeNode__CID ((int64_t)107)
+#define Span_Map_string_TypeNode__CID ((int64_t)108)
 typedef struct Span_WorkItem Span_WorkItem;
-#define Span_WorkItem__CID ((int64_t)108)
+#define Span_WorkItem__CID ((int64_t)109)
 typedef struct Span_ClosureContext Span_ClosureContext;
-#define Span_ClosureContext__CID ((int64_t)109)
+#define Span_ClosureContext__CID ((int64_t)110)
 typedef struct Span_Map_string_string Span_Map_string_string;
-#define Span_Map_string_string__CID ((int64_t)110)
+#define Span_Map_string_string__CID ((int64_t)111)
 typedef int64_t TokenType;
 #define TokenType__INT_LIT ((int64_t)0)
 #define TokenType__FLOAT_LIT ((int64_t)1)
@@ -1208,7 +1210,7 @@ struct Decl {
             TypeNode* returnType;
             Stmt* body;
             List_string* typeParams;
-            Map_string_TypeNode* bounds;
+            Map_string_List_TypeNode* bounds;
         } as_FunctionDecl;
         struct {
             char* name;
@@ -1221,7 +1223,7 @@ struct Decl {
             DestructorDecl* destructor;
             char* access;
             List_string* typeParams;
-            Map_string_TypeNode* bounds;
+            Map_string_List_TypeNode* bounds;
             int isManaged;
         } as_ClassDecl;
         struct {
@@ -1260,7 +1262,7 @@ static Decl Decl__ImportDecl_new(char* path) {
     return __v;
 }
 
-static Decl Decl__FunctionDecl_new(char* name, List_Param* params, TypeNode* returnType, Stmt* body, List_string* typeParams, Map_string_TypeNode* bounds) {
+static Decl Decl__FunctionDecl_new(char* name, List_Param* params, TypeNode* returnType, Stmt* body, List_string* typeParams, Map_string_List_TypeNode* bounds) {
     Decl __v;
     __v.tag = Decl__FunctionDecl;
     __v.data.as_FunctionDecl.name = name;
@@ -1272,7 +1274,7 @@ static Decl Decl__FunctionDecl_new(char* name, List_Param* params, TypeNode* ret
     return __v;
 }
 
-static Decl Decl__ClassDecl_new(char* name, List_FieldDecl* fields, List_StaticFieldDecl* staticFields, List_MethodDecl* methods, char* superclass, List_string* interfaces, ConstructorDecl* constructor, DestructorDecl* destructor, char* access, List_string* typeParams, Map_string_TypeNode* bounds, int isManaged) {
+static Decl Decl__ClassDecl_new(char* name, List_FieldDecl* fields, List_StaticFieldDecl* staticFields, List_MethodDecl* methods, char* superclass, List_string* interfaces, ConstructorDecl* constructor, DestructorDecl* destructor, char* access, List_string* typeParams, Map_string_List_TypeNode* bounds, int isManaged) {
     Decl __v;
     __v.tag = Decl__ClassDecl;
     __v.data.as_ClassDecl.name = name;
@@ -1382,7 +1384,7 @@ struct StmtParser {
 struct TypeParams {
     int64_t __cid;
     List_string* names;
-    Map_string_TypeNode* bounds;
+    Map_string_List_TypeNode* bounds;
 };
 
 struct DeclParser {
@@ -1672,10 +1674,10 @@ struct List_FieldDecl {
     int64_t size;
 };
 
-struct Map_string_TypeNode {
+struct Map_string_List_TypeNode {
     int64_t __cid;
     char** keys;
-    TypeNode** vals;
+    List_TypeNode** vals;
     int64_t cap;
     int64_t size;
 };
@@ -1844,6 +1846,14 @@ struct List_List_string {
 struct List_FlatDecl {
     int64_t __cid;
     FlatDecl** data;
+    int64_t cap;
+    int64_t size;
+};
+
+struct Map_string_TypeNode {
+    int64_t __cid;
+    char** keys;
+    TypeNode** vals;
     int64_t cap;
     int64_t size;
 };
@@ -2178,7 +2188,7 @@ Program* Program_new(List_Decl* i, List_Decl* d);
 void Program__init(Program* self, List_Decl* i, List_Decl* d);
 void Program_delete(Program* self);
 char* showStrList(List_string* xs);
-char* showTypeParams(List_string* tps, Map_string_TypeNode* bounds);
+char* showTypeParams(List_string* tps, Map_string_List_TypeNode* bounds);
 char* showField(FieldDecl* f);
 char* showFieldList(List_FieldDecl* xs);
 char* showStaticField(StaticFieldDecl* f);
@@ -2253,8 +2263,8 @@ Stmt* StmtParser__parseMatch(StmtParser* self);
 Stmt* StmtParser__parseReturn(StmtParser* self);
 int isAccessKw(TokenType t);
 int isOverloadableOp(TokenType t);
-TypeParams* TypeParams_new(List_string* n, Map_string_TypeNode* b);
-void TypeParams__init(TypeParams* self, List_string* n, Map_string_TypeNode* b);
+TypeParams* TypeParams_new(List_string* n, Map_string_List_TypeNode* b);
+void TypeParams__init(TypeParams* self, List_string* n, Map_string_List_TypeNode* b);
 void TypeParams_delete(TypeParams* self);
 DeclParser* DeclParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, StmtParser* stmtParser);
 void DeclParser__init(DeclParser* self, TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, StmtParser* stmtParser);
@@ -2268,7 +2278,7 @@ Decl* DeclParser__parseEnum(DeclParser* self);
 List_string* DeclParser__parseTypeParamNames(DeclParser* self);
 Decl* DeclParser__parseUnion(DeclParser* self);
 TypeParams* DeclParser__parseTypeParams(DeclParser* self);
-void DeclParser__parseOneTypeParam(DeclParser* self, List_string* names, Map_string_TypeNode* bounds);
+void DeclParser__parseOneTypeParam(DeclParser* self, List_string* names, Map_string_List_TypeNode* bounds);
 Decl* DeclParser__parseFunction(DeclParser* self);
 Decl* DeclParser__parseClass(DeclParser* self, char* access, int isManaged);
 Decl* DeclParser__parseInterface(DeclParser* self);
@@ -2400,7 +2410,7 @@ MethodDecl* NamespaceResolver__r_method(NamespaceResolver* self, MethodDecl* md,
 MethodDecl* NamespaceResolver__r_method_sig(NamespaceResolver* self, MethodDecl* md, List_string* p);
 ConstructorDecl* NamespaceResolver__r_ctor(NamespaceResolver* self, ConstructorDecl* ctor, List_string* p);
 void NamespaceResolver__r_params(NamespaceResolver* self, List_Param* params, List_string* p);
-void NamespaceResolver__r_bounds(NamespaceResolver* self, List_string* tps, Map_string_TypeNode* bounds, List_string* p);
+void NamespaceResolver__r_bounds(NamespaceResolver* self, List_string* tps, Map_string_List_TypeNode* bounds, List_string* p);
 Map_string_bool* NamespaceResolver__params_set(NamespaceResolver* self, List_string* tps);
 List_string* NamespaceResolver__param_names(NamespaceResolver* self, List_Param* params);
 TypeNode* NamespaceResolver__r_type(NamespaceResolver* self, TypeNode* t, List_string* p);
@@ -2422,7 +2432,7 @@ List_UnionVariant* clone_union_variant_list(List_UnionVariant* xs);
 List_CatchClause* clone_catch_list(List_CatchClause* xs);
 List_MatchArm* clone_arm_list(List_MatchArm* xs);
 List_string* clone_str_list(List_string* xs);
-Map_string_TypeNode* clone_bounds(Map_string_TypeNode* m);
+Map_string_List_TypeNode* clone_bounds(Map_string_List_TypeNode* m);
 TypeNode* clone_type(TypeNode* t);
 Param* clone_param(Param* p);
 Expr* clone_expr(Expr* e);
@@ -2820,18 +2830,18 @@ void List_FieldDecl__removeAt(List_FieldDecl* self, int64_t index);
 void List_FieldDecl__clear(List_FieldDecl* self);
 int64_t List_FieldDecl__indexOf(List_FieldDecl* self, FieldDecl* item);
 Span_FieldDecl* List_FieldDecl__span(List_FieldDecl* self);
-Map_string_TypeNode* Map_string_TypeNode_new(void);
-void Map_string_TypeNode__init(Map_string_TypeNode* self);
-void Map_string_TypeNode_delete(Map_string_TypeNode* self);
-int64_t Map_string_TypeNode__length(Map_string_TypeNode* self);
-int Map_string_TypeNode__isEmpty(Map_string_TypeNode* self);
-int64_t Map_string_TypeNode___find(Map_string_TypeNode* self, char* key);
-int Map_string_TypeNode__has(Map_string_TypeNode* self, char* key);
-void Map_string_TypeNode___grow(Map_string_TypeNode* self);
-void Map_string_TypeNode__set(Map_string_TypeNode* self, char* key, TypeNode* value);
-TypeNode* Map_string_TypeNode__getOr(Map_string_TypeNode* self, char* key, TypeNode* fallback);
-TypeNode* Map_string_TypeNode__getOrDefault(Map_string_TypeNode* self, char* key, TypeNode* defaultValue);
-void Map_string_TypeNode__remove(Map_string_TypeNode* self, char* key);
+Map_string_List_TypeNode* Map_string_List_TypeNode_new(void);
+void Map_string_List_TypeNode__init(Map_string_List_TypeNode* self);
+void Map_string_List_TypeNode_delete(Map_string_List_TypeNode* self);
+int64_t Map_string_List_TypeNode__length(Map_string_List_TypeNode* self);
+int Map_string_List_TypeNode__isEmpty(Map_string_List_TypeNode* self);
+int64_t Map_string_List_TypeNode___find(Map_string_List_TypeNode* self, char* key);
+int Map_string_List_TypeNode__has(Map_string_List_TypeNode* self, char* key);
+void Map_string_List_TypeNode___grow(Map_string_List_TypeNode* self);
+void Map_string_List_TypeNode__set(Map_string_List_TypeNode* self, char* key, List_TypeNode* value);
+List_TypeNode* Map_string_List_TypeNode__getOr(Map_string_List_TypeNode* self, char* key, List_TypeNode* fallback);
+List_TypeNode* Map_string_List_TypeNode__getOrDefault(Map_string_List_TypeNode* self, char* key, List_TypeNode* defaultValue);
+void Map_string_List_TypeNode__remove(Map_string_List_TypeNode* self, char* key);
 List_StaticFieldDecl* List_StaticFieldDecl_new(void);
 void List_StaticFieldDecl__init(List_StaticFieldDecl* self);
 void List_StaticFieldDecl_delete(List_StaticFieldDecl* self);
@@ -3112,6 +3122,18 @@ void List_FlatDecl__removeAt(List_FlatDecl* self, int64_t index);
 void List_FlatDecl__clear(List_FlatDecl* self);
 int64_t List_FlatDecl__indexOf(List_FlatDecl* self, FlatDecl* item);
 Span_FlatDecl* List_FlatDecl__span(List_FlatDecl* self);
+Map_string_TypeNode* Map_string_TypeNode_new(void);
+void Map_string_TypeNode__init(Map_string_TypeNode* self);
+void Map_string_TypeNode_delete(Map_string_TypeNode* self);
+int64_t Map_string_TypeNode__length(Map_string_TypeNode* self);
+int Map_string_TypeNode__isEmpty(Map_string_TypeNode* self);
+int64_t Map_string_TypeNode___find(Map_string_TypeNode* self, char* key);
+int Map_string_TypeNode__has(Map_string_TypeNode* self, char* key);
+void Map_string_TypeNode___grow(Map_string_TypeNode* self);
+void Map_string_TypeNode__set(Map_string_TypeNode* self, char* key, TypeNode* value);
+TypeNode* Map_string_TypeNode__getOr(Map_string_TypeNode* self, char* key, TypeNode* fallback);
+TypeNode* Map_string_TypeNode__getOrDefault(Map_string_TypeNode* self, char* key, TypeNode* defaultValue);
+void Map_string_TypeNode__remove(Map_string_TypeNode* self, char* key);
 Map_string_Decl* Map_string_Decl_new(void);
 void Map_string_Decl__init(Map_string_Decl* self);
 void Map_string_Decl_delete(Map_string_Decl* self);
@@ -5434,7 +5456,7 @@ char* showStrList(List_string* xs) {
     return StringBuilder__build(sb);
 }
 
-char* showTypeParams(List_string* tps, Map_string_TypeNode* bounds) {
+char* showTypeParams(List_string* tps, Map_string_List_TypeNode* bounds) {
     StringBuilder* sb = StringBuilder_new();
     StringBuilder__appendChar(sb, '[');
     int64_t n = List_string__length(tps);
@@ -5444,9 +5466,16 @@ char* showTypeParams(List_string* tps, Map_string_TypeNode* bounds) {
         }
         char* tp = List_string__get(tps, i);
         StringBuilder__append(sb, tp);
-        if (Map_string_TypeNode__has(bounds, tp)) {
+        if (Map_string_List_TypeNode__has(bounds, tp)) {
             StringBuilder__appendChar(sb, ':');
-            StringBuilder__append(sb, showType(Map_string_TypeNode__getOr(bounds, tp, NULL)));
+            List_TypeNode* bs = Map_string_List_TypeNode__getOr(bounds, tp, NULL);
+            int64_t bn = List_TypeNode__length(bs);
+            for (int64_t j = 0; (j < bn); (++j)) {
+                if ((j > 0)) {
+                    StringBuilder__appendChar(sb, '&');
+                }
+                StringBuilder__append(sb, showType(List_TypeNode__get(bs, j)));
+            }
         }
     }
     StringBuilder__appendChar(sb, ']');
@@ -5578,7 +5607,7 @@ char* showDecl(Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(fn ", name), " "), showTypeParams(tps, bounds)), " "), showParams(params)), " "), showType(ret)), " "), showStmt(body)), ")");
             break;
         }
@@ -5593,7 +5622,7 @@ char* showDecl(Decl* d) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             char* ext = "_";
             if ((strcmp(superName, "") != 0)) {
@@ -6897,12 +6926,12 @@ int isOverloadableOp(TokenType t) {
     return (((((((((((t == TokenType__PLUS) || (t == TokenType__MINUS)) || (t == TokenType__STAR)) || (t == TokenType__SLASH)) || (t == TokenType__PERCENT)) || (t == TokenType__EQ)) || (t == TokenType__NEQ)) || (t == TokenType__LT)) || (t == TokenType__LTE)) || (t == TokenType__GT)) || (t == TokenType__GTE));
 }
 
-void TypeParams__init(TypeParams* self, List_string* n, Map_string_TypeNode* b) {
+void TypeParams__init(TypeParams* self, List_string* n, Map_string_List_TypeNode* b) {
     self->names = n;
     self->bounds = b;
 }
 
-TypeParams* TypeParams_new(List_string* n, Map_string_TypeNode* b) {
+TypeParams* TypeParams_new(List_string* n, Map_string_List_TypeNode* b) {
     TypeParams* self = (TypeParams*)calloc(1, sizeof(TypeParams));
     self->__cid = TypeParams__CID;
     TypeParams__init(self, n, b);
@@ -7081,7 +7110,7 @@ Decl* DeclParser__parseUnion(DeclParser* self) {
 
 TypeParams* DeclParser__parseTypeParams(DeclParser* self) {
     List_string* names = List_string_new();
-    Map_string_TypeNode* bounds = Map_string_TypeNode_new();
+    Map_string_List_TypeNode* bounds = Map_string_List_TypeNode_new();
     if ((!TokenStream__accept(self->s, TokenType__LT))) {
         return TypeParams_new(names, bounds);
     }
@@ -7093,11 +7122,16 @@ TypeParams* DeclParser__parseTypeParams(DeclParser* self) {
     return TypeParams_new(names, bounds);
 }
 
-void DeclParser__parseOneTypeParam(DeclParser* self, List_string* names, Map_string_TypeNode* bounds) {
+void DeclParser__parseOneTypeParam(DeclParser* self, List_string* names, Map_string_List_TypeNode* bounds) {
     Token* nameTok = TokenStream__expect(self->s, TokenType__IDENT);
     List_string__add(names, nameTok->value);
     if (TokenStream__accept(self->s, TokenType__KW_EXTENDS)) {
-        Map_string_TypeNode__set(bounds, nameTok->value, TypeParser__parseType(self->tp));
+        List_TypeNode* bs = List_TypeNode_new();
+        List_TypeNode__add(bs, TypeParser__parseType(self->tp));
+        while (TokenStream__accept(self->s, TokenType__AMP)) {
+            List_TypeNode__add(bs, TypeParser__parseType(self->tp));
+        }
+        Map_string_List_TypeNode__set(bounds, nameTok->value, bs);
     }
 }
 
@@ -9634,7 +9668,7 @@ char* NamespaceResolver__decl_name(NamespaceResolver* self, Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             return name;
             break;
         }
@@ -9649,7 +9683,7 @@ char* NamespaceResolver__decl_name(NamespaceResolver* self, Decl* d) {
             DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             return name;
             break;
@@ -9706,7 +9740,7 @@ Decl* NamespaceResolver__qualify_decl_name(NamespaceResolver* self, Decl* d, cha
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__FunctionDecl_new(glang_str_concat(glang_str_concat(prefix, "::"), name), params, ret, body, tps, bounds); __up; });
             break;
         }
@@ -9721,7 +9755,7 @@ Decl* NamespaceResolver__qualify_decl_name(NamespaceResolver* self, Decl* d, cha
             DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnd = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(glang_str_concat(glang_str_concat(prefix, "::"), name), f, sf, m, sup, ifc, ct, dt, acc, tps, bnd, mgd); __up; });
             break;
@@ -9872,7 +9906,7 @@ Decl* NamespaceResolver__r_decl(NamespaceResolver* self, Decl* d, List_string* p
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             self->type_params = NamespaceResolver__params_set(self, tps);
             NamespaceResolver__r_bounds(self, tps, bounds, p);
             TypeNode* nret = NamespaceResolver__r_type(self, ret, p);
@@ -9896,7 +9930,7 @@ Decl* NamespaceResolver__r_decl(NamespaceResolver* self, Decl* d, List_string* p
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             self->type_params = NamespaceResolver__params_set(self, tps);
             NamespaceResolver__r_bounds(self, tps, bounds, p);
@@ -10028,11 +10062,17 @@ void NamespaceResolver__r_params(NamespaceResolver* self, List_Param* params, Li
     }
 }
 
-void NamespaceResolver__r_bounds(NamespaceResolver* self, List_string* tps, Map_string_TypeNode* bounds, List_string* p) {
+void NamespaceResolver__r_bounds(NamespaceResolver* self, List_string* tps, Map_string_List_TypeNode* bounds, List_string* p) {
     for (int64_t i = 0; (i < List_string__length(tps)); (++i)) {
         char* k = List_string__get(tps, i);
-        if (Map_string_TypeNode__has(bounds, k)) {
-            Map_string_TypeNode__set(bounds, k, NamespaceResolver__r_type(self, Map_string_TypeNode__getOr(bounds, k, NULL), p));
+        if (Map_string_List_TypeNode__has(bounds, k)) {
+            List_TypeNode* bs = Map_string_List_TypeNode__getOr(bounds, k, NULL);
+            List_TypeNode* out = List_TypeNode_new();
+            int64_t bn = List_TypeNode__length(bs);
+            for (int64_t j = 0; (j < bn); (++j)) {
+                List_TypeNode__add(out, NamespaceResolver__r_type(self, List_TypeNode__get(bs, j), p));
+            }
+            Map_string_List_TypeNode__set(bounds, k, out);
         }
     }
 }
@@ -10603,12 +10643,18 @@ List_string* clone_str_list(List_string* xs) {
     return out;
 }
 
-Map_string_TypeNode* clone_bounds(Map_string_TypeNode* m) {
-    Map_string_TypeNode* out = Map_string_TypeNode_new();
+Map_string_List_TypeNode* clone_bounds(Map_string_List_TypeNode* m) {
+    Map_string_List_TypeNode* out = Map_string_List_TypeNode_new();
     int64_t n = m->size;
     for (int64_t i = 0; (i < n); (++i)) {
         char* k = m->keys[i];
-        Map_string_TypeNode__set(out, k, clone_type(m->vals[i]));
+        List_TypeNode* src = m->vals[i];
+        List_TypeNode* dst = List_TypeNode_new();
+        int64_t bn = List_TypeNode__length(src);
+        for (int64_t j = 0; (j < bn); (++j)) {
+            List_TypeNode__add(dst, clone_type(List_TypeNode__get(src, j)));
+        }
+        Map_string_List_TypeNode__set(out, k, dst);
     }
     return out;
 }
@@ -11005,7 +11051,7 @@ Decl* clone_decl(Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__FunctionDecl_new(name, clone_param_list(params), clone_type(ret), clone_stmt(body), clone_str_list(tps), clone_bounds(bounds)); __up; });
             break;
         }
@@ -11020,7 +11066,7 @@ Decl* clone_decl(Decl* d) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             ConstructorDecl* c = NULL;
             if ((ctor != NULL)) {
@@ -11216,7 +11262,7 @@ Program* Monomorphizer__run(Monomorphizer* self, Program* program) {
                 DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 if ((List_string__length(tps) > 0)) {
                     Map_string_Decl__set(self->class_templates, name, d);
@@ -11230,7 +11276,7 @@ Program* Monomorphizer__run(Monomorphizer* self, Program* program) {
                 TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
                 Stmt* body = __match__.data.as_FunctionDecl.body;
                 List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
                 if ((List_string__length(tps) > 0)) {
                     Map_string_Decl__set(self->func_templates, name, d);
                     handled = 1;
@@ -11317,7 +11363,7 @@ void Monomorphizer__collect_known_decls(Monomorphizer* self, List_Decl* decls) {
                 DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 Map_string_bool__set(self->class_names, name, 1);
                 Map_string_string__set(self->class_supers, name, superName);
@@ -11355,7 +11401,7 @@ void Monomorphizer__collect_known_decls(Monomorphizer* self, List_Decl* decls) {
                 TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
                 Stmt* body = __match__.data.as_FunctionDecl.body;
                 List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
                 if ((List_string__length(tps) == 0)) {
                     Map_string_TypeNode__set(self->function_returns, name, ret);
                 }
@@ -11432,7 +11478,7 @@ void Monomorphizer__register_class_instance_metadata(Monomorphizer* self, char* 
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             Map_string_TypeNode* mapping = zip_mapping(tps, args);
             Map_string_bool__set(self->class_names, mangled, 1);
@@ -11536,7 +11582,7 @@ void Monomorphizer__register_function_instance_metadata(Monomorphizer* self, cha
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             Map_string_TypeNode* mapping = zip_mapping(tps, args);
             Map_string_TypeNode__set(self->function_returns, mangled, Monomorphizer__t_type(self, clone_type(ret), mapping));
             break;
@@ -11563,7 +11609,7 @@ List_string* Monomorphizer__decl_type_params(Monomorphizer* self, Decl* d) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             return tps;
             break;
@@ -11574,7 +11620,7 @@ List_string* Monomorphizer__decl_type_params(Monomorphizer* self, Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             return tps;
             break;
         }
@@ -11764,7 +11810,7 @@ Decl* Monomorphizer__t_decl(Monomorphizer* self, Decl* d, Map_string_TypeNode* m
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             TypeNode* nret = Monomorphizer__t_type(self, ret, m);
             List_Param* nparams = Monomorphizer__t_params(self, params, m);
             if ((List_string__length(tps) == 0)) {
@@ -11792,7 +11838,7 @@ Decl* Monomorphizer__t_decl(Monomorphizer* self, Decl* d, Map_string_TypeNode* m
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             List_FieldDecl* nfields = List_FieldDecl_new();
             int64_t nf = List_FieldDecl__length(fields);
@@ -11876,7 +11922,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             TypeNode* nret = Monomorphizer__t_type(self, ret, m);
             List_Param* nparams = Monomorphizer__t_params(self, params, m);
             Map_string_TypeNode__set(self->function_returns, mangled, nret);
@@ -11888,7 +11934,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             }
             Stmt* nbody = Monomorphizer__t_stmt(self, body, m);
             Monomorphizer__pop_scope(self);
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__FunctionDecl_new(mangled, nparams, nret, nbody, List_string_new(), Map_string_TypeNode_new()); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__FunctionDecl_new(mangled, nparams, nret, nbody, List_string_new(), Map_string_List_TypeNode_new()); __up; });
             break;
         }
         case Decl__ClassDecl: {
@@ -11902,7 +11948,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             List_FieldDecl* nfields = List_FieldDecl_new();
             int64_t nf = List_FieldDecl__length(fields);
@@ -11933,7 +11979,7 @@ Decl* Monomorphizer__t_decl_instantiate(Monomorphizer* self, Decl* d, char* mang
             for (int64_t i = 0; (i < nm); (++i)) {
                 List_MethodDecl__add(nmethods, Monomorphizer__t_method(self, List_MethodDecl__get(methods, i), m));
             }
-            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(mangled, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, List_string_new(), Map_string_TypeNode_new(), mgd); __up; });
+            return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new(mangled, nfields, nsfields, nmethods, superName, clone_str_list(ifaces), nctor, ndtor, access, List_string_new(), Map_string_List_TypeNode_new(), mgd); __up; });
             break;
         }
         default: {
@@ -12441,7 +12487,7 @@ List_TypeNode* Monomorphizer__infer_instantiation(Monomorphizer* self, char* kin
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             if ((strcmp(kind, "func") == 0)) {
                 params = fps;
             }
@@ -12459,7 +12505,7 @@ List_TypeNode* Monomorphizer__infer_instantiation(Monomorphizer* self, char* kin
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             tparams = tps;
             if ((ctor != NULL)) {
@@ -12642,7 +12688,7 @@ ArgsOpt* Monomorphizer__generic_actual_args(Monomorphizer* self, char* base, Typ
 
 void Monomorphizer__check_type_arg_bounds(Monomorphizer* self, Decl* template, List_TypeNode* args, int64_t line, int64_t col) {
     List_string* tparams = List_string_new();
-    Map_string_TypeNode* bounds = Map_string_TypeNode_new();
+    Map_string_List_TypeNode* bounds = Map_string_List_TypeNode_new();
     {
         Decl __match__ = (*template);
         switch (__match__.tag) {
@@ -12657,7 +12703,7 @@ void Monomorphizer__check_type_arg_bounds(Monomorphizer* self, Decl* template, L
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             tparams = tps;
             bounds = bnds;
@@ -12669,7 +12715,7 @@ void Monomorphizer__check_type_arg_bounds(Monomorphizer* self, Decl* template, L
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
             tparams = tps;
             bounds = bnds;
             break;
@@ -12690,13 +12736,16 @@ void Monomorphizer__check_type_arg_bounds(Monomorphizer* self, Decl* template, L
     for (int64_t i = 0; (i < lim); (++i)) {
         char* tp = List_string__get(tparams, i);
         TypeNode* arg = List_TypeNode__get(args, i);
-        if ((!Map_string_TypeNode__has(bounds, tp))) {
+        if ((!Map_string_List_TypeNode__has(bounds, tp))) {
             continue;
         }
-        TypeNode* bound = Map_string_TypeNode__getOr(bounds, tp, NULL);
-        TypeNode* concrete_bound = Monomorphizer__t_type(self, clone_type(bound), mapping);
-        if ((!Monomorphizer__type_satisfies_bound(self, arg, concrete_bound))) {
-            GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("type argument '", type_str(arg)), "' does not satisfy bound '"), type_str(concrete_bound)), "' for '"), tp), "'"), line, col), "AnalyzeError");
+        List_TypeNode* bs = Map_string_List_TypeNode__getOr(bounds, tp, NULL);
+        int64_t bn = List_TypeNode__length(bs);
+        for (int64_t j = 0; (j < bn); (++j)) {
+            TypeNode* concrete_bound = Monomorphizer__t_type(self, clone_type(List_TypeNode__get(bs, j)), mapping);
+            if ((!Monomorphizer__type_satisfies_bound(self, arg, concrete_bound))) {
+                GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("type argument '", type_str(arg)), "' does not satisfy bound '"), type_str(concrete_bound)), "' for '"), tp), "'"), line, col), "AnalyzeError");
+            }
         }
     }
 }
@@ -13130,7 +13179,7 @@ void _register_class_names(GlobalEnv* env, Program* program) {
                 DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 _register_class_shell(env, decl);
                 break;
@@ -13243,7 +13292,7 @@ void _register_non_class_declarations(GlobalEnv* env, Program* program) {
                 TypeNode* rt = __match__.data.as_FunctionDecl.returnType;
                 Stmt* body = __match__.data.as_FunctionDecl.body;
                 List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-                Map_string_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
+                Map_string_List_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
                 _register_function(env, decl);
                 break;
             }
@@ -13322,7 +13371,7 @@ void _register_function(GlobalEnv* env, Decl* decl) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_FunctionDecl.bounds;
             if (_name_taken(env, name)) {
                 GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat("name '", name), "' is already defined"), 0, 0), "AnalyzeError");
             }
@@ -13356,7 +13405,7 @@ void _register_class_shell(GlobalEnv* env, Decl* decl) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             if (_name_taken(env, name)) {
                 GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat("name '", name), "' is already defined"), 0, 0), "AnalyzeError");
@@ -13394,7 +13443,7 @@ void _populate_classes(GlobalEnv* env, Program* program) {
                 DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 _populate_class(env, decl);
                 break;
@@ -13422,7 +13471,7 @@ void _populate_class(GlobalEnv* env, Decl* decl) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             Map_string_FieldDecl* fmap = Map_string_FieldDecl_new();
             int64_t fcount = List_FieldDecl__length(fields);
@@ -13862,7 +13911,7 @@ List_FieldDecl* _class_decl_fields(Decl* decl) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bnds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             return fields;
             break;
@@ -13958,7 +14007,7 @@ void Pass2Checker__check_program(Pass2Checker* self, Program* program) {
                 TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
                 Stmt* body = __match__.data.as_FunctionDecl.body;
                 List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
                 Pass2Checker__check_function(self, d);
                 break;
             }
@@ -13973,7 +14022,7 @@ void Pass2Checker__check_program(Pass2Checker* self, Program* program) {
                 DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
                 char* access = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 ClassInfo* info = Map_string_ClassInfo__getOr(self->env->classes, name, NULL);
                 Pass2Checker__check_class(self, d, info);
@@ -14020,7 +14069,7 @@ void Pass2Checker__check_function(Pass2Checker* self, Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             SymbolTable* saved_scope = self->scope;
             TypeNode* saved_return = self->return_type;
             self->scope = SymbolTable__child(self->scope);
@@ -14082,7 +14131,7 @@ void Pass2Checker__check_class(Pass2Checker* self, Decl* d, ClassInfo* info) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             ClassInfo* saved_class = self->current_class;
             int saved_static = self->in_static_method;
@@ -16191,7 +16240,7 @@ int Pass2Checker__declHasField(Pass2Checker* self, Decl* d, char* field_name) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             int64_t n = List_FieldDecl__length(fields);
             for (int64_t i = 0; (i < n); (++i)) {
@@ -16225,7 +16274,7 @@ int Pass2Checker__declHasMethod(Pass2Checker* self, Decl* d, char* method_name) 
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* access = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             int64_t n = List_MethodDecl__length(methods);
             for (int64_t i = 0; (i < n); (++i)) {
@@ -16953,7 +17002,7 @@ List_FieldDecl* CEmit__ownFieldsOf(CEmit* self, char* name) {
                 DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 return fields;
                 break;
@@ -16984,7 +17033,7 @@ List_MethodDecl* CEmit__ownMethodsOf(CEmit* self, char* name) {
                 DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 return m;
                 break;
@@ -17098,7 +17147,7 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 char* cn = mangleName(nm);
                 StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("typedef struct ", cn), " "), cn), ";"));
@@ -17162,7 +17211,7 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 CEmit__emitClassStruct(self, nm);
                 break;
@@ -17557,7 +17606,7 @@ void CEmit__emitPrototype(CEmit* self, Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             char* cname = mangleName(name);
             if ((strcmp(cname, "main") == 0)) {
                 cname = "glang_main";
@@ -17576,7 +17625,7 @@ void CEmit__emitPrototype(CEmit* self, Decl* d) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             char* cn = mangleName(name);
             char* selfp = glang_str_concat(cn, "* self");
@@ -17636,7 +17685,7 @@ void CEmit__emitDecl(CEmit* self, Decl* d) {
             TypeNode* ret = __match__.data.as_FunctionDecl.returnType;
             Stmt* body = __match__.data.as_FunctionDecl.body;
             List_string* tps = __match__.data.as_FunctionDecl.typeParams;
-            Map_string_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
+            Map_string_List_TypeNode* bounds = __match__.data.as_FunctionDecl.bounds;
             CEmit__emitFunc(self, name, params, ret, body);
             break;
         }
@@ -17651,7 +17700,7 @@ void CEmit__emitDecl(CEmit* self, Decl* d) {
             DestructorDecl* dtor = __match__.data.as_ClassDecl.destructor;
             char* acc = __match__.data.as_ClassDecl.access;
             List_string* tps = __match__.data.as_ClassDecl.typeParams;
-            Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+            Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
             int mgd = __match__.data.as_ClassDecl.isManaged;
             CEmit__emitClass(self, name, methods, sup, ctor, dtor, mgd);
             break;
@@ -18511,7 +18560,7 @@ void CEmit__emitOneIfaceDispatch(CEmit* self, char* inm, MethodDecl* m, List_Dec
                 DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
                 char* acc = __match__.data.as_ClassDecl.access;
                 List_string* tps = __match__.data.as_ClassDecl.typeParams;
-                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                Map_string_List_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 if (CEmit__classImplements(self, nm, inm)) {
                     char* owner = mangleName(CEmit__methodOwnerClass(self, nm, m->name));
@@ -19761,7 +19810,7 @@ Decl* make_exception_decl(void) {
     ConstructorDecl* ctor = ConstructorDecl_new(ctorParams, ({ Stmt* __up = (Stmt*)malloc(sizeof(Stmt)); *__up = Stmt__Block_new(ctorStmts, List_string_new()); __up; }), 0, List_Expr_new());
     List_string* ifaces = List_string_new();
     List_string* typeParams = List_string_new();
-    Map_string_TypeNode* bounds = Map_string_TypeNode_new();
+    Map_string_List_TypeNode* bounds = Map_string_List_TypeNode_new();
     return ({ Decl* __up = (Decl*)malloc(sizeof(Decl)); *__up = Decl__ClassDecl_new("Exception", fields, sfields, methods, "", ifaces, ctor, NULL, "public", typeParams, bounds, 0); __up; });
 }
 
@@ -20687,34 +20736,34 @@ Span_FieldDecl* List_FieldDecl__span(List_FieldDecl* self) {
     return Span_FieldDecl_new(self->data, 0, self->size);
 }
 
-void Map_string_TypeNode__init(Map_string_TypeNode* self) {
+void Map_string_List_TypeNode__init(Map_string_List_TypeNode* self) {
     self->cap = 4;
     self->size = 0;
     self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
-    self->vals = (TypeNode**)glang_alloc_n((size_t)(4), sizeof(TypeNode*));
+    self->vals = (List_TypeNode**)glang_alloc_n((size_t)(4), sizeof(List_TypeNode*));
 }
 
-Map_string_TypeNode* Map_string_TypeNode_new(void) {
-    Map_string_TypeNode* self = (Map_string_TypeNode*)calloc(1, sizeof(Map_string_TypeNode));
-    self->__cid = Map_string_TypeNode__CID;
-    Map_string_TypeNode__init(self);
+Map_string_List_TypeNode* Map_string_List_TypeNode_new(void) {
+    Map_string_List_TypeNode* self = (Map_string_List_TypeNode*)calloc(1, sizeof(Map_string_List_TypeNode));
+    self->__cid = Map_string_List_TypeNode__CID;
+    Map_string_List_TypeNode__init(self);
     return self;
 }
 
-void Map_string_TypeNode_delete(Map_string_TypeNode* self) {
+void Map_string_List_TypeNode_delete(Map_string_List_TypeNode* self) {
     if (self == NULL) return;
     free(self);
 }
 
-int64_t Map_string_TypeNode__length(Map_string_TypeNode* self) {
+int64_t Map_string_List_TypeNode__length(Map_string_List_TypeNode* self) {
     return self->size;
 }
 
-int Map_string_TypeNode__isEmpty(Map_string_TypeNode* self) {
+int Map_string_List_TypeNode__isEmpty(Map_string_List_TypeNode* self) {
     return (self->size == 0);
 }
 
-int64_t Map_string_TypeNode___find(Map_string_TypeNode* self, char* key) {
+int64_t Map_string_List_TypeNode___find(Map_string_List_TypeNode* self, char* key) {
     for (int64_t i = 0; (i < self->size); (++i)) {
         if ((strcmp(self->keys[i], key) == 0)) {
             return i;
@@ -20723,14 +20772,14 @@ int64_t Map_string_TypeNode___find(Map_string_TypeNode* self, char* key) {
     return (-1);
 }
 
-int Map_string_TypeNode__has(Map_string_TypeNode* self, char* key) {
-    return (Map_string_TypeNode___find(self, key) >= 0);
+int Map_string_List_TypeNode__has(Map_string_List_TypeNode* self, char* key) {
+    return (Map_string_List_TypeNode___find(self, key) >= 0);
 }
 
-void Map_string_TypeNode___grow(Map_string_TypeNode* self) {
+void Map_string_List_TypeNode___grow(Map_string_List_TypeNode* self) {
     int64_t newcap = (self->cap * 2);
     char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
-    TypeNode** nv = (TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(TypeNode*));
+    List_TypeNode** nv = (List_TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(List_TypeNode*));
     for (int64_t i = 0; (i < self->size); (++i)) {
         nk[i] = self->keys[i];
         nv[i] = self->vals[i];
@@ -20742,34 +20791,34 @@ void Map_string_TypeNode___grow(Map_string_TypeNode* self) {
     self->cap = newcap;
 }
 
-void Map_string_TypeNode__set(Map_string_TypeNode* self, char* key, TypeNode* value) {
-    int64_t idx = Map_string_TypeNode___find(self, key);
+void Map_string_List_TypeNode__set(Map_string_List_TypeNode* self, char* key, List_TypeNode* value) {
+    int64_t idx = Map_string_List_TypeNode___find(self, key);
     if ((idx >= 0)) {
         self->vals[idx] = value;
         return;
     }
     if ((self->size == self->cap)) {
-        Map_string_TypeNode___grow(self);
+        Map_string_List_TypeNode___grow(self);
     }
     self->keys[self->size] = key;
     self->vals[self->size] = value;
     self->size = (self->size + 1);
 }
 
-TypeNode* Map_string_TypeNode__getOr(Map_string_TypeNode* self, char* key, TypeNode* fallback) {
-    int64_t idx = Map_string_TypeNode___find(self, key);
+List_TypeNode* Map_string_List_TypeNode__getOr(Map_string_List_TypeNode* self, char* key, List_TypeNode* fallback) {
+    int64_t idx = Map_string_List_TypeNode___find(self, key);
     if ((idx >= 0)) {
         return self->vals[idx];
     }
     return fallback;
 }
 
-TypeNode* Map_string_TypeNode__getOrDefault(Map_string_TypeNode* self, char* key, TypeNode* defaultValue) {
-    return Map_string_TypeNode__getOr(self, key, defaultValue);
+List_TypeNode* Map_string_List_TypeNode__getOrDefault(Map_string_List_TypeNode* self, char* key, List_TypeNode* defaultValue) {
+    return Map_string_List_TypeNode__getOr(self, key, defaultValue);
 }
 
-void Map_string_TypeNode__remove(Map_string_TypeNode* self, char* key) {
-    int64_t idx = Map_string_TypeNode___find(self, key);
+void Map_string_List_TypeNode__remove(Map_string_List_TypeNode* self, char* key) {
+    int64_t idx = Map_string_List_TypeNode___find(self, key);
     if ((idx < 0)) {
         return;
     }
@@ -22753,6 +22802,98 @@ int64_t List_FlatDecl__indexOf(List_FlatDecl* self, FlatDecl* item) {
 
 Span_FlatDecl* List_FlatDecl__span(List_FlatDecl* self) {
     return Span_FlatDecl_new(self->data, 0, self->size);
+}
+
+void Map_string_TypeNode__init(Map_string_TypeNode* self) {
+    self->cap = 4;
+    self->size = 0;
+    self->keys = (char**)glang_alloc_n((size_t)(4), sizeof(char*));
+    self->vals = (TypeNode**)glang_alloc_n((size_t)(4), sizeof(TypeNode*));
+}
+
+Map_string_TypeNode* Map_string_TypeNode_new(void) {
+    Map_string_TypeNode* self = (Map_string_TypeNode*)calloc(1, sizeof(Map_string_TypeNode));
+    self->__cid = Map_string_TypeNode__CID;
+    Map_string_TypeNode__init(self);
+    return self;
+}
+
+void Map_string_TypeNode_delete(Map_string_TypeNode* self) {
+    if (self == NULL) return;
+    free(self);
+}
+
+int64_t Map_string_TypeNode__length(Map_string_TypeNode* self) {
+    return self->size;
+}
+
+int Map_string_TypeNode__isEmpty(Map_string_TypeNode* self) {
+    return (self->size == 0);
+}
+
+int64_t Map_string_TypeNode___find(Map_string_TypeNode* self, char* key) {
+    for (int64_t i = 0; (i < self->size); (++i)) {
+        if ((strcmp(self->keys[i], key) == 0)) {
+            return i;
+        }
+    }
+    return (-1);
+}
+
+int Map_string_TypeNode__has(Map_string_TypeNode* self, char* key) {
+    return (Map_string_TypeNode___find(self, key) >= 0);
+}
+
+void Map_string_TypeNode___grow(Map_string_TypeNode* self) {
+    int64_t newcap = (self->cap * 2);
+    char** nk = (char**)glang_alloc_n((size_t)(newcap), sizeof(char*));
+    TypeNode** nv = (TypeNode**)glang_alloc_n((size_t)(newcap), sizeof(TypeNode*));
+    for (int64_t i = 0; (i < self->size); (++i)) {
+        nk[i] = self->keys[i];
+        nv[i] = self->vals[i];
+    }
+    glang_free(self->keys);
+    glang_free(self->vals);
+    self->keys = nk;
+    self->vals = nv;
+    self->cap = newcap;
+}
+
+void Map_string_TypeNode__set(Map_string_TypeNode* self, char* key, TypeNode* value) {
+    int64_t idx = Map_string_TypeNode___find(self, key);
+    if ((idx >= 0)) {
+        self->vals[idx] = value;
+        return;
+    }
+    if ((self->size == self->cap)) {
+        Map_string_TypeNode___grow(self);
+    }
+    self->keys[self->size] = key;
+    self->vals[self->size] = value;
+    self->size = (self->size + 1);
+}
+
+TypeNode* Map_string_TypeNode__getOr(Map_string_TypeNode* self, char* key, TypeNode* fallback) {
+    int64_t idx = Map_string_TypeNode___find(self, key);
+    if ((idx >= 0)) {
+        return self->vals[idx];
+    }
+    return fallback;
+}
+
+TypeNode* Map_string_TypeNode__getOrDefault(Map_string_TypeNode* self, char* key, TypeNode* defaultValue) {
+    return Map_string_TypeNode__getOr(self, key, defaultValue);
+}
+
+void Map_string_TypeNode__remove(Map_string_TypeNode* self, char* key) {
+    int64_t idx = Map_string_TypeNode___find(self, key);
+    if ((idx < 0)) {
+        return;
+    }
+    int64_t last = (self->size - 1);
+    self->keys[idx] = self->keys[last];
+    self->vals[idx] = self->vals[last];
+    self->size = (self->size - 1);
 }
 
 void Map_string_Decl__init(Map_string_Decl* self) {

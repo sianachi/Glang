@@ -210,8 +210,9 @@ class NamespaceResolver:
     def _r_decl(self, d: Decl, p: List[str]) -> None:
         if isinstance(d, FunctionDecl):
             self._type_params = set(d.type_params)
-            for name, bound in list(d.type_param_bounds.items()):
-                self._r_type(bound, p)
+            for name, bs in list(d.type_param_bounds.items()):
+                for bound in bs:
+                    self._r_type(bound, p)
             self._r_type(d.return_type, p)
             self._r_params(d.params, p)
             self._scopes = [{prm.name for prm in d.params}]
@@ -220,8 +221,9 @@ class NamespaceResolver:
             self._type_params = set()
         elif isinstance(d, ClassDecl):
             self._type_params = set(d.type_params)
-            for name, bound in list(d.type_param_bounds.items()):
-                self._r_type(bound, p)
+            for name, bs in list(d.type_param_bounds.items()):
+                for bound in bs:
+                    self._r_type(bound, p)
             if d.superclass is not None:
                 d.superclass = self._resolve_type_name(
                     d.superclass, p, d.line, d.col
