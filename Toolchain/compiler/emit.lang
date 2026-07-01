@@ -143,6 +143,7 @@ class CEmit {
     Map<string, int> classCids;          // class name -> runtime class id (for iface dispatch)
     int cidCounter;
     List<Stmt*> finallyStack;            // enclosing try-finally blocks; null entry = loop boundary
+    bool sanitize;                       // GLANG_SANITIZE=1: emit bounds/UAF checks
 
     CEmit(GlobalEnv* e) {
         this.out = StringBuilder();
@@ -161,6 +162,7 @@ class CEmit {
         this.classCids = Map<string, int>();
         this.cidCounter = 1;
         this.finallyStack = List<Stmt*>();
+        this.sanitize = getEnv("GLANG_SANITIZE") == "1";
     }
 
     // ── Class-info helpers (from the real GlobalEnv) ─────────────────────
@@ -989,9 +991,18 @@ class CEmit {
     string emitAlloc(TypeNode* allocType, Expr* count) {
         string ct = cTypeOf(showType(allocType));
         if (count != null) {
-            return "(" + ct + "*)glang_alloc_n((size_t)(" + this.emitExpr(count) + "), sizeof(" + ct + "))";
+            string an = "glang_alloc_n";
+            if (this.sanitize) { an = "glang_alloc_n_checked"; }
+            return "(" + ct + "*)" + an + "((size_t)(" + this.emitExpr(count) + "), sizeof(" + ct + "))";
         }
-        return "(" + ct + "*)glang_alloc(sizeof(" + ct + "))";
+        string a1 = "glang_alloc";
+        if (this.sanitize) { a1 = "glang_alloc_checked"; }
+        return "(" + ct + "*)" + a1 + "(sizeof(" + ct + "))";
+    }
+
+    string freeFn() {
+        if (this.sanitize) { return "glang_free_checked"; }
+        return "glang_free";
     }
 
     string renderForInit(Stmt* init) {
@@ -1035,13 +1046,21 @@ class CEmit {
                 string base = t;
                 if (endsWith(base, "*")) { base = substr(base, 0, len(base) - 1); }
                 if (this.env->is_class(base)) { return mangleName(base) + "_delete(" + this.emitExpr(o) + ")"; }
-                return "glang_free(" + this.emitExpr(o) + ")";
+                return this.freeFn() + "(" + this.emitExpr(o) + ")";
             }
-            Expr.FreeExpr(o) => { return "glang_free(" + this.emitExpr(o) + ")"; }
+            Expr.FreeExpr(o) => { return this.freeFn() + "(" + this.emitExpr(o) + ")"; }
             Expr.AllocExpr(t, cnt) => { return this.emitAlloc(t, cnt); }
             Expr.AddressOfExpr(o) => { return "(&" + this.emitExpr(o) + ")"; }
             Expr.DerefExpr(o) => { return "(*" + this.emitExpr(o) + ")"; }
-            Expr.IndexExpr(a, i) => { return this.emitExpr(a) + "[" + this.emitExpr(i) + "]"; }
+            Expr.IndexExpr(a, i) => {
+                string at = this.infer(a);
+                if (this.sanitize && endsWith(at, "*")) {
+                    string ct = cTypeOf(substr(at, 0, len(at) - 1));
+                    return "(*(" + ct + "*)glang_checked_index((void*)(" + this.emitExpr(a)
+                        + "), (int64_t)(" + this.emitExpr(i) + "), sizeof(" + ct + ")))";
+                }
+                return this.emitExpr(a) + "[" + this.emitExpr(i) + "]";
+            }
             Expr.FieldAccessExpr(obj, f) => { return this.emitFieldAccess(obj, f); }
             Expr.ArrowAccessExpr(p, f) => { return this.emitExpr(p) + "->" + f; }
             Expr.ClosureExpr(ps, rt, body, caps) => { return this.emitClosure(ps, rt, body); }
@@ -1748,6 +1767,10 @@ class CEmit {
         f.appendLine("void* glang_alloc(size_t size);");
         f.appendLine("void* glang_alloc_n(size_t count, size_t size);");
         f.appendLine("void  glang_free(void* p);");
+        f.appendLine("void* glang_alloc_checked(size_t size);");
+        f.appendLine("void* glang_alloc_n_checked(size_t count, size_t elem);");
+        f.appendLine("void* glang_checked_index(void* p, int64_t i, size_t elem);");
+        f.appendLine("void  glang_free_checked(void* p);");
         f.appendLine("int64_t glang_now_nanos(void);");
         f.appendLine("int64_t glang_wall_millis(void);");
         f.appendLine("void    glang_sleep_ms(int64_t ms);");

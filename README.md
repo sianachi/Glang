@@ -1392,6 +1392,18 @@ runtime error (a `RuntimeError` diagnostic) rather than continuing:
 > undefined behaviour for performance; portable programs should not depend on
 > either the check firing or on a particular post-violation result.
 
+**Sanitizer for the compiled backend.** The interpreter always checks these
+hazards; the native backend emits raw C, which does not. Compiling with the
+environment variable `GLANG_SANITIZE=1` set turns those checks back on for the
+compiled program: `alloc`/`free`/indexing go through a size-aware runtime
+registry so an **out-of-bounds index**, a **use-after-free** (indexing a freed
+block), or a **double free** aborts with a diagnostic instead of corrupting
+memory. It is opt-in and adds per-operation overhead, so release builds leave it
+off (the emitted code is then byte-for-byte the unchecked form). Pointers not
+produced by an `alloc` (e.g. `bytesFromString` blocks) pass through unchecked.
+Separately, `GLANG_DEBUG_ALLOC=1` enables a lighter runtime double-free/leak
+check without recompiling.
+
 ---
 
 ## 17. Future Work
@@ -1412,7 +1424,8 @@ inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
 **string interpolation** (`$"...{expr}..."`), the **`uint`** unsigned 64-bit
 type, **method dispatch through interface pointers**, **terminal-control
 built-ins**, **filesystem/environment built-ins** (`makeDir`/`isDir`/
-`renameFile`/`removeFile`/`getEnv`), and a **`shell`** built-in
+`renameFile`/`removeFile`/`getEnv`), an opt-in compiled-mode **sanitizer**
+(`GLANG_SANITIZE=1`), and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal
 editor, and a task manager). The standard library also gained `std/format.lang`

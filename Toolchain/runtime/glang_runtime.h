@@ -145,6 +145,10 @@ void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
 void* glang_alloc_n(size_t count, size_t size);
 void  glang_free(void* p);
+void* glang_alloc_checked(size_t size);
+void* glang_alloc_n_checked(size_t count, size_t elem);
+void* glang_checked_index(void* p, int64_t i, size_t elem);
+void  glang_free_checked(void* p);
 
 /* Time: monotonic nanoseconds, wall-clock milliseconds, and a millisecond sleep. */
 int64_t glang_now_nanos(void);

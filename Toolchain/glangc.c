@@ -48,6 +48,10 @@ void  glang_managed_sweep(void);
 void* glang_alloc(size_t size);
 void* glang_alloc_n(size_t count, size_t size);
 void  glang_free(void* p);
+void* glang_alloc_checked(size_t size);
+void* glang_alloc_n_checked(size_t count, size_t elem);
+void* glang_checked_index(void* p, int64_t i, size_t elem);
+void  glang_free_checked(void* p);
 int64_t glang_now_nanos(void);
 int64_t glang_wall_millis(void);
 void    glang_sleep_ms(int64_t ms);
@@ -1590,6 +1594,7 @@ struct CEmit {
     Map_string_int* classCids;
     int64_t cidCounter;
     List_Stmt* finallyStack;
+    int sanitize;
 };
 
 struct List_string {
@@ -2641,6 +2646,7 @@ void CEmit__emitBlock(CEmit* self, Stmt* block);
 void CEmit__emitStmt(CEmit* self, Stmt* s);
 void CEmit__emitForeach(CEmit* self, TypeNode* varType, char* varName, Expr* iterable, Stmt* body);
 char* CEmit__emitAlloc(CEmit* self, TypeNode* allocType, Expr* count);
+char* CEmit__freeFn(CEmit* self);
 char* CEmit__renderForInit(CEmit* self, Stmt* init);
 char* CEmit__renderForPost(CEmit* self, Stmt* post);
 char* CEmit__emitExpr(CEmit* self, Expr* e);
@@ -16869,6 +16875,7 @@ void CEmit__init(CEmit* self, GlobalEnv* e) {
     self->classCids = Map_string_int_new();
     self->cidCounter = 1;
     self->finallyStack = List_Stmt_new();
+    self->sanitize = (strcmp(glang_getenv("GLANG_SANITIZE"), "1") == 0);
 }
 
 CEmit* CEmit_new(GlobalEnv* e) {
@@ -18075,9 +18082,24 @@ void CEmit__emitForeach(CEmit* self, TypeNode* varType, char* varName, Expr* ite
 char* CEmit__emitAlloc(CEmit* self, TypeNode* allocType, Expr* count) {
     char* ct = cTypeOf(showType(allocType));
     if ((count != NULL)) {
-        return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)glang_alloc_n((size_t)("), CEmit__emitExpr(self, count)), "), sizeof("), ct), "))");
+        char* an = "glang_alloc_n";
+        if (self->sanitize) {
+            an = "glang_alloc_n_checked";
+        }
+        return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)"), an), "((size_t)("), CEmit__emitExpr(self, count)), "), sizeof("), ct), "))");
     }
-    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)glang_alloc(sizeof("), ct), "))");
+    char* a1 = "glang_alloc";
+    if (self->sanitize) {
+        a1 = "glang_alloc_checked";
+    }
+    return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(", ct), "*)"), a1), "(sizeof("), ct), "))");
+}
+
+char* CEmit__freeFn(CEmit* self) {
+    if (self->sanitize) {
+        return "glang_free_checked";
+    }
+    return "glang_free";
 }
 
 char* CEmit__renderForInit(CEmit* self, Stmt* init) {
@@ -18213,12 +18235,12 @@ char* CEmit__emitExpr(CEmit* self, Expr* e) {
             if (GlobalEnv__is_class(self->env, base)) {
                 return glang_str_concat(glang_str_concat(glang_str_concat(mangleName(base), "_delete("), CEmit__emitExpr(self, o)), ")");
             }
-            return glang_str_concat(glang_str_concat("glang_free(", CEmit__emitExpr(self, o)), ")");
+            return glang_str_concat(glang_str_concat(glang_str_concat(CEmit__freeFn(self), "("), CEmit__emitExpr(self, o)), ")");
             break;
         }
         case Expr__FreeExpr: {
             Expr* o = __match__.data.as_FreeExpr.operand;
-            return glang_str_concat(glang_str_concat("glang_free(", CEmit__emitExpr(self, o)), ")");
+            return glang_str_concat(glang_str_concat(glang_str_concat(CEmit__freeFn(self), "("), CEmit__emitExpr(self, o)), ")");
             break;
         }
         case Expr__AllocExpr: {
@@ -18240,6 +18262,11 @@ char* CEmit__emitExpr(CEmit* self, Expr* e) {
         case Expr__IndexExpr: {
             Expr* a = __match__.data.as_IndexExpr.array;
             Expr* i = __match__.data.as_IndexExpr.index;
+            char* at = CEmit__infer(self, a);
+            if ((self->sanitize && glang_endswith(at, "*"))) {
+                char* ct = cTypeOf(glang_str_substr(at, 0, ((int64_t)strlen(at) - 1)));
+                return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("(*(", ct), "*)glang_checked_index((void*)("), CEmit__emitExpr(self, a)), "), (int64_t)("), CEmit__emitExpr(self, i)), "), sizeof("), ct), ")))");
+            }
             return glang_str_concat(glang_str_concat(glang_str_concat(CEmit__emitExpr(self, a), "["), CEmit__emitExpr(self, i)), "]");
             break;
         }
@@ -19605,6 +19632,10 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "void* glang_alloc(size_t size);");
     StringBuilder__appendLine(f, "void* glang_alloc_n(size_t count, size_t size);");
     StringBuilder__appendLine(f, "void  glang_free(void* p);");
+    StringBuilder__appendLine(f, "void* glang_alloc_checked(size_t size);");
+    StringBuilder__appendLine(f, "void* glang_alloc_n_checked(size_t count, size_t elem);");
+    StringBuilder__appendLine(f, "void* glang_checked_index(void* p, int64_t i, size_t elem);");
+    StringBuilder__appendLine(f, "void  glang_free_checked(void* p);");
     StringBuilder__appendLine(f, "int64_t glang_now_nanos(void);");
     StringBuilder__appendLine(f, "int64_t glang_wall_millis(void);");
     StringBuilder__appendLine(f, "void    glang_sleep_ms(int64_t ms);");

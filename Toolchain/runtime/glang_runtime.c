@@ -340,6 +340,82 @@ void glang_free(void* p) {
     free(p);
 }
 
+/* ── Sanitizer (compile with GLANG_SANITIZE=1) ──────────────────────────────
+   A size-aware allocation registry so the emitted code can bounds-check every
+   index into an alloc'd block and detect use-after-free / double-free. Entries
+   are kept (marked dead on free) so a freed block still reports UAF. Pointers
+   not produced by the checked alloc paths (foreign/string blocks) pass through
+   unchecked. Off by default: only the *_checked functions consult it, and those
+   are emitted only under GLANG_SANITIZE. */
+typedef struct { char* base; size_t size; int live; } GlangSanBlock;
+static GlangSanBlock* glang_san = NULL;
+static size_t glang_san_len = 0, glang_san_cap = 0;
+
+static void glang_san_register(void* p, size_t size) {
+    if (!p) return;
+    if (glang_san_len == glang_san_cap) {
+        glang_san_cap = glang_san_cap ? glang_san_cap * 2 : 128;
+        glang_san = (GlangSanBlock*)realloc(glang_san, glang_san_cap * sizeof(GlangSanBlock));
+    }
+    glang_san[glang_san_len].base = (char*)p;
+    glang_san[glang_san_len].size = size;
+    glang_san[glang_san_len].live = 1;
+    glang_san_len++;
+}
+
+/* Index of the block whose range contains addr, or -1. */
+static long glang_san_find(void* addr) {
+    char* a = (char*)addr;
+    for (long i = (long)glang_san_len - 1; i >= 0; --i) {
+        if (a >= glang_san[i].base && a < glang_san[i].base + glang_san[i].size) return i;
+    }
+    return -1;
+}
+
+void* glang_alloc_checked(size_t size) {
+    void* p = glang_alloc(size);
+    glang_san_register(p, size);
+    return p;
+}
+void* glang_alloc_n_checked(size_t count, size_t elem) {
+    void* p = glang_alloc_n(count, elem);
+    glang_san_register(p, count * elem);
+    return p;
+}
+
+void* glang_checked_index(void* p, int64_t i, size_t elem) {
+    long b = glang_san_find(p);
+    char* target = (char*)p + i * (int64_t)elem;
+    if (b >= 0) {
+        if (!glang_san[b].live) {
+            fprintf(stderr, "glang: use-after-free (index into freed block)\n");
+            abort();
+        }
+        char* base = glang_san[b].base;
+        if (target < base || target + elem > base + glang_san[b].size) {
+            fprintf(stderr, "glang: index %lld out of bounds\n", (long long)i);
+            abort();
+        }
+    }
+    return target;
+}
+
+void glang_free_checked(void* p) {
+    if (!p) return;
+    for (long i = (long)glang_san_len - 1; i >= 0; --i) {
+        if (glang_san[i].base == (char*)p) {
+            if (!glang_san[i].live) {
+                fprintf(stderr, "glang: double free\n");
+                abort();
+            }
+            glang_san[i].live = 0;
+            glang_free(p);
+            return;
+        }
+    }
+    glang_free(p);   /* untracked (foreign block) */
+}
+
 void* glang_managed_alloc(size_t size) {
     if (!glang_managed_atexit_set) {
         atexit(glang_managed_sweep);
