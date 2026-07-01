@@ -1,0 +1,133 @@
+// textstats.lang — summarize a text: counts, a 64-bit content checksum, and a
+// frequency histogram of the most common words.
+//
+// Brings together several language features in one small tool:
+//   * uint            — a wrapping FNV-1a 64-bit checksum of the content;
+//   * HashMap<string,int> — word-frequency counting in average O(1);
+//   * string interpolation — the whole report is written with $"...{expr}...";
+//   * default parameters   — the histogram bar width defaults to 40.
+//
+//   textstats <file|->
+//
+// From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/textstats.lang notes.txt
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/textstats.lang /tmp/textstats.c
+//   gcc -O2 /tmp/textstats.c runtime/glang_runtime.c -o /tmp/textstats
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/stringbuilder.lang";
+import "std/char.lang";
+import "std/hashmap.lang";
+
+// FNV-1a 64-bit hash — relies on unsigned wraparound multiply.
+uint fnv1a(string s) {
+    uint h = 14695981039346656037;      // FNV offset basis
+    uint prime = 1099511628211;         // FNV prime
+    int n = len(s);
+    for (int i = 0; i < n; i = i + 1) {
+        h = h ^ (uint)(s[i]);
+        h = h * prime;
+    }
+    return h;
+}
+
+bool isWordChar(char c) {
+    int v = (int)c;
+    bool digit = v >= 48 && v <= 57;
+    bool lower = v >= 97 && v <= 122;
+    bool upper = v >= 65 && v <= 90;
+    return digit || lower || upper;
+}
+
+// Split into lowercased words on any non-word character.
+List<string> words(string text) {
+    List<string> out = List<string>();
+    StringBuilder cur = StringBuilder();
+    int n = len(text);
+    for (int i = 0; i < n; i = i + 1) {
+        char c = text[i];
+        if (isWordChar(c)) {
+            cur.appendChar(chars::toLower(c));
+        } else if (cur.length() > 0) {
+            out.add(cur.build());
+            cur = StringBuilder();
+        }
+    }
+    if (cur.length() > 0) { out.add(cur.build()); }
+    return out;
+}
+
+class Freq {
+    string word;
+    int n;
+    Freq(string word, int n) { this.word = word; this.n = n; }
+}
+
+bool freqBefore(Freq* a, Freq* b) {
+    if (a->n != b->n) { return a->n > b->n; }
+    return strings::compare(a->word, b->word) < 0;
+}
+
+// A proportional bar; width defaults to 40 columns.
+string bar(int value, int maxValue, int width = 40) {
+    int fill = 0;
+    if (maxValue > 0) { fill = value * width / maxValue; }
+    return strings::repeat("#", fill);
+}
+
+int main() {
+    if (getArgCount() == 0) {
+        print("usage: textstats <file|->");
+        return 1;
+    }
+    string path = getArg(0);
+    string text = path == "-" ? readStdin() : readFile(path);
+
+    List<string> lines = strings::split(text, '\n');
+    // A trailing newline yields an empty final segment; don't count it as a line.
+    int lineCount = lines.length();
+    if (lineCount > 0 && len(lines.get(lineCount - 1)) == 0) { lineCount = lineCount - 1; }
+    List<string> ws = words(text);
+
+    // Word frequencies.
+    HashMap<string, int> freq = HashMap<string, int>();
+    for (int i = 0; i < ws.length(); i = i + 1) {
+        string w = ws.get(i);
+        freq.set(w, freq.getOr(w, 0) + 1);
+    }
+
+    // Sort the distinct words by frequency (desc), then alphabetically.
+    List<string> keys = freq.keys();
+    List<Freq*> rows = List<Freq*>();
+    for (int i = 0; i < keys.length(); i = i + 1) {
+        rows.add(new Freq(keys.get(i), freq.getOr(keys.get(i), 0)));
+    }
+    for (int i = 0; i < rows.length(); i = i + 1) {
+        int best = i;
+        for (int j = i + 1; j < rows.length(); j = j + 1) {
+            if (freqBefore(rows.get(j), rows.get(best))) { best = j; }
+        }
+        Freq* t = rows.get(i); rows.set(i, rows.get(best)); rows.set(best, t);
+    }
+
+    print($"file:      {path}");
+    print($"lines:     {lineCount}");
+    print($"words:     {ws.length()}");
+    print($"unique:    {rows.length()}");
+    print($"chars:     {len(text)}");
+    print($"checksum:  {fnv1a(text)}");
+    print("");
+    print("top words");
+
+    int topMax = 0;
+    if (rows.length() > 0) { topMax = rows.get(0)->n; }
+    int shown = rows.length();
+    if (shown > 5) { shown = 5; }
+    for (int i = 0; i < shown; i = i + 1) {
+        Freq* f = rows.get(i);
+        print($"  {f->word}  {f->n}  {bar(f->n, topMax, 20)}");
+    }
+    return 0;
+}

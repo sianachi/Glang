@@ -9,6 +9,20 @@ import "std/list.lang";
 
 namespace strings {
 
+// Lexicographic comparison by byte value: negative if a < b, 0 if equal,
+// positive if a > b. (Glang's `<`/`>` are numeric only, so strings need this.)
+int compare(string a, string b) {
+    int an = len(a);
+    int bn = len(b);
+    int m = an < bn ? an : bn;
+    for (int i = 0; i < m; ++i) {
+        int ca = (int)(a[i]);
+        int cb = (int)(b[i]);
+        if (ca != cb) { return ca - cb; }
+    }
+    return an - bn;
+}
+
 string toUpperStr(string s) {
     string out = "";
     int n = len(s);

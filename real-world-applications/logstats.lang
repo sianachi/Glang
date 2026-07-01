@@ -26,23 +26,10 @@ class Count {
     Count(string key, int n) { this.key = key; this.n = n; }
 }
 
-// Lexicographic string comparison (Glang '<' is numeric only).
-bool strLess(string a, string b) {
-    int an = len(a);
-    int bn = len(b);
-    int m = an < bn ? an : bn;
-    for (int i = 0; i < m; ++i) {
-        int ca = (int)(a[i]);
-        int cb = (int)(b[i]);
-        if (ca != cb) { return ca < cb; }
-    }
-    return an < bn;
-}
-
 // Sort descending by count, breaking ties by key ascending (deterministic).
 bool countBefore(Count* a, Count* b) {
     if (a->n != b->n) { return a->n > b->n; }
-    return strLess(a->key, b->key);
+    return strings::compare(a->key, b->key) < 0;
 }
 
 void sortCounts(List<Count*> xs) {
