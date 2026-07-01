@@ -93,117 +93,224 @@ static const char* __glang_hier__[] = { "LexError", "Exception", "ParseError", "
 #define __glang_hier_len__ 8
 
 typedef struct Exception Exception;
+#define Exception__CID ((int64_t)1)
 typedef struct Token Token;
+#define Token__CID ((int64_t)2)
 typedef struct StringBuilder StringBuilder;
+#define StringBuilder__CID ((int64_t)3)
 typedef struct LexError LexError;
+#define LexError__CID ((int64_t)4)
 typedef struct GLexer GLexer;
+#define GLexer__CID ((int64_t)5)
 typedef struct ParseError ParseError;
+#define ParseError__CID ((int64_t)6)
 typedef struct TokenStream TokenStream;
+#define TokenStream__CID ((int64_t)7)
 typedef struct TypeNode TypeNode;
 typedef struct Param Param;
+#define Param__CID ((int64_t)8)
 typedef struct Expr Expr;
 typedef struct Pattern Pattern;
 typedef struct CatchClause CatchClause;
+#define CatchClause__CID ((int64_t)9)
 typedef struct MatchArm MatchArm;
+#define MatchArm__CID ((int64_t)10)
 typedef struct Stmt Stmt;
 typedef struct FieldDecl FieldDecl;
+#define FieldDecl__CID ((int64_t)11)
 typedef struct StaticFieldDecl StaticFieldDecl;
+#define StaticFieldDecl__CID ((int64_t)12)
 typedef struct ConstructorDecl ConstructorDecl;
+#define ConstructorDecl__CID ((int64_t)13)
 typedef struct DestructorDecl DestructorDecl;
+#define DestructorDecl__CID ((int64_t)14)
 typedef struct MethodDecl MethodDecl;
+#define MethodDecl__CID ((int64_t)15)
 typedef struct EnumVariant EnumVariant;
+#define EnumVariant__CID ((int64_t)16)
 typedef struct UnionVariant UnionVariant;
+#define UnionVariant__CID ((int64_t)17)
 typedef struct Decl Decl;
 typedef struct Program Program;
+#define Program__CID ((int64_t)18)
 typedef struct TypeParser TypeParser;
+#define TypeParser__CID ((int64_t)19)
 typedef struct Bp Bp;
+#define Bp__CID ((int64_t)20)
 typedef struct ExprParser ExprParser;
+#define ExprParser__CID ((int64_t)21)
 typedef struct StmtParser StmtParser;
+#define StmtParser__CID ((int64_t)22)
 typedef struct TypeParams TypeParams;
+#define TypeParams__CID ((int64_t)23)
 typedef struct DeclParser DeclParser;
+#define DeclParser__CID ((int64_t)24)
 typedef struct Parser Parser;
+#define Parser__CID ((int64_t)25)
 typedef struct AnalyzeError AnalyzeError;
+#define AnalyzeError__CID ((int64_t)26)
 typedef struct FunctionInfo FunctionInfo;
+#define FunctionInfo__CID ((int64_t)27)
 typedef struct ClassInfo ClassInfo;
+#define ClassInfo__CID ((int64_t)28)
 typedef struct InterfaceInfo InterfaceInfo;
+#define InterfaceInfo__CID ((int64_t)29)
 typedef struct EnumInfo EnumInfo;
+#define EnumInfo__CID ((int64_t)30)
 typedef struct UnionVariantInfo UnionVariantInfo;
+#define UnionVariantInfo__CID ((int64_t)31)
 typedef struct UnionInfo UnionInfo;
+#define UnionInfo__CID ((int64_t)32)
 typedef struct SymEntry SymEntry;
+#define SymEntry__CID ((int64_t)33)
 typedef struct SymbolTable SymbolTable;
+#define SymbolTable__CID ((int64_t)34)
 typedef struct GlobalEnv GlobalEnv;
+#define GlobalEnv__CID ((int64_t)35)
 typedef struct UsingContext UsingContext;
+#define UsingContext__CID ((int64_t)36)
 typedef struct FlatDecl FlatDecl;
+#define FlatDecl__CID ((int64_t)37)
 typedef struct NamespaceResolver NamespaceResolver;
+#define NamespaceResolver__CID ((int64_t)38)
 typedef struct WorkItem WorkItem;
+#define WorkItem__CID ((int64_t)39)
 typedef struct InstanceArgs InstanceArgs;
+#define InstanceArgs__CID ((int64_t)40)
 typedef struct ArgsOpt ArgsOpt;
+#define ArgsOpt__CID ((int64_t)41)
 typedef struct Monomorphizer Monomorphizer;
+#define Monomorphizer__CID ((int64_t)42)
 typedef struct ClosureContext ClosureContext;
+#define ClosureContext__CID ((int64_t)43)
 typedef struct Pass2Checker Pass2Checker;
+#define Pass2Checker__CID ((int64_t)44)
 typedef struct LoadError LoadError;
+#define LoadError__CID ((int64_t)45)
 typedef struct Loader Loader;
+#define Loader__CID ((int64_t)46)
 typedef struct CEmit CEmit;
+#define CEmit__CID ((int64_t)47)
 typedef struct List_string List_string;
+#define List_string__CID ((int64_t)48)
 typedef struct Map_string_TokenType Map_string_TokenType;
+#define Map_string_TokenType__CID ((int64_t)49)
 typedef struct List_Token List_Token;
+#define List_Token__CID ((int64_t)50)
 typedef struct List_TypeNode List_TypeNode;
+#define List_TypeNode__CID ((int64_t)51)
 typedef struct List_Expr List_Expr;
+#define List_Expr__CID ((int64_t)52)
 typedef struct List_Param List_Param;
+#define List_Param__CID ((int64_t)53)
 typedef struct List_Stmt List_Stmt;
+#define List_Stmt__CID ((int64_t)54)
 typedef struct List_CatchClause List_CatchClause;
+#define List_CatchClause__CID ((int64_t)55)
 typedef struct List_MatchArm List_MatchArm;
+#define List_MatchArm__CID ((int64_t)56)
 typedef struct List_FieldDecl List_FieldDecl;
+#define List_FieldDecl__CID ((int64_t)57)
 typedef struct Map_string_TypeNode Map_string_TypeNode;
+#define Map_string_TypeNode__CID ((int64_t)58)
 typedef struct List_StaticFieldDecl List_StaticFieldDecl;
+#define List_StaticFieldDecl__CID ((int64_t)59)
 typedef struct List_MethodDecl List_MethodDecl;
+#define List_MethodDecl__CID ((int64_t)60)
 typedef struct List_EnumVariant List_EnumVariant;
+#define List_EnumVariant__CID ((int64_t)61)
 typedef struct List_Decl List_Decl;
+#define List_Decl__CID ((int64_t)62)
 typedef struct List_UnionVariant List_UnionVariant;
+#define List_UnionVariant__CID ((int64_t)63)
 typedef struct Map_string_FieldDecl Map_string_FieldDecl;
+#define Map_string_FieldDecl__CID ((int64_t)64)
 typedef struct Map_string_StaticFieldDecl Map_string_StaticFieldDecl;
+#define Map_string_StaticFieldDecl__CID ((int64_t)65)
 typedef struct Map_string_MethodDecl Map_string_MethodDecl;
+#define Map_string_MethodDecl__CID ((int64_t)66)
 typedef struct Map_string_int Map_string_int;
+#define Map_string_int__CID ((int64_t)67)
 typedef struct Map_string_UnionVariantInfo Map_string_UnionVariantInfo;
+#define Map_string_UnionVariantInfo__CID ((int64_t)68)
 typedef struct Map_string_SymEntry Map_string_SymEntry;
+#define Map_string_SymEntry__CID ((int64_t)69)
 typedef struct Map_string_FunctionInfo Map_string_FunctionInfo;
+#define Map_string_FunctionInfo__CID ((int64_t)70)
 typedef struct Map_string_ClassInfo Map_string_ClassInfo;
+#define Map_string_ClassInfo__CID ((int64_t)71)
 typedef struct Map_string_InterfaceInfo Map_string_InterfaceInfo;
+#define Map_string_InterfaceInfo__CID ((int64_t)72)
 typedef struct Map_string_EnumInfo Map_string_EnumInfo;
+#define Map_string_EnumInfo__CID ((int64_t)73)
 typedef struct Map_string_UnionInfo Map_string_UnionInfo;
+#define Map_string_UnionInfo__CID ((int64_t)74)
 typedef struct Map_string_Map_string_MethodDecl Map_string_Map_string_MethodDecl;
+#define Map_string_Map_string_MethodDecl__CID ((int64_t)75)
 typedef struct Map_string_string Map_string_string;
+#define Map_string_string__CID ((int64_t)76)
 typedef struct Map_string_bool Map_string_bool;
+#define Map_string_bool__CID ((int64_t)77)
 typedef struct List_List_string List_List_string;
+#define List_List_string__CID ((int64_t)78)
 typedef struct List_FlatDecl List_FlatDecl;
+#define List_FlatDecl__CID ((int64_t)79)
 typedef struct Map_string_Decl Map_string_Decl;
+#define Map_string_Decl__CID ((int64_t)80)
 typedef struct Map_string_List_string Map_string_List_string;
+#define Map_string_List_string__CID ((int64_t)81)
 typedef struct Map_string_InstanceArgs Map_string_InstanceArgs;
+#define Map_string_InstanceArgs__CID ((int64_t)82)
 typedef struct List_Map_string_TypeNode List_Map_string_TypeNode;
+#define List_Map_string_TypeNode__CID ((int64_t)83)
 typedef struct List_WorkItem List_WorkItem;
+#define List_WorkItem__CID ((int64_t)84)
 typedef struct Map_string_List_Decl Map_string_List_Decl;
+#define Map_string_List_Decl__CID ((int64_t)85)
 typedef struct List_ClosureContext List_ClosureContext;
+#define List_ClosureContext__CID ((int64_t)86)
 typedef struct List_Map_string_string List_Map_string_string;
+#define List_Map_string_string__CID ((int64_t)87)
 typedef struct Span_string Span_string;
+#define Span_string__CID ((int64_t)88)
 typedef struct Span_Token Span_Token;
+#define Span_Token__CID ((int64_t)89)
 typedef struct Span_TypeNode Span_TypeNode;
+#define Span_TypeNode__CID ((int64_t)90)
 typedef struct Span_Expr Span_Expr;
+#define Span_Expr__CID ((int64_t)91)
 typedef struct Span_Param Span_Param;
+#define Span_Param__CID ((int64_t)92)
 typedef struct Span_Stmt Span_Stmt;
+#define Span_Stmt__CID ((int64_t)93)
 typedef struct Span_CatchClause Span_CatchClause;
+#define Span_CatchClause__CID ((int64_t)94)
 typedef struct Span_MatchArm Span_MatchArm;
+#define Span_MatchArm__CID ((int64_t)95)
 typedef struct Span_FieldDecl Span_FieldDecl;
+#define Span_FieldDecl__CID ((int64_t)96)
 typedef struct Span_StaticFieldDecl Span_StaticFieldDecl;
+#define Span_StaticFieldDecl__CID ((int64_t)97)
 typedef struct Span_MethodDecl Span_MethodDecl;
+#define Span_MethodDecl__CID ((int64_t)98)
 typedef struct Span_EnumVariant Span_EnumVariant;
+#define Span_EnumVariant__CID ((int64_t)99)
 typedef struct Span_Decl Span_Decl;
+#define Span_Decl__CID ((int64_t)100)
 typedef struct Span_UnionVariant Span_UnionVariant;
+#define Span_UnionVariant__CID ((int64_t)101)
 typedef struct Span_List_string Span_List_string;
+#define Span_List_string__CID ((int64_t)102)
 typedef struct Span_FlatDecl Span_FlatDecl;
+#define Span_FlatDecl__CID ((int64_t)103)
 typedef struct Span_Map_string_TypeNode Span_Map_string_TypeNode;
+#define Span_Map_string_TypeNode__CID ((int64_t)104)
 typedef struct Span_WorkItem Span_WorkItem;
+#define Span_WorkItem__CID ((int64_t)105)
 typedef struct Span_ClosureContext Span_ClosureContext;
+#define Span_ClosureContext__CID ((int64_t)106)
 typedef struct Span_Map_string_string Span_Map_string_string;
+#define Span_Map_string_string__CID ((int64_t)107)
 typedef int64_t TokenType;
 #define TokenType__INT_LIT ((int64_t)0)
 #define TokenType__FLOAT_LIT ((int64_t)1)
@@ -307,10 +414,12 @@ typedef int64_t TokenType;
 #define TokenType__EOF ((int64_t)99)
 
 struct Exception {
+    int64_t __cid;
     char* message;
 };
 
 struct Token {
+    int64_t __cid;
     TokenType type;
     char* value;
     int64_t line;
@@ -318,16 +427,19 @@ struct Token {
 };
 
 struct StringBuilder {
+    int64_t __cid;
     List_string* chunks;
 };
 
 struct LexError {
+    int64_t __cid;
     char* message;
     int64_t line;
     int64_t col;
 };
 
 struct GLexer {
+    int64_t __cid;
     char* src;
     int64_t pos;
     int64_t srcLen;
@@ -336,12 +448,14 @@ struct GLexer {
 };
 
 struct ParseError {
+    int64_t __cid;
     char* message;
     int64_t line;
     int64_t col;
 };
 
 struct TokenStream {
+    int64_t __cid;
     List_Token* tokens;
     int64_t pos;
 };
@@ -439,6 +553,7 @@ static TypeNode TypeNode__FunctionPointerType_new(List_TypeNode* paramTypes, Typ
 }
 
 struct Param {
+    int64_t __cid;
     char* name;
     TypeNode* type;
     int isConst;
@@ -748,12 +863,14 @@ static Pattern Pattern__WildcardPattern_new(void) {
 }
 
 struct CatchClause {
+    int64_t __cid;
     TypeNode* catchType;
     char* varName;
     Stmt* body;
 };
 
 struct MatchArm {
+    int64_t __cid;
     Pattern* pattern;
     Stmt* body;
 };
@@ -976,6 +1093,7 @@ static Stmt Stmt__MatchStmt_new(Expr* scrutinee, List_MatchArm* arms) {
 }
 
 struct FieldDecl {
+    int64_t __cid;
     char* name;
     TypeNode* fieldType;
     int isConst;
@@ -983,6 +1101,7 @@ struct FieldDecl {
 };
 
 struct StaticFieldDecl {
+    int64_t __cid;
     char* name;
     TypeNode* fieldType;
     Expr* initializer;
@@ -991,6 +1110,7 @@ struct StaticFieldDecl {
 };
 
 struct ConstructorDecl {
+    int64_t __cid;
     List_Param* params;
     Stmt* body;
     int hasSuper;
@@ -998,10 +1118,12 @@ struct ConstructorDecl {
 };
 
 struct DestructorDecl {
+    int64_t __cid;
     Stmt* body;
 };
 
 struct MethodDecl {
+    int64_t __cid;
     char* name;
     List_Param* params;
     TypeNode* returnType;
@@ -1011,12 +1133,14 @@ struct MethodDecl {
 };
 
 struct EnumVariant {
+    int64_t __cid;
     char* name;
     int hasValue;
     int64_t value;
 };
 
 struct UnionVariant {
+    int64_t __cid;
     char* name;
     List_FieldDecl* fields;
 };
@@ -1178,38 +1302,45 @@ static Decl Decl__UnionDecl_new(char* name, List_string* typeParams, List_UnionV
 }
 
 struct Program {
+    int64_t __cid;
     List_Decl* imports;
     List_Decl* declarations;
 };
 
 struct TypeParser {
+    int64_t __cid;
     TokenStream* s;
     int64_t pendingGt;
 };
 
 struct Bp {
+    int64_t __cid;
     int64_t left;
     int64_t right;
 };
 
 struct ExprParser {
+    int64_t __cid;
     TokenStream* s;
     TypeParser* tp;
     GlangFn blockHook;
 };
 
 struct StmtParser {
+    int64_t __cid;
     TokenStream* s;
     TypeParser* tp;
     ExprParser* ep;
 };
 
 struct TypeParams {
+    int64_t __cid;
     List_string* names;
     Map_string_TypeNode* bounds;
 };
 
 struct DeclParser {
+    int64_t __cid;
     TokenStream* s;
     TypeParser* tp;
     ExprParser* ep;
@@ -1217,17 +1348,20 @@ struct DeclParser {
 };
 
 struct Parser {
+    int64_t __cid;
     TokenStream* s;
     DeclParser* dp;
 };
 
 struct AnalyzeError {
+    int64_t __cid;
     char* message;
     int64_t line;
     int64_t col;
 };
 
 struct FunctionInfo {
+    int64_t __cid;
     char* name;
     List_Param* params;
     TypeNode* return_type;
@@ -1235,6 +1369,7 @@ struct FunctionInfo {
 };
 
 struct ClassInfo {
+    int64_t __cid;
     char* name;
     Map_string_FieldDecl* fields;
     Map_string_StaticFieldDecl* static_fields;
@@ -1251,23 +1386,27 @@ struct ClassInfo {
 };
 
 struct InterfaceInfo {
+    int64_t __cid;
     char* name;
     Map_string_MethodDecl* methods;
     Decl* decl;
 };
 
 struct EnumInfo {
+    int64_t __cid;
     char* name;
     Map_string_int* variants;
     Decl* decl;
 };
 
 struct UnionVariantInfo {
+    int64_t __cid;
     char* name;
     List_FieldDecl* fields;
 };
 
 struct UnionInfo {
+    int64_t __cid;
     char* name;
     List_string* type_params;
     Map_string_UnionVariantInfo* variants;
@@ -1275,6 +1414,7 @@ struct UnionInfo {
 };
 
 struct SymEntry {
+    int64_t __cid;
     TypeNode* type;
     int64_t line;
     int64_t col;
@@ -1282,11 +1422,13 @@ struct SymEntry {
 };
 
 struct SymbolTable {
+    int64_t __cid;
     SymbolTable* parent;
     Map_string_SymEntry* symbols;
 };
 
 struct GlobalEnv {
+    int64_t __cid;
     Map_string_FunctionInfo* functions;
     Map_string_ClassInfo* classes;
     Map_string_InterfaceInfo* interfaces;
@@ -1296,16 +1438,19 @@ struct GlobalEnv {
 };
 
 struct UsingContext {
+    int64_t __cid;
     Map_string_string* aliases;
     List_string* opened;
 };
 
 struct FlatDecl {
+    int64_t __cid;
     Decl* decl;
     List_string* prefixes;
 };
 
 struct NamespaceResolver {
+    int64_t __cid;
     Map_string_bool* declared;
     Map_string_bool* namespaces;
     Map_string_bool* globals;
@@ -1315,6 +1460,7 @@ struct NamespaceResolver {
 };
 
 struct WorkItem {
+    int64_t __cid;
     char* kind;
     char* base;
     List_TypeNode* args;
@@ -1322,16 +1468,19 @@ struct WorkItem {
 };
 
 struct InstanceArgs {
+    int64_t __cid;
     char* base;
     List_TypeNode* args;
 };
 
 struct ArgsOpt {
+    int64_t __cid;
     int found;
     List_TypeNode* args;
 };
 
 struct Monomorphizer {
+    int64_t __cid;
     Map_string_Decl* class_templates;
     Map_string_Decl* func_templates;
     Map_string_bool* class_names;
@@ -1350,12 +1499,14 @@ struct Monomorphizer {
 };
 
 struct ClosureContext {
+    int64_t __cid;
     SymbolTable* root;
     Map_string_TypeNode* captures;
     List_string* captureOrder;
 };
 
 struct Pass2Checker {
+    int64_t __cid;
     GlobalEnv* env;
     SymbolTable* scope;
     TypeNode* return_type;
@@ -1368,12 +1519,14 @@ struct Pass2Checker {
 };
 
 struct LoadError {
+    int64_t __cid;
     char* message;
     int64_t line;
     int64_t col;
 };
 
 struct Loader {
+    int64_t __cid;
     List_string* loaded;
     List_string* visiting;
     List_Decl* declarations;
@@ -1381,6 +1534,7 @@ struct Loader {
 };
 
 struct CEmit {
+    int64_t __cid;
     StringBuilder* out;
     StringBuilder* preamble;
     StringBuilder* structs;
@@ -1394,15 +1548,19 @@ struct CEmit {
     List_Map_string_string* scopes;
     List_string* hierEntries;
     List_string* thunksEmitted;
+    Map_string_int* classCids;
+    int64_t cidCounter;
 };
 
 struct List_string {
+    int64_t __cid;
     char** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Map_string_TokenType {
+    int64_t __cid;
     char** keys;
     TokenType* vals;
     int64_t cap;
@@ -1410,54 +1568,63 @@ struct Map_string_TokenType {
 };
 
 struct List_Token {
+    int64_t __cid;
     Token** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_TypeNode {
+    int64_t __cid;
     TypeNode** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_Expr {
+    int64_t __cid;
     Expr** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_Param {
+    int64_t __cid;
     Param** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_Stmt {
+    int64_t __cid;
     Stmt** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_CatchClause {
+    int64_t __cid;
     CatchClause** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_MatchArm {
+    int64_t __cid;
     MatchArm** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_FieldDecl {
+    int64_t __cid;
     FieldDecl** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Map_string_TypeNode {
+    int64_t __cid;
     char** keys;
     TypeNode** vals;
     int64_t cap;
@@ -1465,36 +1632,42 @@ struct Map_string_TypeNode {
 };
 
 struct List_StaticFieldDecl {
+    int64_t __cid;
     StaticFieldDecl** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_MethodDecl {
+    int64_t __cid;
     MethodDecl** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_EnumVariant {
+    int64_t __cid;
     EnumVariant** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_Decl {
+    int64_t __cid;
     Decl** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_UnionVariant {
+    int64_t __cid;
     UnionVariant** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Map_string_FieldDecl {
+    int64_t __cid;
     char** keys;
     FieldDecl** vals;
     int64_t cap;
@@ -1502,6 +1675,7 @@ struct Map_string_FieldDecl {
 };
 
 struct Map_string_StaticFieldDecl {
+    int64_t __cid;
     char** keys;
     StaticFieldDecl** vals;
     int64_t cap;
@@ -1509,6 +1683,7 @@ struct Map_string_StaticFieldDecl {
 };
 
 struct Map_string_MethodDecl {
+    int64_t __cid;
     char** keys;
     MethodDecl** vals;
     int64_t cap;
@@ -1516,6 +1691,7 @@ struct Map_string_MethodDecl {
 };
 
 struct Map_string_int {
+    int64_t __cid;
     char** keys;
     int64_t* vals;
     int64_t cap;
@@ -1523,6 +1699,7 @@ struct Map_string_int {
 };
 
 struct Map_string_UnionVariantInfo {
+    int64_t __cid;
     char** keys;
     UnionVariantInfo** vals;
     int64_t cap;
@@ -1530,6 +1707,7 @@ struct Map_string_UnionVariantInfo {
 };
 
 struct Map_string_SymEntry {
+    int64_t __cid;
     char** keys;
     SymEntry** vals;
     int64_t cap;
@@ -1537,6 +1715,7 @@ struct Map_string_SymEntry {
 };
 
 struct Map_string_FunctionInfo {
+    int64_t __cid;
     char** keys;
     FunctionInfo** vals;
     int64_t cap;
@@ -1544,6 +1723,7 @@ struct Map_string_FunctionInfo {
 };
 
 struct Map_string_ClassInfo {
+    int64_t __cid;
     char** keys;
     ClassInfo** vals;
     int64_t cap;
@@ -1551,6 +1731,7 @@ struct Map_string_ClassInfo {
 };
 
 struct Map_string_InterfaceInfo {
+    int64_t __cid;
     char** keys;
     InterfaceInfo** vals;
     int64_t cap;
@@ -1558,6 +1739,7 @@ struct Map_string_InterfaceInfo {
 };
 
 struct Map_string_EnumInfo {
+    int64_t __cid;
     char** keys;
     EnumInfo** vals;
     int64_t cap;
@@ -1565,6 +1747,7 @@ struct Map_string_EnumInfo {
 };
 
 struct Map_string_UnionInfo {
+    int64_t __cid;
     char** keys;
     UnionInfo** vals;
     int64_t cap;
@@ -1572,6 +1755,7 @@ struct Map_string_UnionInfo {
 };
 
 struct Map_string_Map_string_MethodDecl {
+    int64_t __cid;
     char** keys;
     Map_string_MethodDecl** vals;
     int64_t cap;
@@ -1579,6 +1763,7 @@ struct Map_string_Map_string_MethodDecl {
 };
 
 struct Map_string_string {
+    int64_t __cid;
     char** keys;
     char** vals;
     int64_t cap;
@@ -1586,6 +1771,7 @@ struct Map_string_string {
 };
 
 struct Map_string_bool {
+    int64_t __cid;
     char** keys;
     int* vals;
     int64_t cap;
@@ -1593,18 +1779,21 @@ struct Map_string_bool {
 };
 
 struct List_List_string {
+    int64_t __cid;
     List_string** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_FlatDecl {
+    int64_t __cid;
     FlatDecl** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Map_string_Decl {
+    int64_t __cid;
     char** keys;
     Decl** vals;
     int64_t cap;
@@ -1612,6 +1801,7 @@ struct Map_string_Decl {
 };
 
 struct Map_string_List_string {
+    int64_t __cid;
     char** keys;
     List_string** vals;
     int64_t cap;
@@ -1619,6 +1809,7 @@ struct Map_string_List_string {
 };
 
 struct Map_string_InstanceArgs {
+    int64_t __cid;
     char** keys;
     InstanceArgs** vals;
     int64_t cap;
@@ -1626,18 +1817,21 @@ struct Map_string_InstanceArgs {
 };
 
 struct List_Map_string_TypeNode {
+    int64_t __cid;
     Map_string_TypeNode** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_WorkItem {
+    int64_t __cid;
     WorkItem** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Map_string_List_Decl {
+    int64_t __cid;
     char** keys;
     List_Decl** vals;
     int64_t cap;
@@ -1645,132 +1839,154 @@ struct Map_string_List_Decl {
 };
 
 struct List_ClosureContext {
+    int64_t __cid;
     ClosureContext** data;
     int64_t cap;
     int64_t size;
 };
 
 struct List_Map_string_string {
+    int64_t __cid;
     Map_string_string** data;
     int64_t cap;
     int64_t size;
 };
 
 struct Span_string {
+    int64_t __cid;
     char** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Token {
+    int64_t __cid;
     Token** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_TypeNode {
+    int64_t __cid;
     TypeNode** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Expr {
+    int64_t __cid;
     Expr** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Param {
+    int64_t __cid;
     Param** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Stmt {
+    int64_t __cid;
     Stmt** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_CatchClause {
+    int64_t __cid;
     CatchClause** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_MatchArm {
+    int64_t __cid;
     MatchArm** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_FieldDecl {
+    int64_t __cid;
     FieldDecl** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_StaticFieldDecl {
+    int64_t __cid;
     StaticFieldDecl** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_MethodDecl {
+    int64_t __cid;
     MethodDecl** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_EnumVariant {
+    int64_t __cid;
     EnumVariant** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Decl {
+    int64_t __cid;
     Decl** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_UnionVariant {
+    int64_t __cid;
     UnionVariant** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_List_string {
+    int64_t __cid;
     List_string** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_FlatDecl {
+    int64_t __cid;
     FlatDecl** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Map_string_TypeNode {
+    int64_t __cid;
     Map_string_TypeNode** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_WorkItem {
+    int64_t __cid;
     WorkItem** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_ClosureContext {
+    int64_t __cid;
     ClosureContext** data;
     int64_t off;
     int64_t len;
 };
 
 struct Span_Map_string_string {
+    int64_t __cid;
     Map_string_string** data;
     int64_t off;
     int64_t len;
@@ -2360,6 +2576,9 @@ char* CEmit__renderForPost(CEmit* self, Stmt* post);
 char* CEmit__emitExpr(CEmit* self, Expr* e);
 char* CEmit__emitFieldAccess(CEmit* self, Expr* obj, char* field);
 char* CEmit__emitMethodCall(CEmit* self, Expr* obj, char* method, List_Expr* args);
+int CEmit__classImplements(CEmit* self, char* cls, char* iface);
+void CEmit__emitInterfaceDispatch(CEmit* self, List_Decl* decls, int protoOnly);
+void CEmit__emitOneIfaceDispatch(CEmit* self, char* inm, MethodDecl* m, List_Decl* decls, int protoOnly);
 char* CEmit__emitNew(CEmit* self, char* cls, List_Expr* args);
 char* CEmit__emitLit(CEmit* self, char* kind, char* value);
 char* CEmit__cStringLit(CEmit* self, char* val);
@@ -3087,6 +3306,7 @@ void Exception__init(Exception* self, char* msg) {
 
 Exception* Exception_new(char* msg) {
     Exception* self = (Exception*)calloc(1, sizeof(Exception));
+    self->__cid = Exception__CID;
     Exception__init(self, msg);
     return self;
 }
@@ -3323,6 +3543,7 @@ void Token__init(Token* self, TokenType t, char* v, int64_t ln, int64_t c) {
 
 Token* Token_new(TokenType t, char* v, int64_t ln, int64_t c) {
     Token* self = (Token*)calloc(1, sizeof(Token));
+    self->__cid = Token__CID;
     Token__init(self, t, v, ln, c);
     return self;
 }
@@ -3690,6 +3911,7 @@ void StringBuilder__init(StringBuilder* self) {
 
 StringBuilder* StringBuilder_new(void) {
     StringBuilder* self = (StringBuilder*)calloc(1, sizeof(StringBuilder));
+    self->__cid = StringBuilder__CID;
     StringBuilder__init(self);
     return self;
 }
@@ -3741,6 +3963,7 @@ void LexError__init(LexError* self, char* msg, int64_t ln, int64_t c) {
 
 LexError* LexError_new(char* msg, int64_t ln, int64_t c) {
     LexError* self = (LexError*)calloc(1, sizeof(LexError));
+    self->__cid = LexError__CID;
     LexError__init(self, msg, ln, c);
     return self;
 }
@@ -3786,6 +4009,7 @@ void GLexer__init(GLexer* self, char* source) {
 
 GLexer* GLexer_new(char* source) {
     GLexer* self = (GLexer*)calloc(1, sizeof(GLexer));
+    self->__cid = GLexer__CID;
     GLexer__init(self, source);
     return self;
 }
@@ -4255,6 +4479,7 @@ void ParseError__init(ParseError* self, char* msg, int64_t ln, int64_t c) {
 
 ParseError* ParseError_new(char* msg, int64_t ln, int64_t c) {
     ParseError* self = (ParseError*)calloc(1, sizeof(ParseError));
+    self->__cid = ParseError__CID;
     ParseError__init(self, msg, ln, c);
     return self;
 }
@@ -4272,6 +4497,7 @@ void TokenStream__init(TokenStream* self, List_Token* toks) {
 
 TokenStream* TokenStream_new(List_Token* toks) {
     TokenStream* self = (TokenStream*)calloc(1, sizeof(TokenStream));
+    self->__cid = TokenStream__CID;
     TokenStream__init(self, toks);
     return self;
 }
@@ -4410,6 +4636,7 @@ void Param__init(Param* self, char* n, TypeNode* t, int c) {
 
 Param* Param_new(char* n, TypeNode* t, int c) {
     Param* self = (Param*)calloc(1, sizeof(Param));
+    self->__cid = Param__CID;
     Param__init(self, n, t, c);
     return self;
 }
@@ -4616,6 +4843,7 @@ void CatchClause__init(CatchClause* self, TypeNode* ct, char* vn, Stmt* b) {
 
 CatchClause* CatchClause_new(TypeNode* ct, char* vn, Stmt* b) {
     CatchClause* self = (CatchClause*)calloc(1, sizeof(CatchClause));
+    self->__cid = CatchClause__CID;
     CatchClause__init(self, ct, vn, b);
     return self;
 }
@@ -4632,6 +4860,7 @@ void MatchArm__init(MatchArm* self, Pattern* p, Stmt* b) {
 
 MatchArm* MatchArm_new(Pattern* p, Stmt* b) {
     MatchArm* self = (MatchArm*)calloc(1, sizeof(MatchArm));
+    self->__cid = MatchArm__CID;
     MatchArm__init(self, p, b);
     return self;
 }
@@ -4847,6 +5076,7 @@ void FieldDecl__init(FieldDecl* self, char* n, TypeNode* t, int c, char* a) {
 
 FieldDecl* FieldDecl_new(char* n, TypeNode* t, int c, char* a) {
     FieldDecl* self = (FieldDecl*)calloc(1, sizeof(FieldDecl));
+    self->__cid = FieldDecl__CID;
     FieldDecl__init(self, n, t, c, a);
     return self;
 }
@@ -4866,6 +5096,7 @@ void StaticFieldDecl__init(StaticFieldDecl* self, char* n, TypeNode* t, Expr* in
 
 StaticFieldDecl* StaticFieldDecl_new(char* n, TypeNode* t, Expr* init, int c, char* a) {
     StaticFieldDecl* self = (StaticFieldDecl*)calloc(1, sizeof(StaticFieldDecl));
+    self->__cid = StaticFieldDecl__CID;
     StaticFieldDecl__init(self, n, t, init, c, a);
     return self;
 }
@@ -4884,6 +5115,7 @@ void ConstructorDecl__init(ConstructorDecl* self, List_Param* p, Stmt* b, int hs
 
 ConstructorDecl* ConstructorDecl_new(List_Param* p, Stmt* b, int hs, List_Expr* sa) {
     ConstructorDecl* self = (ConstructorDecl*)calloc(1, sizeof(ConstructorDecl));
+    self->__cid = ConstructorDecl__CID;
     ConstructorDecl__init(self, p, b, hs, sa);
     return self;
 }
@@ -4899,6 +5131,7 @@ void DestructorDecl__init(DestructorDecl* self, Stmt* b) {
 
 DestructorDecl* DestructorDecl_new(Stmt* b) {
     DestructorDecl* self = (DestructorDecl*)calloc(1, sizeof(DestructorDecl));
+    self->__cid = DestructorDecl__CID;
     DestructorDecl__init(self, b);
     return self;
 }
@@ -4919,6 +5152,7 @@ void MethodDecl__init(MethodDecl* self, char* n, List_Param* p, TypeNode* rt, St
 
 MethodDecl* MethodDecl_new(char* n, List_Param* p, TypeNode* rt, Stmt* b, int st, char* a) {
     MethodDecl* self = (MethodDecl*)calloc(1, sizeof(MethodDecl));
+    self->__cid = MethodDecl__CID;
     MethodDecl__init(self, n, p, rt, b, st, a);
     return self;
 }
@@ -4936,6 +5170,7 @@ void EnumVariant__init(EnumVariant* self, char* n, int h, int64_t v) {
 
 EnumVariant* EnumVariant_new(char* n, int h, int64_t v) {
     EnumVariant* self = (EnumVariant*)calloc(1, sizeof(EnumVariant));
+    self->__cid = EnumVariant__CID;
     EnumVariant__init(self, n, h, v);
     return self;
 }
@@ -4952,6 +5187,7 @@ void UnionVariant__init(UnionVariant* self, char* n, List_FieldDecl* f) {
 
 UnionVariant* UnionVariant_new(char* n, List_FieldDecl* f) {
     UnionVariant* self = (UnionVariant*)calloc(1, sizeof(UnionVariant));
+    self->__cid = UnionVariant__CID;
     UnionVariant__init(self, n, f);
     return self;
 }
@@ -4968,6 +5204,7 @@ void Program__init(Program* self, List_Decl* i, List_Decl* d) {
 
 Program* Program_new(List_Decl* i, List_Decl* d) {
     Program* self = (Program*)calloc(1, sizeof(Program));
+    self->__cid = Program__CID;
     Program__init(self, i, d);
     return self;
 }
@@ -5323,6 +5560,7 @@ void TypeParser__init(TypeParser* self, TokenStream* stream) {
 
 TypeParser* TypeParser_new(TokenStream* stream) {
     TypeParser* self = (TypeParser*)calloc(1, sizeof(TypeParser));
+    self->__cid = TypeParser__CID;
     TypeParser__init(self, stream);
     return self;
 }
@@ -5437,6 +5675,7 @@ void Bp__init(Bp* self, int64_t l, int64_t r) {
 
 Bp* Bp_new(int64_t l, int64_t r) {
     Bp* self = (Bp*)calloc(1, sizeof(Bp));
+    self->__cid = Bp__CID;
     Bp__init(self, l, r);
     return self;
 }
@@ -5527,6 +5766,7 @@ void ExprParser__init(ExprParser* self, TokenStream* stream, TypeParser* typePar
 
 ExprParser* ExprParser_new(TokenStream* stream, TypeParser* typeParser) {
     ExprParser* self = (ExprParser*)calloc(1, sizeof(ExprParser));
+    self->__cid = ExprParser__CID;
     ExprParser__init(self, stream, typeParser);
     return self;
 }
@@ -5878,6 +6118,7 @@ void StmtParser__init(StmtParser* self, TokenStream* stream, TypeParser* typePar
 
 StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser) {
     StmtParser* self = (StmtParser*)calloc(1, sizeof(StmtParser));
+    self->__cid = StmtParser__CID;
     StmtParser__init(self, stream, typeParser, exprParser);
     return self;
 }
@@ -6248,6 +6489,7 @@ void TypeParams__init(TypeParams* self, List_string* n, Map_string_TypeNode* b) 
 
 TypeParams* TypeParams_new(List_string* n, Map_string_TypeNode* b) {
     TypeParams* self = (TypeParams*)calloc(1, sizeof(TypeParams));
+    self->__cid = TypeParams__CID;
     TypeParams__init(self, n, b);
     return self;
 }
@@ -6266,6 +6508,7 @@ void DeclParser__init(DeclParser* self, TokenStream* stream, TypeParser* typePar
 
 DeclParser* DeclParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser, StmtParser* stmtParser) {
     DeclParser* self = (DeclParser*)calloc(1, sizeof(DeclParser));
+    self->__cid = DeclParser__CID;
     DeclParser__init(self, stream, typeParser, exprParser, stmtParser);
     return self;
 }
@@ -6658,6 +6901,7 @@ void Parser__init(Parser* self, List_Token* tokens) {
 
 Parser* Parser_new(List_Token* tokens) {
     Parser* self = (Parser*)calloc(1, sizeof(Parser));
+    self->__cid = Parser__CID;
     Parser__init(self, tokens);
     return self;
 }
@@ -6688,6 +6932,7 @@ void AnalyzeError__init(AnalyzeError* self, char* msg, int64_t ln, int64_t c) {
 
 AnalyzeError* AnalyzeError_new(char* msg, int64_t ln, int64_t c) {
     AnalyzeError* self = (AnalyzeError*)calloc(1, sizeof(AnalyzeError));
+    self->__cid = AnalyzeError__CID;
     AnalyzeError__init(self, msg, ln, c);
     return self;
 }
@@ -6707,6 +6952,7 @@ void FunctionInfo__init(FunctionInfo* self, char* n, List_Param* p, TypeNode* rt
 
 FunctionInfo* FunctionInfo_new(char* n, List_Param* p, TypeNode* rt, Decl* d) {
     FunctionInfo* self = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
+    self->__cid = FunctionInfo__CID;
     FunctionInfo__init(self, n, p, rt, d);
     return self;
 }
@@ -6734,6 +6980,7 @@ void ClassInfo__init(ClassInfo* self, char* n, Map_string_FieldDecl* f, Map_stri
 
 ClassInfo* ClassInfo_new(char* n, Map_string_FieldDecl* f, Map_string_StaticFieldDecl* sf, Map_string_MethodDecl* im, Map_string_MethodDecl* sm, Map_string_MethodDecl* vt, ConstructorDecl* ctor, DestructorDecl* dtor, char* superName, List_string* ifaces, Decl* d, char* acc, int isMgd) {
     ClassInfo* self = (ClassInfo*)calloc(1, sizeof(ClassInfo));
+    self->__cid = ClassInfo__CID;
     ClassInfo__init(self, n, f, sf, im, sm, vt, ctor, dtor, superName, ifaces, d, acc, isMgd);
     return self;
 }
@@ -6751,6 +6998,7 @@ void InterfaceInfo__init(InterfaceInfo* self, char* n, Map_string_MethodDecl* m,
 
 InterfaceInfo* InterfaceInfo_new(char* n, Map_string_MethodDecl* m, Decl* d) {
     InterfaceInfo* self = (InterfaceInfo*)calloc(1, sizeof(InterfaceInfo));
+    self->__cid = InterfaceInfo__CID;
     InterfaceInfo__init(self, n, m, d);
     return self;
 }
@@ -6768,6 +7016,7 @@ void EnumInfo__init(EnumInfo* self, char* n, Map_string_int* v, Decl* d) {
 
 EnumInfo* EnumInfo_new(char* n, Map_string_int* v, Decl* d) {
     EnumInfo* self = (EnumInfo*)calloc(1, sizeof(EnumInfo));
+    self->__cid = EnumInfo__CID;
     EnumInfo__init(self, n, v, d);
     return self;
 }
@@ -6784,6 +7033,7 @@ void UnionVariantInfo__init(UnionVariantInfo* self, char* n, List_FieldDecl* f) 
 
 UnionVariantInfo* UnionVariantInfo_new(char* n, List_FieldDecl* f) {
     UnionVariantInfo* self = (UnionVariantInfo*)calloc(1, sizeof(UnionVariantInfo));
+    self->__cid = UnionVariantInfo__CID;
     UnionVariantInfo__init(self, n, f);
     return self;
 }
@@ -6802,6 +7052,7 @@ void UnionInfo__init(UnionInfo* self, char* n, List_string* tp, Map_string_Union
 
 UnionInfo* UnionInfo_new(char* n, List_string* tp, Map_string_UnionVariantInfo* v, Decl* d) {
     UnionInfo* self = (UnionInfo*)calloc(1, sizeof(UnionInfo));
+    self->__cid = UnionInfo__CID;
     UnionInfo__init(self, n, tp, v, d);
     return self;
 }
@@ -6820,6 +7071,7 @@ void SymEntry__init(SymEntry* self, TypeNode* t, int64_t ln, int64_t c, int ic) 
 
 SymEntry* SymEntry_new(TypeNode* t, int64_t ln, int64_t c, int ic) {
     SymEntry* self = (SymEntry*)calloc(1, sizeof(SymEntry));
+    self->__cid = SymEntry__CID;
     SymEntry__init(self, t, ln, c, ic);
     return self;
 }
@@ -6836,6 +7088,7 @@ void SymbolTable__init(SymbolTable* self, SymbolTable* parentScope) {
 
 SymbolTable* SymbolTable_new(SymbolTable* parentScope) {
     SymbolTable* self = (SymbolTable*)calloc(1, sizeof(SymbolTable));
+    self->__cid = SymbolTable__CID;
     SymbolTable__init(self, parentScope);
     return self;
 }
@@ -6940,6 +7193,7 @@ void GlobalEnv__init(GlobalEnv* self) {
 
 GlobalEnv* GlobalEnv_new(void) {
     GlobalEnv* self = (GlobalEnv*)calloc(1, sizeof(GlobalEnv));
+    self->__cid = GlobalEnv__CID;
     GlobalEnv__init(self);
     return self;
 }
@@ -8622,6 +8876,7 @@ void UsingContext__init(UsingContext* self) {
 
 UsingContext* UsingContext_new(void) {
     UsingContext* self = (UsingContext*)calloc(1, sizeof(UsingContext));
+    self->__cid = UsingContext__CID;
     UsingContext__init(self);
     return self;
 }
@@ -8642,6 +8897,7 @@ void FlatDecl__init(FlatDecl* self, Decl* d, List_string* p) {
 
 FlatDecl* FlatDecl_new(Decl* d, List_string* p) {
     FlatDecl* self = (FlatDecl*)calloc(1, sizeof(FlatDecl));
+    self->__cid = FlatDecl__CID;
     FlatDecl__init(self, d, p);
     return self;
 }
@@ -8662,6 +8918,7 @@ void NamespaceResolver__init(NamespaceResolver* self) {
 
 NamespaceResolver* NamespaceResolver_new(void) {
     NamespaceResolver* self = (NamespaceResolver*)calloc(1, sizeof(NamespaceResolver));
+    self->__cid = NamespaceResolver__CID;
     NamespaceResolver__init(self);
     return self;
 }
@@ -10277,6 +10534,7 @@ void WorkItem__init(WorkItem* self, char* k, char* b, List_TypeNode* a, char* mg
 
 WorkItem* WorkItem_new(char* k, char* b, List_TypeNode* a, char* mg) {
     WorkItem* self = (WorkItem*)calloc(1, sizeof(WorkItem));
+    self->__cid = WorkItem__CID;
     WorkItem__init(self, k, b, a, mg);
     return self;
 }
@@ -10293,6 +10551,7 @@ void InstanceArgs__init(InstanceArgs* self, char* b, List_TypeNode* a) {
 
 InstanceArgs* InstanceArgs_new(char* b, List_TypeNode* a) {
     InstanceArgs* self = (InstanceArgs*)calloc(1, sizeof(InstanceArgs));
+    self->__cid = InstanceArgs__CID;
     InstanceArgs__init(self, b, a);
     return self;
 }
@@ -10309,6 +10568,7 @@ void ArgsOpt__init(ArgsOpt* self, int f, List_TypeNode* a) {
 
 ArgsOpt* ArgsOpt_new(int f, List_TypeNode* a) {
     ArgsOpt* self = (ArgsOpt*)calloc(1, sizeof(ArgsOpt));
+    self->__cid = ArgsOpt__CID;
     ArgsOpt__init(self, f, a);
     return self;
 }
@@ -10352,6 +10612,7 @@ void Monomorphizer__init(Monomorphizer* self) {
 
 Monomorphizer* Monomorphizer_new(void) {
     Monomorphizer* self = (Monomorphizer*)calloc(1, sizeof(Monomorphizer));
+    self->__cid = Monomorphizer__CID;
     Monomorphizer__init(self);
     return self;
 }
@@ -13032,6 +13293,7 @@ void ClosureContext__init(ClosureContext* self, SymbolTable* r) {
 
 ClosureContext* ClosureContext_new(SymbolTable* r) {
     ClosureContext* self = (ClosureContext*)calloc(1, sizeof(ClosureContext));
+    self->__cid = ClosureContext__CID;
     ClosureContext__init(self, r);
     return self;
 }
@@ -13072,6 +13334,7 @@ void Pass2Checker__init(Pass2Checker* self, GlobalEnv* e) {
 
 Pass2Checker* Pass2Checker_new(GlobalEnv* e) {
     Pass2Checker* self = (Pass2Checker*)calloc(1, sizeof(Pass2Checker));
+    self->__cid = Pass2Checker__CID;
     Pass2Checker__init(self, e);
     return self;
 }
@@ -14451,26 +14714,37 @@ TypeNode* Pass2Checker__check_method_call(Pass2Checker* self, Expr* expr) {
                 }
             }
             ClassInfo* class_info = Map_string_ClassInfo__getOr(self->env->classes, class_name, NULL);
+            InterfaceInfo* iface_info = Map_string_InterfaceInfo__getOr(self->env->interfaces, class_name, NULL);
             MethodDecl* mmethod = NULL;
             int isInstanceMethod = 0;
-            if ((class_info == NULL)) {
-                mmethod = Pass2Checker__modifierMethod(self, class_name, method);
-                if ((mmethod == NULL)) {
-                    GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("'", class_name), "' has no method '"), method), "'"), 0, 0), "AnalyzeError");
-                }
-            } else {
-                mmethod = Map_string_MethodDecl__getOr(class_info->instance_methods, method, NULL);
-                if ((mmethod != NULL)) {
-                    isInstanceMethod = 1;
-                }
+            if (((class_info == NULL) && (iface_info != NULL))) {
+                mmethod = Map_string_MethodDecl__getOr(iface_info->methods, method, NULL);
                 if ((mmethod == NULL)) {
                     mmethod = Pass2Checker__modifierMethod(self, class_name, method);
                 }
                 if ((mmethod == NULL)) {
                     GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("'", class_name), "' has no method '"), method), "'"), 0, 0), "AnalyzeError");
                 }
-                if (isInstanceMethod) {
-                    Pass2Checker__check_access(self, class_name, mmethod->access, method);
+            } else {
+                if ((class_info == NULL)) {
+                    mmethod = Pass2Checker__modifierMethod(self, class_name, method);
+                    if ((mmethod == NULL)) {
+                        GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("'", class_name), "' has no method '"), method), "'"), 0, 0), "AnalyzeError");
+                    }
+                } else {
+                    mmethod = Map_string_MethodDecl__getOr(class_info->instance_methods, method, NULL);
+                    if ((mmethod != NULL)) {
+                        isInstanceMethod = 1;
+                    }
+                    if ((mmethod == NULL)) {
+                        mmethod = Pass2Checker__modifierMethod(self, class_name, method);
+                    }
+                    if ((mmethod == NULL)) {
+                        GLANG_THROW(AnalyzeError_new(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("'", class_name), "' has no method '"), method), "'"), 0, 0), "AnalyzeError");
+                    }
+                    if (isInstanceMethod) {
+                        Pass2Checker__check_access(self, class_name, mmethod->access, method);
+                    }
                 }
             }
             int64_t expected = List_Param__length(mmethod->params);
@@ -15539,6 +15813,7 @@ void LoadError__init(LoadError* self, char* msg, int64_t ln, int64_t c) {
 
 LoadError* LoadError_new(char* msg, int64_t ln, int64_t c) {
     LoadError* self = (LoadError*)calloc(1, sizeof(LoadError));
+    self->__cid = LoadError__CID;
     LoadError__init(self, msg, ln, c);
     return self;
 }
@@ -15646,6 +15921,7 @@ void Loader__init(Loader* self, char* stdlibDir) {
 
 Loader* Loader_new(char* stdlibDir) {
     Loader* self = (Loader*)calloc(1, sizeof(Loader));
+    self->__cid = Loader__CID;
     Loader__init(self, stdlibDir);
     return self;
 }
@@ -15940,10 +16216,13 @@ void CEmit__init(CEmit* self, GlobalEnv* e) {
     self->scopes = List_Map_string_string_new();
     self->hierEntries = List_string_new();
     self->thunksEmitted = List_string_new();
+    self->classCids = Map_string_int_new();
+    self->cidCounter = 1;
 }
 
 CEmit* CEmit_new(GlobalEnv* e) {
     CEmit* self = (CEmit*)calloc(1, sizeof(CEmit));
+    self->__cid = CEmit__CID;
     CEmit__init(self, e);
     return self;
 }
@@ -16056,6 +16335,13 @@ char* CEmit__methodReturnTypeOf(CEmit* self, char* cls, char* method) {
             return showType(md->returnType);
         }
     }
+    InterfaceInfo* ii = Map_string_InterfaceInfo__getOr(self->env->interfaces, cls, NULL);
+    if ((ii != NULL)) {
+        MethodDecl* im = Map_string_MethodDecl__getOr(ii->methods, method, NULL);
+        if ((im != NULL)) {
+            return showType(im->returnType);
+        }
+    }
     return "";
 }
 
@@ -16131,6 +16417,9 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 int mgd = __match__.data.as_ClassDecl.isManaged;
                 char* cn = mangleName(nm);
                 StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("typedef struct ", cn), " "), cn), ";"));
+                Map_string_int__set(self->classCids, nm, self->cidCounter);
+                StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("#define ", cn), "__CID ((int64_t)"), strings__intToStr(self->cidCounter)), ")"));
+                self->cidCounter = (self->cidCounter + 1);
                 if ((strcmp(sup, "") != 0)) {
                     List_string__add(self->hierEntries, mangleName(nm));
                     List_string__add(self->hierEntries, mangleName(sup));
@@ -16143,6 +16432,12 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
                 List_UnionVariant* variants = __match__.data.as_UnionDecl.variants;
                 char* cn = mangleName(nm);
                 StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("typedef struct ", cn), " "), cn), ";"));
+                break;
+            }
+            case Decl__InterfaceDecl: {
+                char* inm = __match__.data.as_InterfaceDecl.name;
+                List_MethodDecl* ims = __match__.data.as_InterfaceDecl.methods;
+                StringBuilder__appendLine(self->preamble, glang_str_concat(glang_str_concat("typedef void ", mangleName(inm)), ";"));
                 break;
             }
             default: {
@@ -16203,9 +16498,11 @@ void CEmit__emitProgram(CEmit* self, Program* program) {
     for (int64_t i = 0; (i < n); (++i)) {
         CEmit__emitPrototype(self, List_Decl__get(decls, i));
     }
+    CEmit__emitInterfaceDispatch(self, decls, 1);
     for (int64_t i = 0; (i < n); (++i)) {
         CEmit__emitDecl(self, List_Decl__get(decls, i));
     }
+    CEmit__emitInterfaceDispatch(self, decls, 0);
     StringBuilder__appendLine(self->out, "");
     StringBuilder__appendLine(self->out, "int main(int argc, char** argv) {");
     StringBuilder__appendLine(self->out, "    glang_argc = argc;");
@@ -16226,6 +16523,8 @@ void CEmit__emitFieldsRec(CEmit* self, char* name) {
     char* sup = CEmit__classSuperOf(self, name);
     if ((strcmp(sup, "") != 0)) {
         CEmit__emitFieldsRec(self, sup);
+    } else {
+        StringBuilder__appendLine(self->structs, "    int64_t __cid;");
     }
     List_FieldDecl* fs = CEmit__ownFieldsOf(self, name);
     for (int64_t i = 0; (i < List_FieldDecl__length(fs)); (++i)) {
@@ -16629,6 +16928,7 @@ void CEmit__emitClass(CEmit* self, char* rawName, List_MethodDecl* methods, char
         StringBuilder__appendLine(self->out, "}");
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(cn, "* "), cn), "_new(void) {"));
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = "), CEmit__allocExpr(self, cn, isManaged)), ";"));
+        StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat("    self->__cid = ", cn), "__CID;"));
         StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat("    ", cn), "__init(self);"));
         StringBuilder__appendLine(self->out, "    return self;");
         StringBuilder__appendLine(self->out, "}");
@@ -16689,6 +16989,7 @@ void CEmit__emitConstructor(CEmit* self, char* rawName, ConstructorDecl* ctor, c
     StringBuilder__appendLine(self->out, "");
     StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(cn, "* "), cn), "_new("), CEmit__buildParamList(self, ctor->params)), ") {"));
     StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat("    ", cn), "* self = "), CEmit__allocExpr(self, cn, isManaged)), ";"));
+    StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat("    self->__cid = ", cn), "__CID;"));
     StringBuilder* ic = StringBuilder_new();
     StringBuilder__append(ic, glang_str_concat(glang_str_concat("    ", cn), "__init(self"));
     for (int64_t i = 0; (i < pn); (++i)) {
@@ -17287,6 +17588,15 @@ char* CEmit__emitMethodCall(CEmit* self, Expr* obj, char* method, List_Expr* arg
         }
         return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(tgt, "__"), mangleName(method)), "("), margs), ")");
     }
+    if (GlobalEnv__is_interface(self->env, baseType)) {
+        char* fname = glang_str_concat(glang_str_concat(glang_str_concat("__glang_ifm_", mangleName(baseType)), "__"), mangleName(method));
+        char* irest = CEmit__emitArgs(self, args);
+        char* iargs = objStr;
+        if ((strcmp(irest, "") != 0)) {
+            iargs = glang_str_concat(glang_str_concat(objStr, ", "), irest);
+        }
+        return glang_str_concat(glang_str_concat(glang_str_concat(fname, "("), iargs), ")");
+    }
     char* defCls = CEmit__methodOwnerClass(self, baseType, method);
     char* clsName = mangleName(defCls);
     char* castSelf = selfArg;
@@ -17299,6 +17609,115 @@ char* CEmit__emitMethodCall(CEmit* self, Expr* obj, char* method, List_Expr* arg
         allArgs = glang_str_concat(glang_str_concat(castSelf, ", "), rest);
     }
     return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(clsName, "__"), mangleName(method)), "("), allArgs), ")");
+}
+
+int CEmit__classImplements(CEmit* self, char* cls, char* iface) {
+    char* cur = cls;
+    while ((strcmp(cur, "") != 0)) {
+        ClassInfo* ci = Map_string_ClassInfo__getOr(self->env->classes, cur, NULL);
+        if ((ci != NULL)) {
+            List_string* ifs = ci->interfaces;
+            for (int64_t i = 0; (i < List_string__length(ifs)); (++i)) {
+                if ((strcmp(List_string__get(ifs, i), iface) == 0)) {
+                    return 1;
+                }
+            }
+        }
+        cur = CEmit__classSuperOf(self, cur);
+    }
+    return 0;
+}
+
+void CEmit__emitInterfaceDispatch(CEmit* self, List_Decl* decls, int protoOnly) {
+    int64_t n = List_Decl__length(decls);
+    for (int64_t i = 0; (i < n); (++i)) {
+        {
+            Decl __match__ = (*List_Decl__get(decls, i));
+            switch (__match__.tag) {
+            case Decl__InterfaceDecl: {
+                char* inm = __match__.data.as_InterfaceDecl.name;
+                List_MethodDecl* methods = __match__.data.as_InterfaceDecl.methods;
+                for (int64_t j = 0; (j < List_MethodDecl__length(methods)); (++j)) {
+                    CEmit__emitOneIfaceDispatch(self, inm, List_MethodDecl__get(methods, j), decls, protoOnly);
+                }
+                break;
+            }
+            default: {
+                break;
+            }
+            }
+        }
+    }
+}
+
+void CEmit__emitOneIfaceDispatch(CEmit* self, char* inm, MethodDecl* m, List_Decl* decls, int protoOnly) {
+    char* fname = glang_str_concat(glang_str_concat(glang_str_concat("__glang_ifm_", mangleName(inm)), "__"), mangleName(m->name));
+    char* cret = CEmit__cRetTypeOf(self, m->returnType);
+    int64_t pn = List_Param__length(m->params);
+    StringBuilder* sig = StringBuilder_new();
+    StringBuilder__append(sig, "void* self");
+    for (int64_t i = 0; (i < pn); (++i)) {
+        Param* p = List_Param__get(m->params, i);
+        StringBuilder__append(sig, glang_str_concat(glang_str_concat(glang_str_concat(", ", cTypeOfNode(p->type, self->env)), " a"), strings__intToStr(i)));
+    }
+    char* proto = glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(cret, " "), fname), "("), StringBuilder__build(sig)), ")");
+    if (protoOnly) {
+        StringBuilder__appendLine(self->protos, glang_str_concat(proto, ";"));
+        return;
+    }
+    int isVoid = (strcmp(showType(m->returnType), "void") == 0);
+    StringBuilder__appendLine(self->out, "");
+    StringBuilder__appendLine(self->out, glang_str_concat(proto, " {"));
+    StringBuilder__appendLine(self->out, "    switch (*(int64_t*)self) {");
+    int64_t dn = List_Decl__length(decls);
+    for (int64_t i = 0; (i < dn); (++i)) {
+        {
+            Decl __match__ = (*List_Decl__get(decls, i));
+            switch (__match__.tag) {
+            case Decl__ClassDecl: {
+                char* nm = __match__.data.as_ClassDecl.name;
+                List_FieldDecl* f = __match__.data.as_ClassDecl.fields;
+                List_StaticFieldDecl* sf = __match__.data.as_ClassDecl.staticFields;
+                List_MethodDecl* cms = __match__.data.as_ClassDecl.methods;
+                char* sup = __match__.data.as_ClassDecl.superclass;
+                List_string* ifc = __match__.data.as_ClassDecl.interfaces;
+                ConstructorDecl* ct = __match__.data.as_ClassDecl.constructor;
+                DestructorDecl* dt = __match__.data.as_ClassDecl.destructor;
+                char* acc = __match__.data.as_ClassDecl.access;
+                List_string* tps = __match__.data.as_ClassDecl.typeParams;
+                Map_string_TypeNode* bn = __match__.data.as_ClassDecl.bounds;
+                int mgd = __match__.data.as_ClassDecl.isManaged;
+                if (CEmit__classImplements(self, nm, inm)) {
+                    char* owner = mangleName(CEmit__methodOwnerClass(self, nm, m->name));
+                    StringBuilder* call = StringBuilder_new();
+                    StringBuilder__append(call, glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(owner, "__"), mangleName(m->name)), "(("), owner), "*)self"));
+                    for (int64_t k = 0; (k < pn); (++k)) {
+                        StringBuilder__append(call, glang_str_concat(", a", strings__intToStr(k)));
+                    }
+                    StringBuilder__append(call, ")");
+                    char* line = glang_str_concat(glang_str_concat("        case ", mangleName(nm)), "__CID: ");
+                    if (isVoid) {
+                        line = glang_str_concat(glang_str_concat(line, StringBuilder__build(call)), "; return;");
+                    } else {
+                        line = glang_str_concat(glang_str_concat(glang_str_concat(line, "return "), StringBuilder__build(call)), ";");
+                    }
+                    StringBuilder__appendLine(self->out, line);
+                }
+                break;
+            }
+            default: {
+                break;
+            }
+            }
+        }
+    }
+    if (isVoid) {
+        StringBuilder__appendLine(self->out, "        default: return;");
+    } else {
+        StringBuilder__appendLine(self->out, glang_str_concat(glang_str_concat("        default: return (", cret), ")0;"));
+    }
+    StringBuilder__appendLine(self->out, "    }");
+    StringBuilder__appendLine(self->out, "}");
 }
 
 char* CEmit__emitNew(CEmit* self, char* cls, List_Expr* args) {
@@ -18529,6 +18948,7 @@ void List_string__init(List_string* self) {
 
 List_string* List_string_new(void) {
     List_string* self = (List_string*)calloc(1, sizeof(List_string));
+    self->__cid = List_string__CID;
     List_string__init(self);
     return self;
 }
@@ -18615,6 +19035,7 @@ void Map_string_TokenType__init(Map_string_TokenType* self) {
 
 Map_string_TokenType* Map_string_TokenType_new(void) {
     Map_string_TokenType* self = (Map_string_TokenType*)calloc(1, sizeof(Map_string_TokenType));
+    self->__cid = Map_string_TokenType__CID;
     Map_string_TokenType__init(self);
     return self;
 }
@@ -18705,6 +19126,7 @@ void List_Token__init(List_Token* self) {
 
 List_Token* List_Token_new(void) {
     List_Token* self = (List_Token*)calloc(1, sizeof(List_Token));
+    self->__cid = List_Token__CID;
     List_Token__init(self);
     return self;
 }
@@ -18790,6 +19212,7 @@ void List_TypeNode__init(List_TypeNode* self) {
 
 List_TypeNode* List_TypeNode_new(void) {
     List_TypeNode* self = (List_TypeNode*)calloc(1, sizeof(List_TypeNode));
+    self->__cid = List_TypeNode__CID;
     List_TypeNode__init(self);
     return self;
 }
@@ -18875,6 +19298,7 @@ void List_Expr__init(List_Expr* self) {
 
 List_Expr* List_Expr_new(void) {
     List_Expr* self = (List_Expr*)calloc(1, sizeof(List_Expr));
+    self->__cid = List_Expr__CID;
     List_Expr__init(self);
     return self;
 }
@@ -18960,6 +19384,7 @@ void List_Param__init(List_Param* self) {
 
 List_Param* List_Param_new(void) {
     List_Param* self = (List_Param*)calloc(1, sizeof(List_Param));
+    self->__cid = List_Param__CID;
     List_Param__init(self);
     return self;
 }
@@ -19045,6 +19470,7 @@ void List_Stmt__init(List_Stmt* self) {
 
 List_Stmt* List_Stmt_new(void) {
     List_Stmt* self = (List_Stmt*)calloc(1, sizeof(List_Stmt));
+    self->__cid = List_Stmt__CID;
     List_Stmt__init(self);
     return self;
 }
@@ -19130,6 +19556,7 @@ void List_CatchClause__init(List_CatchClause* self) {
 
 List_CatchClause* List_CatchClause_new(void) {
     List_CatchClause* self = (List_CatchClause*)calloc(1, sizeof(List_CatchClause));
+    self->__cid = List_CatchClause__CID;
     List_CatchClause__init(self);
     return self;
 }
@@ -19215,6 +19642,7 @@ void List_MatchArm__init(List_MatchArm* self) {
 
 List_MatchArm* List_MatchArm_new(void) {
     List_MatchArm* self = (List_MatchArm*)calloc(1, sizeof(List_MatchArm));
+    self->__cid = List_MatchArm__CID;
     List_MatchArm__init(self);
     return self;
 }
@@ -19300,6 +19728,7 @@ void List_FieldDecl__init(List_FieldDecl* self) {
 
 List_FieldDecl* List_FieldDecl_new(void) {
     List_FieldDecl* self = (List_FieldDecl*)calloc(1, sizeof(List_FieldDecl));
+    self->__cid = List_FieldDecl__CID;
     List_FieldDecl__init(self);
     return self;
 }
@@ -19386,6 +19815,7 @@ void Map_string_TypeNode__init(Map_string_TypeNode* self) {
 
 Map_string_TypeNode* Map_string_TypeNode_new(void) {
     Map_string_TypeNode* self = (Map_string_TypeNode*)calloc(1, sizeof(Map_string_TypeNode));
+    self->__cid = Map_string_TypeNode__CID;
     Map_string_TypeNode__init(self);
     return self;
 }
@@ -19476,6 +19906,7 @@ void List_StaticFieldDecl__init(List_StaticFieldDecl* self) {
 
 List_StaticFieldDecl* List_StaticFieldDecl_new(void) {
     List_StaticFieldDecl* self = (List_StaticFieldDecl*)calloc(1, sizeof(List_StaticFieldDecl));
+    self->__cid = List_StaticFieldDecl__CID;
     List_StaticFieldDecl__init(self);
     return self;
 }
@@ -19561,6 +19992,7 @@ void List_MethodDecl__init(List_MethodDecl* self) {
 
 List_MethodDecl* List_MethodDecl_new(void) {
     List_MethodDecl* self = (List_MethodDecl*)calloc(1, sizeof(List_MethodDecl));
+    self->__cid = List_MethodDecl__CID;
     List_MethodDecl__init(self);
     return self;
 }
@@ -19646,6 +20078,7 @@ void List_EnumVariant__init(List_EnumVariant* self) {
 
 List_EnumVariant* List_EnumVariant_new(void) {
     List_EnumVariant* self = (List_EnumVariant*)calloc(1, sizeof(List_EnumVariant));
+    self->__cid = List_EnumVariant__CID;
     List_EnumVariant__init(self);
     return self;
 }
@@ -19731,6 +20164,7 @@ void List_Decl__init(List_Decl* self) {
 
 List_Decl* List_Decl_new(void) {
     List_Decl* self = (List_Decl*)calloc(1, sizeof(List_Decl));
+    self->__cid = List_Decl__CID;
     List_Decl__init(self);
     return self;
 }
@@ -19816,6 +20250,7 @@ void List_UnionVariant__init(List_UnionVariant* self) {
 
 List_UnionVariant* List_UnionVariant_new(void) {
     List_UnionVariant* self = (List_UnionVariant*)calloc(1, sizeof(List_UnionVariant));
+    self->__cid = List_UnionVariant__CID;
     List_UnionVariant__init(self);
     return self;
 }
@@ -19902,6 +20337,7 @@ void Map_string_FieldDecl__init(Map_string_FieldDecl* self) {
 
 Map_string_FieldDecl* Map_string_FieldDecl_new(void) {
     Map_string_FieldDecl* self = (Map_string_FieldDecl*)calloc(1, sizeof(Map_string_FieldDecl));
+    self->__cid = Map_string_FieldDecl__CID;
     Map_string_FieldDecl__init(self);
     return self;
 }
@@ -19993,6 +20429,7 @@ void Map_string_StaticFieldDecl__init(Map_string_StaticFieldDecl* self) {
 
 Map_string_StaticFieldDecl* Map_string_StaticFieldDecl_new(void) {
     Map_string_StaticFieldDecl* self = (Map_string_StaticFieldDecl*)calloc(1, sizeof(Map_string_StaticFieldDecl));
+    self->__cid = Map_string_StaticFieldDecl__CID;
     Map_string_StaticFieldDecl__init(self);
     return self;
 }
@@ -20084,6 +20521,7 @@ void Map_string_MethodDecl__init(Map_string_MethodDecl* self) {
 
 Map_string_MethodDecl* Map_string_MethodDecl_new(void) {
     Map_string_MethodDecl* self = (Map_string_MethodDecl*)calloc(1, sizeof(Map_string_MethodDecl));
+    self->__cid = Map_string_MethodDecl__CID;
     Map_string_MethodDecl__init(self);
     return self;
 }
@@ -20175,6 +20613,7 @@ void Map_string_int__init(Map_string_int* self) {
 
 Map_string_int* Map_string_int_new(void) {
     Map_string_int* self = (Map_string_int*)calloc(1, sizeof(Map_string_int));
+    self->__cid = Map_string_int__CID;
     Map_string_int__init(self);
     return self;
 }
@@ -20266,6 +20705,7 @@ void Map_string_UnionVariantInfo__init(Map_string_UnionVariantInfo* self) {
 
 Map_string_UnionVariantInfo* Map_string_UnionVariantInfo_new(void) {
     Map_string_UnionVariantInfo* self = (Map_string_UnionVariantInfo*)calloc(1, sizeof(Map_string_UnionVariantInfo));
+    self->__cid = Map_string_UnionVariantInfo__CID;
     Map_string_UnionVariantInfo__init(self);
     return self;
 }
@@ -20357,6 +20797,7 @@ void Map_string_SymEntry__init(Map_string_SymEntry* self) {
 
 Map_string_SymEntry* Map_string_SymEntry_new(void) {
     Map_string_SymEntry* self = (Map_string_SymEntry*)calloc(1, sizeof(Map_string_SymEntry));
+    self->__cid = Map_string_SymEntry__CID;
     Map_string_SymEntry__init(self);
     return self;
 }
@@ -20448,6 +20889,7 @@ void Map_string_FunctionInfo__init(Map_string_FunctionInfo* self) {
 
 Map_string_FunctionInfo* Map_string_FunctionInfo_new(void) {
     Map_string_FunctionInfo* self = (Map_string_FunctionInfo*)calloc(1, sizeof(Map_string_FunctionInfo));
+    self->__cid = Map_string_FunctionInfo__CID;
     Map_string_FunctionInfo__init(self);
     return self;
 }
@@ -20539,6 +20981,7 @@ void Map_string_ClassInfo__init(Map_string_ClassInfo* self) {
 
 Map_string_ClassInfo* Map_string_ClassInfo_new(void) {
     Map_string_ClassInfo* self = (Map_string_ClassInfo*)calloc(1, sizeof(Map_string_ClassInfo));
+    self->__cid = Map_string_ClassInfo__CID;
     Map_string_ClassInfo__init(self);
     return self;
 }
@@ -20630,6 +21073,7 @@ void Map_string_InterfaceInfo__init(Map_string_InterfaceInfo* self) {
 
 Map_string_InterfaceInfo* Map_string_InterfaceInfo_new(void) {
     Map_string_InterfaceInfo* self = (Map_string_InterfaceInfo*)calloc(1, sizeof(Map_string_InterfaceInfo));
+    self->__cid = Map_string_InterfaceInfo__CID;
     Map_string_InterfaceInfo__init(self);
     return self;
 }
@@ -20721,6 +21165,7 @@ void Map_string_EnumInfo__init(Map_string_EnumInfo* self) {
 
 Map_string_EnumInfo* Map_string_EnumInfo_new(void) {
     Map_string_EnumInfo* self = (Map_string_EnumInfo*)calloc(1, sizeof(Map_string_EnumInfo));
+    self->__cid = Map_string_EnumInfo__CID;
     Map_string_EnumInfo__init(self);
     return self;
 }
@@ -20812,6 +21257,7 @@ void Map_string_UnionInfo__init(Map_string_UnionInfo* self) {
 
 Map_string_UnionInfo* Map_string_UnionInfo_new(void) {
     Map_string_UnionInfo* self = (Map_string_UnionInfo*)calloc(1, sizeof(Map_string_UnionInfo));
+    self->__cid = Map_string_UnionInfo__CID;
     Map_string_UnionInfo__init(self);
     return self;
 }
@@ -20903,6 +21349,7 @@ void Map_string_Map_string_MethodDecl__init(Map_string_Map_string_MethodDecl* se
 
 Map_string_Map_string_MethodDecl* Map_string_Map_string_MethodDecl_new(void) {
     Map_string_Map_string_MethodDecl* self = (Map_string_Map_string_MethodDecl*)calloc(1, sizeof(Map_string_Map_string_MethodDecl));
+    self->__cid = Map_string_Map_string_MethodDecl__CID;
     Map_string_Map_string_MethodDecl__init(self);
     return self;
 }
@@ -20994,6 +21441,7 @@ void Map_string_string__init(Map_string_string* self) {
 
 Map_string_string* Map_string_string_new(void) {
     Map_string_string* self = (Map_string_string*)calloc(1, sizeof(Map_string_string));
+    self->__cid = Map_string_string__CID;
     Map_string_string__init(self);
     return self;
 }
@@ -21085,6 +21533,7 @@ void Map_string_bool__init(Map_string_bool* self) {
 
 Map_string_bool* Map_string_bool_new(void) {
     Map_string_bool* self = (Map_string_bool*)calloc(1, sizeof(Map_string_bool));
+    self->__cid = Map_string_bool__CID;
     Map_string_bool__init(self);
     return self;
 }
@@ -21175,6 +21624,7 @@ void List_List_string__init(List_List_string* self) {
 
 List_List_string* List_List_string_new(void) {
     List_List_string* self = (List_List_string*)calloc(1, sizeof(List_List_string));
+    self->__cid = List_List_string__CID;
     List_List_string__init(self);
     return self;
 }
@@ -21260,6 +21710,7 @@ void List_FlatDecl__init(List_FlatDecl* self) {
 
 List_FlatDecl* List_FlatDecl_new(void) {
     List_FlatDecl* self = (List_FlatDecl*)calloc(1, sizeof(List_FlatDecl));
+    self->__cid = List_FlatDecl__CID;
     List_FlatDecl__init(self);
     return self;
 }
@@ -21346,6 +21797,7 @@ void Map_string_Decl__init(Map_string_Decl* self) {
 
 Map_string_Decl* Map_string_Decl_new(void) {
     Map_string_Decl* self = (Map_string_Decl*)calloc(1, sizeof(Map_string_Decl));
+    self->__cid = Map_string_Decl__CID;
     Map_string_Decl__init(self);
     return self;
 }
@@ -21437,6 +21889,7 @@ void Map_string_List_string__init(Map_string_List_string* self) {
 
 Map_string_List_string* Map_string_List_string_new(void) {
     Map_string_List_string* self = (Map_string_List_string*)calloc(1, sizeof(Map_string_List_string));
+    self->__cid = Map_string_List_string__CID;
     Map_string_List_string__init(self);
     return self;
 }
@@ -21528,6 +21981,7 @@ void Map_string_InstanceArgs__init(Map_string_InstanceArgs* self) {
 
 Map_string_InstanceArgs* Map_string_InstanceArgs_new(void) {
     Map_string_InstanceArgs* self = (Map_string_InstanceArgs*)calloc(1, sizeof(Map_string_InstanceArgs));
+    self->__cid = Map_string_InstanceArgs__CID;
     Map_string_InstanceArgs__init(self);
     return self;
 }
@@ -21618,6 +22072,7 @@ void List_Map_string_TypeNode__init(List_Map_string_TypeNode* self) {
 
 List_Map_string_TypeNode* List_Map_string_TypeNode_new(void) {
     List_Map_string_TypeNode* self = (List_Map_string_TypeNode*)calloc(1, sizeof(List_Map_string_TypeNode));
+    self->__cid = List_Map_string_TypeNode__CID;
     List_Map_string_TypeNode__init(self);
     return self;
 }
@@ -21703,6 +22158,7 @@ void List_WorkItem__init(List_WorkItem* self) {
 
 List_WorkItem* List_WorkItem_new(void) {
     List_WorkItem* self = (List_WorkItem*)calloc(1, sizeof(List_WorkItem));
+    self->__cid = List_WorkItem__CID;
     List_WorkItem__init(self);
     return self;
 }
@@ -21789,6 +22245,7 @@ void Map_string_List_Decl__init(Map_string_List_Decl* self) {
 
 Map_string_List_Decl* Map_string_List_Decl_new(void) {
     Map_string_List_Decl* self = (Map_string_List_Decl*)calloc(1, sizeof(Map_string_List_Decl));
+    self->__cid = Map_string_List_Decl__CID;
     Map_string_List_Decl__init(self);
     return self;
 }
@@ -21879,6 +22336,7 @@ void List_ClosureContext__init(List_ClosureContext* self) {
 
 List_ClosureContext* List_ClosureContext_new(void) {
     List_ClosureContext* self = (List_ClosureContext*)calloc(1, sizeof(List_ClosureContext));
+    self->__cid = List_ClosureContext__CID;
     List_ClosureContext__init(self);
     return self;
 }
@@ -21964,6 +22422,7 @@ void List_Map_string_string__init(List_Map_string_string* self) {
 
 List_Map_string_string* List_Map_string_string_new(void) {
     List_Map_string_string* self = (List_Map_string_string*)calloc(1, sizeof(List_Map_string_string));
+    self->__cid = List_Map_string_string__CID;
     List_Map_string_string__init(self);
     return self;
 }
@@ -22049,6 +22508,7 @@ void Span_string__init(Span_string* self, char** data, int64_t off, int64_t len)
 
 Span_string* Span_string_new(char** data, int64_t off, int64_t len) {
     Span_string* self = (Span_string*)calloc(1, sizeof(Span_string));
+    self->__cid = Span_string__CID;
     Span_string__init(self, data, off, len);
     return self;
 }
@@ -22095,6 +22555,7 @@ void Span_Token__init(Span_Token* self, Token** data, int64_t off, int64_t len) 
 
 Span_Token* Span_Token_new(Token** data, int64_t off, int64_t len) {
     Span_Token* self = (Span_Token*)calloc(1, sizeof(Span_Token));
+    self->__cid = Span_Token__CID;
     Span_Token__init(self, data, off, len);
     return self;
 }
@@ -22141,6 +22602,7 @@ void Span_TypeNode__init(Span_TypeNode* self, TypeNode** data, int64_t off, int6
 
 Span_TypeNode* Span_TypeNode_new(TypeNode** data, int64_t off, int64_t len) {
     Span_TypeNode* self = (Span_TypeNode*)calloc(1, sizeof(Span_TypeNode));
+    self->__cid = Span_TypeNode__CID;
     Span_TypeNode__init(self, data, off, len);
     return self;
 }
@@ -22187,6 +22649,7 @@ void Span_Expr__init(Span_Expr* self, Expr** data, int64_t off, int64_t len) {
 
 Span_Expr* Span_Expr_new(Expr** data, int64_t off, int64_t len) {
     Span_Expr* self = (Span_Expr*)calloc(1, sizeof(Span_Expr));
+    self->__cid = Span_Expr__CID;
     Span_Expr__init(self, data, off, len);
     return self;
 }
@@ -22233,6 +22696,7 @@ void Span_Param__init(Span_Param* self, Param** data, int64_t off, int64_t len) 
 
 Span_Param* Span_Param_new(Param** data, int64_t off, int64_t len) {
     Span_Param* self = (Span_Param*)calloc(1, sizeof(Span_Param));
+    self->__cid = Span_Param__CID;
     Span_Param__init(self, data, off, len);
     return self;
 }
@@ -22279,6 +22743,7 @@ void Span_Stmt__init(Span_Stmt* self, Stmt** data, int64_t off, int64_t len) {
 
 Span_Stmt* Span_Stmt_new(Stmt** data, int64_t off, int64_t len) {
     Span_Stmt* self = (Span_Stmt*)calloc(1, sizeof(Span_Stmt));
+    self->__cid = Span_Stmt__CID;
     Span_Stmt__init(self, data, off, len);
     return self;
 }
@@ -22325,6 +22790,7 @@ void Span_CatchClause__init(Span_CatchClause* self, CatchClause** data, int64_t 
 
 Span_CatchClause* Span_CatchClause_new(CatchClause** data, int64_t off, int64_t len) {
     Span_CatchClause* self = (Span_CatchClause*)calloc(1, sizeof(Span_CatchClause));
+    self->__cid = Span_CatchClause__CID;
     Span_CatchClause__init(self, data, off, len);
     return self;
 }
@@ -22371,6 +22837,7 @@ void Span_MatchArm__init(Span_MatchArm* self, MatchArm** data, int64_t off, int6
 
 Span_MatchArm* Span_MatchArm_new(MatchArm** data, int64_t off, int64_t len) {
     Span_MatchArm* self = (Span_MatchArm*)calloc(1, sizeof(Span_MatchArm));
+    self->__cid = Span_MatchArm__CID;
     Span_MatchArm__init(self, data, off, len);
     return self;
 }
@@ -22417,6 +22884,7 @@ void Span_FieldDecl__init(Span_FieldDecl* self, FieldDecl** data, int64_t off, i
 
 Span_FieldDecl* Span_FieldDecl_new(FieldDecl** data, int64_t off, int64_t len) {
     Span_FieldDecl* self = (Span_FieldDecl*)calloc(1, sizeof(Span_FieldDecl));
+    self->__cid = Span_FieldDecl__CID;
     Span_FieldDecl__init(self, data, off, len);
     return self;
 }
@@ -22463,6 +22931,7 @@ void Span_StaticFieldDecl__init(Span_StaticFieldDecl* self, StaticFieldDecl** da
 
 Span_StaticFieldDecl* Span_StaticFieldDecl_new(StaticFieldDecl** data, int64_t off, int64_t len) {
     Span_StaticFieldDecl* self = (Span_StaticFieldDecl*)calloc(1, sizeof(Span_StaticFieldDecl));
+    self->__cid = Span_StaticFieldDecl__CID;
     Span_StaticFieldDecl__init(self, data, off, len);
     return self;
 }
@@ -22509,6 +22978,7 @@ void Span_MethodDecl__init(Span_MethodDecl* self, MethodDecl** data, int64_t off
 
 Span_MethodDecl* Span_MethodDecl_new(MethodDecl** data, int64_t off, int64_t len) {
     Span_MethodDecl* self = (Span_MethodDecl*)calloc(1, sizeof(Span_MethodDecl));
+    self->__cid = Span_MethodDecl__CID;
     Span_MethodDecl__init(self, data, off, len);
     return self;
 }
@@ -22555,6 +23025,7 @@ void Span_EnumVariant__init(Span_EnumVariant* self, EnumVariant** data, int64_t 
 
 Span_EnumVariant* Span_EnumVariant_new(EnumVariant** data, int64_t off, int64_t len) {
     Span_EnumVariant* self = (Span_EnumVariant*)calloc(1, sizeof(Span_EnumVariant));
+    self->__cid = Span_EnumVariant__CID;
     Span_EnumVariant__init(self, data, off, len);
     return self;
 }
@@ -22601,6 +23072,7 @@ void Span_Decl__init(Span_Decl* self, Decl** data, int64_t off, int64_t len) {
 
 Span_Decl* Span_Decl_new(Decl** data, int64_t off, int64_t len) {
     Span_Decl* self = (Span_Decl*)calloc(1, sizeof(Span_Decl));
+    self->__cid = Span_Decl__CID;
     Span_Decl__init(self, data, off, len);
     return self;
 }
@@ -22647,6 +23119,7 @@ void Span_UnionVariant__init(Span_UnionVariant* self, UnionVariant** data, int64
 
 Span_UnionVariant* Span_UnionVariant_new(UnionVariant** data, int64_t off, int64_t len) {
     Span_UnionVariant* self = (Span_UnionVariant*)calloc(1, sizeof(Span_UnionVariant));
+    self->__cid = Span_UnionVariant__CID;
     Span_UnionVariant__init(self, data, off, len);
     return self;
 }
@@ -22693,6 +23166,7 @@ void Span_List_string__init(Span_List_string* self, List_string** data, int64_t 
 
 Span_List_string* Span_List_string_new(List_string** data, int64_t off, int64_t len) {
     Span_List_string* self = (Span_List_string*)calloc(1, sizeof(Span_List_string));
+    self->__cid = Span_List_string__CID;
     Span_List_string__init(self, data, off, len);
     return self;
 }
@@ -22739,6 +23213,7 @@ void Span_FlatDecl__init(Span_FlatDecl* self, FlatDecl** data, int64_t off, int6
 
 Span_FlatDecl* Span_FlatDecl_new(FlatDecl** data, int64_t off, int64_t len) {
     Span_FlatDecl* self = (Span_FlatDecl*)calloc(1, sizeof(Span_FlatDecl));
+    self->__cid = Span_FlatDecl__CID;
     Span_FlatDecl__init(self, data, off, len);
     return self;
 }
@@ -22785,6 +23260,7 @@ void Span_Map_string_TypeNode__init(Span_Map_string_TypeNode* self, Map_string_T
 
 Span_Map_string_TypeNode* Span_Map_string_TypeNode_new(Map_string_TypeNode** data, int64_t off, int64_t len) {
     Span_Map_string_TypeNode* self = (Span_Map_string_TypeNode*)calloc(1, sizeof(Span_Map_string_TypeNode));
+    self->__cid = Span_Map_string_TypeNode__CID;
     Span_Map_string_TypeNode__init(self, data, off, len);
     return self;
 }
@@ -22831,6 +23307,7 @@ void Span_WorkItem__init(Span_WorkItem* self, WorkItem** data, int64_t off, int6
 
 Span_WorkItem* Span_WorkItem_new(WorkItem** data, int64_t off, int64_t len) {
     Span_WorkItem* self = (Span_WorkItem*)calloc(1, sizeof(Span_WorkItem));
+    self->__cid = Span_WorkItem__CID;
     Span_WorkItem__init(self, data, off, len);
     return self;
 }
@@ -22877,6 +23354,7 @@ void Span_ClosureContext__init(Span_ClosureContext* self, ClosureContext** data,
 
 Span_ClosureContext* Span_ClosureContext_new(ClosureContext** data, int64_t off, int64_t len) {
     Span_ClosureContext* self = (Span_ClosureContext*)calloc(1, sizeof(Span_ClosureContext));
+    self->__cid = Span_ClosureContext__CID;
     Span_ClosureContext__init(self, data, off, len);
     return self;
 }
@@ -22923,6 +23401,7 @@ void Span_Map_string_string__init(Span_Map_string_string* self, Map_string_strin
 
 Span_Map_string_string* Span_Map_string_string_new(Map_string_string** data, int64_t off, int64_t len) {
     Span_Map_string_string* self = (Span_Map_string_string*)calloc(1, sizeof(Span_Map_string_string));
+    self->__cid = Span_Map_string_string__CID;
     Span_Map_string_string__init(self, data, off, len);
     return self;
 }

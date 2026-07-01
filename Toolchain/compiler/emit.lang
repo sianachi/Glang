@@ -139,6 +139,8 @@ class CEmit {
     List<Map<string, string>*> scopes;   // name -> Glang type string (for infer)
     List<string> hierEntries;            // class/super name pairs for instanceof
     List<string> thunksEmitted;          // free-fn names already given a GlangFn thunk
+    Map<string, int> classCids;          // class name -> runtime class id (for iface dispatch)
+    int cidCounter;
 
     CEmit(GlobalEnv* e) {
         this.out = StringBuilder();
@@ -154,6 +156,8 @@ class CEmit {
         this.scopes = List<Map<string, string>*>();
         this.hierEntries = List<string>();
         this.thunksEmitted = List<string>();
+        this.classCids = Map<string, int>();
+        this.cidCounter = 1;
     }
 
     // ── Class-info helpers (from the real GlobalEnv) ─────────────────────
@@ -206,6 +210,11 @@ class CEmit {
             MethodDecl* md = ci->instance_methods.getOr(method, null);
             if (md != null) { return showType(md->returnType); }
         }
+        InterfaceInfo* ii = this.env->interfaces.getOr(cls, null);
+        if (ii != null) {
+            MethodDecl* im = ii->methods.getOr(method, null);
+            if (im != null) { return showType(im->returnType); }
+        }
         return "";
     }
     string fieldTypeOf(string cls, string field) {
@@ -249,6 +258,9 @@ class CEmit {
                 Decl.ClassDecl(nm, f, sf, m, sup, ifc, ct, dt, acc, tps, bn, mgd) => {
                     string cn = mangleName(nm);
                     this.preamble.appendLine("typedef struct " + cn + " " + cn + ";");
+                    this.classCids.set(nm, this.cidCounter);
+                    this.preamble.appendLine("#define " + cn + "__CID ((int64_t)" + strings::intToStr(this.cidCounter) + ")");
+                    this.cidCounter = this.cidCounter + 1;
                     if (sup != "") {
                         this.hierEntries.add(mangleName(nm));
                         this.hierEntries.add(mangleName(sup));
@@ -257,6 +269,12 @@ class CEmit {
                 Decl.UnionDecl(nm, tps, variants) => {
                     string cn = mangleName(nm);
                     this.preamble.appendLine("typedef struct " + cn + " " + cn + ";");
+                }
+                Decl.InterfaceDecl(inm, ims) => {
+                    // Interfaces are opaque object pointers in C; a value of an
+                    // interface type is a pointer to some implementing object,
+                    // whose first field is its class id (see emitFieldsRec).
+                    this.preamble.appendLine("typedef void " + mangleName(inm) + ";");
                 }
                 _ => { }
             }
@@ -282,8 +300,10 @@ class CEmit {
         }
         // Pass 3: prototypes.
         for (int i = 0; i < n; ++i) { this.emitPrototype(decls.get(i)); }
+        this.emitInterfaceDispatch(decls, true);
         // Pass 4: bodies.
         for (int i = 0; i < n; ++i) { this.emitDecl(decls.get(i)); }
+        this.emitInterfaceDispatch(decls, false);
 
         this.out.appendLine("");
         this.out.appendLine("int main(int argc, char** argv) {");
@@ -304,6 +324,7 @@ class CEmit {
     void emitFieldsRec(string name) {
         string sup = this.classSuperOf(name);
         if (sup != "") { this.emitFieldsRec(sup); }
+        else { this.structs.appendLine("    int64_t __cid;"); }   // object header (offset 0)
         List<FieldDecl*> fs = this.ownFieldsOf(name);
         for (int i = 0; i < fs.length(); ++i) {
             FieldDecl* fd = fs.get(i);
@@ -595,6 +616,7 @@ class CEmit {
             this.out.appendLine("}");
             this.out.appendLine(cn + "* " + cn + "_new(void) {");
             this.out.appendLine("    " + cn + "* self = " + this.allocExpr(cn, isManaged) + ";");
+            this.out.appendLine("    self->__cid = " + cn + "__CID;");
             this.out.appendLine("    " + cn + "__init(self);");
             this.out.appendLine("    return self;");
             this.out.appendLine("}");
@@ -647,6 +669,7 @@ class CEmit {
         this.out.appendLine("");
         this.out.appendLine(cn + "* " + cn + "_new(" + this.buildParamList(ctor->params) + ") {");
         this.out.appendLine("    " + cn + "* self = " + this.allocExpr(cn, isManaged) + ";");
+        this.out.appendLine("    self->__cid = " + cn + "__CID;");
         StringBuilder ic = StringBuilder();
         ic.append("    " + cn + "__init(self");
         for (int i = 0; i < pn; ++i) { ic.append(", " + ctor->params.get(i)->name); }
@@ -979,6 +1002,15 @@ class CEmit {
             if (mrest != "") { margs = selfArg + ", " + mrest; }
             return tgt + "__" + mangleName(method) + "(" + margs + ")";
         }
+        // Dispatch through an interface pointer: call the generated vtable-ish
+        // switch that selects the concrete implementation by the object's __cid.
+        if (this.env->is_interface(baseType)) {
+            string fname = "__glang_ifm_" + mangleName(baseType) + "__" + mangleName(method);
+            string irest = this.emitArgs(args);
+            string iargs = objStr;
+            if (irest != "") { iargs = objStr + ", " + irest; }
+            return fname + "(" + iargs + ")";
+        }
         string defCls = this.methodOwnerClass(baseType, method);
         string clsName = mangleName(defCls);
         string castSelf = selfArg;
@@ -987,6 +1019,82 @@ class CEmit {
         string allArgs = castSelf;
         if (rest != "") { allArgs = castSelf + ", " + rest; }
         return clsName + "__" + mangleName(method) + "(" + allArgs + ")";
+    }
+
+    // True if `cls` (or any superclass) implements interface `iface`.
+    bool classImplements(string cls, string iface) {
+        string cur = cls;
+        while (cur != "") {
+            ClassInfo* ci = this.env->classes.getOr(cur, null);
+            if (ci != null) {
+                List<string> ifs = ci->interfaces;
+                for (int i = 0; i < ifs.length(); ++i) {
+                    if (ifs.get(i) == iface) { return true; }
+                }
+            }
+            cur = this.classSuperOf(cur);
+        }
+        return false;
+    }
+
+    // Emit, for every interface method, a dispatch function that switches on the
+    // receiver object's class id (__cid at offset 0) and forwards to the concrete
+    // class implementation. protoOnly emits declarations (into protos); otherwise
+    // full definitions (into out).
+    void emitInterfaceDispatch(List<Decl*> decls, bool protoOnly) {
+        int n = decls.length();
+        for (int i = 0; i < n; ++i) {
+            match (*(decls.get(i))) {
+                Decl.InterfaceDecl(inm, methods) => {
+                    for (int j = 0; j < methods.length(); ++j) {
+                        this.emitOneIfaceDispatch(inm, methods.get(j), decls, protoOnly);
+                    }
+                }
+                _ => { }
+            }
+        }
+    }
+
+    void emitOneIfaceDispatch(string inm, MethodDecl* m, List<Decl*> decls, bool protoOnly) {
+        string fname = "__glang_ifm_" + mangleName(inm) + "__" + mangleName(m->name);
+        string cret = this.cRetTypeOf(m->returnType);
+        int pn = m->params.length();
+        StringBuilder sig = StringBuilder();
+        sig.append("void* self");
+        for (int i = 0; i < pn; ++i) {
+            Param* p = m->params.get(i);
+            sig.append(", " + cTypeOfNode(p->type, this.env) + " a" + strings::intToStr(i));
+        }
+        string proto = cret + " " + fname + "(" + sig.build() + ")";
+        if (protoOnly) { this.protos.appendLine(proto + ";"); return; }
+
+        bool isVoid = (showType(m->returnType) == "void");
+        this.out.appendLine("");
+        this.out.appendLine(proto + " {");
+        this.out.appendLine("    switch (*(int64_t*)self) {");
+        int dn = decls.length();
+        for (int i = 0; i < dn; ++i) {
+            match (*(decls.get(i))) {
+                Decl.ClassDecl(nm, f, sf, cms, sup, ifc, ct, dt, acc, tps, bn, mgd) => {
+                    if (this.classImplements(nm, inm)) {
+                        string owner = mangleName(this.methodOwnerClass(nm, m->name));
+                        StringBuilder call = StringBuilder();
+                        call.append(owner + "__" + mangleName(m->name) + "((" + owner + "*)self");
+                        for (int k = 0; k < pn; ++k) { call.append(", a" + strings::intToStr(k)); }
+                        call.append(")");
+                        string line = "        case " + mangleName(nm) + "__CID: ";
+                        if (isVoid) { line = line + call.build() + "; return;"; }
+                        else { line = line + "return " + call.build() + ";"; }
+                        this.out.appendLine(line);
+                    }
+                }
+                _ => { }
+            }
+        }
+        if (isVoid) { this.out.appendLine("        default: return;"); }
+        else { this.out.appendLine("        default: return (" + cret + ")0;"); }
+        this.out.appendLine("    }");
+        this.out.appendLine("}");
     }
 
     string emitNew(string cls, List<Expr*> args) {

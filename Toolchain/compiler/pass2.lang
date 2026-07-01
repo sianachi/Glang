@@ -1153,9 +1153,22 @@ class Pass2Checker {
                 }
 
                 ClassInfo* class_info = this.env->classes.getOr(class_name, null);
+                InterfaceInfo* iface_info = this.env->interfaces.getOr(class_name, null);
                 MethodDecl* mmethod = null;
                 bool isInstanceMethod = false;
-                if (class_info == null) {
+                if (class_info == null && iface_info != null) {
+                    // Dispatch through an interface pointer: resolve against the
+                    // interface's declared method signatures (vtable dispatch in
+                    // the emitted C).
+                    mmethod = iface_info->methods.getOr(method, null);
+                    if (mmethod == null) {
+                        mmethod = this.modifierMethod(class_name, method);
+                    }
+                    if (mmethod == null) {
+                        throw new AnalyzeError(
+                            "'" + class_name + "' has no method '" + method + "'", 0, 0);
+                    }
+                } else if (class_info == null) {
                     // Primitive type or unrecognised — check modifier methods.
                     mmethod = this.modifierMethod(class_name, method);
                     if (mmethod == null) {

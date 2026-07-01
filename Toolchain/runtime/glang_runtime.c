@@ -417,7 +417,8 @@ char* glang_inttostr(int64_t n) {
 
 char* glang_floattostr(double f) {
     char buf[64];
-    /* Strip trailing zeros like Python's repr */
+    /* %.15g: up to 15 significant digits, trailing zeros trimmed. Note this
+       renders whole values without a fractional part ("9", not "9.0"). */
     snprintf(buf, sizeof(buf), "%.15g", f);
     return strdup(buf);
 }
@@ -708,16 +709,17 @@ char* glang_shell(const char* cmd) {
 
 void glang_print_int(int64_t v)       { printf("%" PRId64 "\n", v); }
 void glang_print_float(double v)      {
-    /* Match interpreter: no trailing zeros */
-    char buf[64]; snprintf(buf, sizeof(buf), "%.15g", v);
-    printf("%s\n", buf);
+    /* Single source of truth for float formatting: glang_floattostr. */
+    char* s = glang_floattostr(v);
+    printf("%s\n", s);
+    free(s);
 }
 void glang_print_bool(int v)          { printf("%s\n", v ? "true" : "false"); }
 void glang_print_char(char v)         { printf("%c\n", v); }
 void glang_print_string(const char* v){ printf("%s\n", v ? v : "null"); }
 
 void glang_printerr_int(int64_t v)       { fprintf(stderr, "%" PRId64 "\n", v); }
-void glang_printerr_float(double v)      { fprintf(stderr, "%.15g\n", v); }
+void glang_printerr_float(double v)      { char* s = glang_floattostr(v); fprintf(stderr, "%s\n", s); free(s); }
 void glang_printerr_bool(int v)          { fprintf(stderr, "%s\n", v ? "true" : "false"); }
 void glang_printerr_char(char v)         { fprintf(stderr, "%c\n", v); }
 void glang_printerr_string(const char* v){ fprintf(stderr, "%s\n", v ? v : "null"); }

@@ -833,7 +833,20 @@ class Pass2Checker:
                     expr.line, expr.col,
                 )
             class_info = self._env.classes.get(class_t.name)
-            if class_info is None:
+            iface_info = self._env.interfaces.get(class_t.name)
+            if class_info is None and iface_info is not None:
+                # Dispatch through an interface pointer: resolve against the
+                # interface's declared method signatures (vtable dispatch at run
+                # time / in emitted C).
+                method = iface_info.methods.get(expr.method)
+                if method is None:
+                    method = self._env.modifier_methods.get(class_t.name, {}).get(expr.method)
+                if method is None:
+                    raise TypeError(
+                        f"'{class_t.name}' has no method '{expr.method}'",
+                        expr.line, expr.col,
+                    )
+            elif class_info is None:
                 # Primitive type or unrecognised — check modifier methods.
                 method = self._env.modifier_methods.get(class_t.name, {}).get(expr.method)
                 if method is None:

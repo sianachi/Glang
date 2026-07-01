@@ -1,0 +1,55 @@
+// interfaces.lang — polymorphism through interface pointers.
+//
+// A value of an interface type is a pointer to some implementing object; calling
+// a method on it dispatches to the concrete class at run time (via a vtable-ish
+// switch on the object's class id in the compiled backend). A heterogeneous
+// List<Shape*> can therefore hold circles and squares and be treated uniformly.
+//
+//   python3 main.py run examples/interfaces.lang
+
+import "std/list.lang";
+
+interface Shape {
+    float area();
+    string name();
+}
+
+class Circle implements Shape {
+    float r;
+    Circle(float r) { this.r = r; }
+    float area() { return 3.14159 * this.r * this.r; }
+    string name() { return "circle"; }
+}
+
+class Square implements Shape {
+    float side;
+    Square(float side) { this.side = side; }
+    float area() { return this.side * this.side; }
+    string name() { return "square"; }
+}
+
+// Operates on any Shape without knowing its concrete type.
+void describe(Shape* s) {
+    print(s->name());
+    print(s->area());
+}
+
+float totalArea(List<Shape*> shapes) {
+    float total = 0.0;
+    for (int i = 0; i < shapes.length(); ++i) {
+        total = total + shapes.get(i)->area();
+    }
+    return total;
+}
+
+int main() {
+    List<Shape*> shapes = List<Shape*>();
+    shapes.add(new Circle(2.0));
+    shapes.add(new Square(2.5));
+
+    for (int i = 0; i < shapes.length(); ++i) {
+        describe(shapes.get(i));
+    }
+    print(totalArea(shapes));
+    return 0;
+}
