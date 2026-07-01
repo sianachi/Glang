@@ -43,7 +43,7 @@ bool is_overloadable_op(string op) {
 bool is_primitive_value_type(TypeNode* t) {
     match (*t) {
         TypeNode.NamedType(n) => {
-            return n == "int" || n == "float" || n == "bool"
+            return n == "int" || n == "uint" || n == "float" || n == "bool"
                 || n == "char" || n == "byte" || n == "string";
         }
         _ => { return false; }
@@ -150,7 +150,23 @@ bool is_numeric_cast_pair(string s, string d) {
     if (s == "byte" && d == "int") { return true; }
     if (s == "char" && d == "byte") { return true; }
     if (s == "byte" && d == "char") { return true; }
+    if (s == "int" && d == "uint") { return true; }
+    if (s == "uint" && d == "int") { return true; }
+    if (s == "uint" && d == "byte") { return true; }
+    if (s == "byte" && d == "uint") { return true; }
+    if (s == "uint" && d == "char") { return true; }
+    if (s == "char" && d == "uint") { return true; }
+    if (s == "uint" && d == "float") { return true; }
+    if (s == "float" && d == "uint") { return true; }
     return false;
+}
+
+// True iff `e` is a non-negative int literal (usable where a uint is expected).
+bool is_uint_literal(Expr* e) {
+    match (*e) {
+        Expr.LiteralExpr(kind, value) => { return kind == "int" && parseInt(value) >= 0; }
+        _ => { return false; }
+    }
 }
 
 void validate_cast(TypeNode* src, TypeNode* dst, GlobalEnv* env) {

@@ -62,6 +62,9 @@ int64_t glang_net_last_errno(void);
 int64_t glang_net_would_block(void);
 int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents, int64_t count, int64_t timeout_ms);
 void glang_print_int(int64_t v);
+void glang_print_uint(uint64_t v);
+void glang_printerr_uint(uint64_t v);
+char* glang_tostring_uint(uint64_t v);
 void glang_print_float(double v);
 void glang_print_bool(int v);
 void glang_print_char(char v);
@@ -2280,6 +2283,7 @@ int is_nullable(TypeNode* t);
 int is_numeric(TypeNode* t);
 int is_integer(TypeNode* t);
 int is_byte(TypeNode* t);
+int is_uint(TypeNode* t);
 int is_bool(TypeNode* t);
 int is_string(TypeNode* t);
 int is_pointer(TypeNode* t);
@@ -2310,6 +2314,7 @@ int is_byte_literal(Expr* e);
 TypeNode* function_type_from_params(List_Param* params, TypeNode* ret);
 void check_operator_method_decl(MethodDecl* m, char* owner_class);
 int is_numeric_cast_pair(char* s, char* d);
+int is_uint_literal(Expr* e);
 void validate_cast(TypeNode* src, TypeNode* dst, GlobalEnv* env);
 TypeNode* T(char* n);
 TypeNode* check_callable_args(char* name, List_TypeNode* arg_types, List_TypeNode* param_types, TypeNode* ret, GlobalEnv* env);
@@ -7270,7 +7275,7 @@ SymEntry* SymbolTable__find_outer(SymbolTable* self, char* name) {
 }
 
 int isPrimitiveName(char* name) {
-    return (((((((strcmp(name, "int") == 0) || (strcmp(name, "float") == 0)) || (strcmp(name, "bool") == 0)) || (strcmp(name, "char") == 0)) || (strcmp(name, "byte") == 0)) || (strcmp(name, "string") == 0)) || (strcmp(name, "void") == 0));
+    return ((((((((strcmp(name, "int") == 0) || (strcmp(name, "uint") == 0)) || (strcmp(name, "float") == 0)) || (strcmp(name, "bool") == 0)) || (strcmp(name, "char") == 0)) || (strcmp(name, "byte") == 0)) || (strcmp(name, "string") == 0)) || (strcmp(name, "void") == 0));
 }
 
 void GlobalEnv__init(GlobalEnv* self) {
@@ -7452,6 +7457,23 @@ int is_byte(TypeNode* t) {
         case TypeNode__NamedType: {
             char* n = __match__.data.as_NamedType.name;
             return (strcmp(n, "byte") == 0);
+            break;
+        }
+        default: {
+            return 0;
+            break;
+        }
+        }
+    }
+}
+
+int is_uint(TypeNode* t) {
+    {
+        TypeNode __match__ = (*t);
+        switch (__match__.tag) {
+        case TypeNode__NamedType: {
+            char* n = __match__.data.as_NamedType.name;
+            return (strcmp(n, "uint") == 0);
             break;
         }
         default: {
@@ -7885,6 +7907,8 @@ TypeNode* binary_result_type(char* op, TypeNode* left, TypeNode* right) {
     int r_int = is_integer(right);
     int l_byte = is_byte(left);
     int r_byte = is_byte(right);
+    int l_uint = is_uint(left);
+    int r_uint = is_uint(right);
     int l_float = is_float(left);
     int r_float = is_float(right);
     int l_str = is_string(left);
@@ -7897,6 +7921,9 @@ TypeNode* binary_result_type(char* op, TypeNode* left, TypeNode* right) {
         }
         if ((l_byte && r_byte)) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("byte"); __up; });
+        }
+        if ((l_uint && r_uint)) {
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
         }
         if ((l_float && r_float)) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("float"); __up; });
@@ -7918,10 +7945,13 @@ TypeNode* binary_result_type(char* op, TypeNode* left, TypeNode* right) {
         if ((l_byte && r_byte)) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("byte"); __up; });
         }
+        if ((l_uint && r_uint)) {
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
+        }
         GLANG_THROW(Exception_new("operator '%' requires int operands"), "Exception");
     }
     if (((((strcmp(op, "<") == 0) || (strcmp(op, ">") == 0)) || (strcmp(op, "<=") == 0)) || (strcmp(op, ">=") == 0))) {
-        if ((((l_int && r_int) || (l_byte && r_byte)) || (l_float && r_float))) {
+        if (((((l_int && r_int) || (l_byte && r_byte)) || (l_uint && r_uint)) || (l_float && r_float))) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("bool"); __up; });
         }
         char* ls = type_str(left);
@@ -8026,6 +8056,9 @@ TypeNode* binary_result_type(char* op, TypeNode* left, TypeNode* right) {
         }
         if ((l_byte && r_byte)) {
             return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("byte"); __up; });
+        }
+        if ((l_uint && r_uint)) {
+            return ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
         }
         GLANG_THROW(Exception_new(glang_str_concat(glang_str_concat("operator '", op), "' requires int operands")), "Exception");
     }
@@ -8369,7 +8402,7 @@ int is_primitive_value_type(TypeNode* t) {
         switch (__match__.tag) {
         case TypeNode__NamedType: {
             char* n = __match__.data.as_NamedType.name;
-            return ((((((strcmp(n, "int") == 0) || (strcmp(n, "float") == 0)) || (strcmp(n, "bool") == 0)) || (strcmp(n, "char") == 0)) || (strcmp(n, "byte") == 0)) || (strcmp(n, "string") == 0));
+            return (((((((strcmp(n, "int") == 0) || (strcmp(n, "uint") == 0)) || (strcmp(n, "float") == 0)) || (strcmp(n, "bool") == 0)) || (strcmp(n, "char") == 0)) || (strcmp(n, "byte") == 0)) || (strcmp(n, "string") == 0));
             break;
         }
         default: {
@@ -8495,7 +8528,49 @@ int is_numeric_cast_pair(char* s, char* d) {
     if (((strcmp(s, "byte") == 0) && (strcmp(d, "char") == 0))) {
         return 1;
     }
+    if (((strcmp(s, "int") == 0) && (strcmp(d, "uint") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "uint") == 0) && (strcmp(d, "int") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "uint") == 0) && (strcmp(d, "byte") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "byte") == 0) && (strcmp(d, "uint") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "uint") == 0) && (strcmp(d, "char") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "char") == 0) && (strcmp(d, "uint") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "uint") == 0) && (strcmp(d, "float") == 0))) {
+        return 1;
+    }
+    if (((strcmp(s, "float") == 0) && (strcmp(d, "uint") == 0))) {
+        return 1;
+    }
     return 0;
+}
+
+int is_uint_literal(Expr* e) {
+    {
+        Expr __match__ = (*e);
+        switch (__match__.tag) {
+        case Expr__LiteralExpr: {
+            char* kind = __match__.data.as_LiteralExpr.kind;
+            char* value = __match__.data.as_LiteralExpr.value;
+            return ((strcmp(kind, "int") == 0) && (glang_parseint(value) >= 0));
+            break;
+        }
+        default: {
+            return 0;
+            break;
+        }
+        }
+    }
 }
 
 void validate_cast(TypeNode* src, TypeNode* dst, GlobalEnv* env) {
@@ -14313,6 +14388,14 @@ void Pass2Checker__check_assign(Pass2Checker* self, Expr* target, char* op, Expr
         } else {
             if (((is_byte(value_t) && (!is_byte(target_t))) && is_byte_literal(target))) {
                 lhs_t = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("byte"); __up; });
+            } else {
+                if (((is_uint(target_t) && (!is_uint(value_t))) && is_uint_literal(value))) {
+                    rhs_t = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
+                } else {
+                    if (((is_uint(value_t) && (!is_uint(target_t))) && is_uint_literal(target))) {
+                        lhs_t = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
+                    }
+                }
             }
         }
         value_t = Pass2Checker__check_binary_operation_type(self, op_symbol, lhs_t, rhs_t);
@@ -14506,6 +14589,14 @@ TypeNode* Pass2Checker__check_expr(Pass2Checker* self, Expr* expr) {
             } else {
                 if (((is_byte(right_t) && (!is_byte(left_t))) && is_byte_literal(left))) {
                     lt = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("byte"); __up; });
+                } else {
+                    if (((is_uint(left_t) && (!is_uint(right_t))) && is_uint_literal(right))) {
+                        rt = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
+                    } else {
+                        if (((is_uint(right_t) && (!is_uint(left_t))) && is_uint_literal(left))) {
+                            lt = ({ TypeNode* __up = (TypeNode*)malloc(sizeof(TypeNode)); *__up = TypeNode__NamedType_new("uint"); __up; });
+                        }
+                    }
                 }
             }
             return Pass2Checker__check_binary_operation_type(self, op, lt, rt);
@@ -15203,6 +15294,24 @@ int Pass2Checker__assignable(Pass2Checker* self, TypeNode* from_t, TypeNode* to_
                     if (((val < 0) || (val > 255))) {
                         GLANG_THROW(AnalyzeError_new(glang_str_concat("byte literal out of range 0..255: ", strings__intToStr(val)), 0, 0), "AnalyzeError");
                     }
+                    return 1;
+                }
+                break;
+            }
+            default: {
+                break;
+            }
+            }
+        }
+    }
+    if (is_uint(to_t)) {
+        {
+            Expr __match__ = (*from_expr);
+            switch (__match__.tag) {
+            case Expr__LiteralExpr: {
+                char* kind = __match__.data.as_LiteralExpr.kind;
+                char* value = __match__.data.as_LiteralExpr.value;
+                if (((strcmp(kind, "int") == 0) && (glang_parseint(value) >= 0))) {
                     return 1;
                 }
                 break;
@@ -16273,6 +16382,9 @@ char* mangleName(char* s) {
 char* cTypeOf(char* t) {
     if ((strcmp(t, "int") == 0)) {
         return "int64_t";
+    }
+    if ((strcmp(t, "uint") == 0)) {
+        return "uint64_t";
     }
     if ((strcmp(t, "float") == 0)) {
         return "double";
@@ -18382,7 +18494,7 @@ char* CEmit__emitCall(CEmit* self, char* name, List_Expr* args) {
         }
         char* a0 = CEmit__emitExpr(self, List_Expr__get(args, 0));
         char* t = CEmit__infer(self, List_Expr__get(args, 0));
-        if ((((((strcmp(t, "string") == 0) || (strcmp(t, "float") == 0)) || (strcmp(t, "bool") == 0)) || (strcmp(t, "char") == 0)) || (strcmp(t, "int") == 0))) {
+        if (((((((strcmp(t, "string") == 0) || (strcmp(t, "float") == 0)) || (strcmp(t, "bool") == 0)) || (strcmp(t, "char") == 0)) || (strcmp(t, "int") == 0)) || (strcmp(t, "uint") == 0))) {
             return glang_str_concat(glang_str_concat(glang_str_concat(glang_str_concat(pfx, t), "("), a0), ")");
         }
         return glang_str_concat(glang_str_concat(glang_str_concat(pfx, "int((int64_t)"), a0), ")");
@@ -19141,6 +19253,9 @@ char* CEmit__build(CEmit* self) {
     StringBuilder__appendLine(f, "int64_t glang_net_would_block(void);");
     StringBuilder__appendLine(f, "int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents, int64_t count, int64_t timeout_ms);");
     StringBuilder__appendLine(f, "void glang_print_int(int64_t v);");
+    StringBuilder__appendLine(f, "void glang_print_uint(uint64_t v);");
+    StringBuilder__appendLine(f, "void glang_printerr_uint(uint64_t v);");
+    StringBuilder__appendLine(f, "char* glang_tostring_uint(uint64_t v);");
     StringBuilder__appendLine(f, "void glang_print_float(double v);");
     StringBuilder__appendLine(f, "void glang_print_bool(int v);");
     StringBuilder__appendLine(f, "void glang_print_char(char v);");

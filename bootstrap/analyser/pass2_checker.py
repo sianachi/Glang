@@ -19,7 +19,7 @@ from parser.ast_nodes import (
 from errors.errors import TypeError
 from analyser.symbol_table import GlobalEnv, ClassInfo, SymbolTable
 from analyser.type_utils import (
-    NULL_TYPE, is_assignable, is_integer, is_byte, is_bool,
+    NULL_TYPE, is_assignable, is_integer, is_byte, is_uint, is_bool,
     is_pointer, is_array, is_string, is_nullable, pointer_base, type_str,
     is_lvalue, binary_result_type, unary_result_type,
     superclass_chain, types_equal,
@@ -1310,7 +1310,7 @@ class Pass2Checker:
     def _is_primitive_value_type(self, t: TypeNode) -> bool:
         return (
             isinstance(t, NamedType)
-            and t.name in ("int", "float", "bool", "char", "byte", "string")
+            and t.name in ("int", "uint", "float", "bool", "char", "byte", "string")
         )
 
     def _is_byte_literal(self, e: Expr) -> bool:
@@ -1335,7 +1335,19 @@ class Pass2Checker:
             return left_t, NamedType("byte")
         if is_byte(right_t) and not is_byte(left_t) and self._is_byte_literal(left_e):
             return NamedType("byte"), right_t
+        # Same idea for uint meeting a non-negative integer literal.
+        if is_uint(left_t) and not is_uint(right_t) and self._is_uint_literal(right_e):
+            return left_t, NamedType("uint")
+        if is_uint(right_t) and not is_uint(left_t) and self._is_uint_literal(left_e):
+            return NamedType("uint"), right_t
         return left_t, right_t
+
+    def _is_uint_literal(self, e: Expr) -> bool:
+        return (
+            isinstance(e, LiteralExpr)
+            and e.kind == "int"
+            and int(e.value) >= 0
+        )
 
     def _assignable(self, from_t: TypeNode, to_t: TypeNode, from_expr: Expr) -> bool:
         """Like ``is_assignable``, but also accepts an integer *literal* in the
@@ -1355,6 +1367,14 @@ class Pass2Checker:
                     f"byte literal out of range 0..255: {val}",
                     from_expr.line, from_expr.col,
                 )
+            return True
+        # A non-negative integer literal is accepted where a uint is expected.
+        if (
+            is_uint(to_t)
+            and isinstance(from_expr, LiteralExpr)
+            and from_expr.kind == "int"
+            and int(from_expr.value) >= 0
+        ):
             return True
         return False
 
@@ -1800,6 +1820,10 @@ class Pass2Checker:
             ("int", "char"), ("char", "int"),
             ("int", "byte"), ("byte", "int"),
             ("char", "byte"), ("byte", "char"),
+            ("int", "uint"), ("uint", "int"),
+            ("uint", "byte"), ("byte", "uint"),
+            ("uint", "char"), ("char", "uint"),
+            ("uint", "float"), ("float", "uint"),
         }
         if (
             isinstance(src, NamedType)

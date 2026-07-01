@@ -222,7 +222,7 @@ class SymbolTable {
 
 // ── GlobalEnv: top-level declaration registry ──────────────────────────────
 bool isPrimitiveName(string name) {
-    return name == "int" || name == "float" || name == "bool" || name == "char"
+    return name == "int" || name == "uint" || name == "float" || name == "bool" || name == "char"
         || name == "byte" || name == "string" || name == "void";
 }
 

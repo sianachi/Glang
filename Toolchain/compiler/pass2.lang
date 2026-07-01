@@ -707,6 +707,10 @@ class Pass2Checker {
                 rhs_t = new TypeNode.NamedType("byte");
             } else if (is_byte(value_t) && !(is_byte(target_t)) && is_byte_literal(target)) {
                 lhs_t = new TypeNode.NamedType("byte");
+            } else if (is_uint(target_t) && !(is_uint(value_t)) && is_uint_literal(value)) {
+                rhs_t = new TypeNode.NamedType("uint");
+            } else if (is_uint(value_t) && !(is_uint(target_t)) && is_uint_literal(target)) {
+                lhs_t = new TypeNode.NamedType("uint");
             }
             value_t = this.check_binary_operation_type(op_symbol, lhs_t, rhs_t);
         }
@@ -853,6 +857,10 @@ class Pass2Checker {
                     rt = new TypeNode.NamedType("byte");
                 } else if (is_byte(right_t) && !(is_byte(left_t)) && is_byte_literal(left)) {
                     lt = new TypeNode.NamedType("byte");
+                } else if (is_uint(left_t) && !(is_uint(right_t)) && is_uint_literal(right)) {
+                    rt = new TypeNode.NamedType("uint");
+                } else if (is_uint(right_t) && !(is_uint(left_t)) && is_uint_literal(left)) {
+                    lt = new TypeNode.NamedType("uint");
                 }
                 return this.check_binary_operation_type(op, lt, rt);
             }
@@ -1458,6 +1466,14 @@ class Pass2Checker {
                         }
                         return true;
                     }
+                }
+                _ => { }
+            }
+        }
+        if (is_uint(to_t)) {
+            match (*from_expr) {
+                Expr.LiteralExpr(kind, value) => {
+                    if (kind == "int" && parseInt(value) >= 0) { return true; }
                 }
                 _ => { }
             }

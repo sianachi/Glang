@@ -221,6 +221,11 @@ class GlangThrowException(Exception):
 VOID = Value(NamedType("void"), None)
 _BINARY_OPERATOR_OVERLOADS = {"+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="}
 
+# uint arithmetic wraps modulo 2**64 (like the native uint64_t).
+_U64_MASK = 0xFFFFFFFFFFFFFFFF   # 2**64 - 1
+_I64_SIGN_BIT = 0x8000000000000000
+_U64_MODULUS = 0x10000000000000000
+
 
 class Interpreter:
     def __init__(
@@ -693,6 +698,12 @@ class Interpreter:
         # guarantees a byte only ever meets a byte or an int *literal*, so any
         # byte/int pairing at runtime is a byte operation.
         byte_op = (l_byte or r_byte) and (l_byte or l_int) and (r_byte or r_int)
+        # A uint computes like int but stays uint, wrapping modulo 2**64 (as the
+        # native uint64_t does); it only ever meets a uint or an int literal.
+        l_uint = self._is(left, "uint")
+        r_uint = self._is(right, "uint")
+        uint_op = (l_uint or r_uint) and (l_uint or l_int) and (r_uint or r_int)
+        _U64 = _U64_MASK
         both_int = l_int and r_int
 
         if op == "+":
@@ -702,15 +713,21 @@ class Interpreter:
                 return Value(NamedType("int"), l + r)
             if byte_op:
                 return Value(NamedType("byte"), (l + r) & 0xFF)
+            if uint_op:
+                return Value(NamedType("uint"), (l + r) & _U64)
             return Value(NamedType("float"), l + r)
         if op == "-":
             if byte_op:
                 return Value(NamedType("byte"), (l - r) & 0xFF)
+            if uint_op:
+                return Value(NamedType("uint"), (l - r) & _U64)
             t = "int" if both_int else "float"
             return Value(NamedType(t), l - r)
         if op == "*":
             if byte_op:
                 return Value(NamedType("byte"), (l * r) & 0xFF)
+            if uint_op:
+                return Value(NamedType("uint"), (l * r) & _U64)
             t = "int" if both_int else "float"
             return Value(NamedType(t), l * r)
         if op == "/":
@@ -718,14 +735,21 @@ class Interpreter:
                 return Value(NamedType("int"), self._cdiv(l, r, line, col))
             if byte_op:
                 return Value(NamedType("byte"), self._cdiv(l, r, line, col) & 0xFF)
+            if uint_op:
+                # Unsigned division of the masked (non-negative) operands.
+                return Value(NamedType("uint"), ((l & _U64) // (r & _U64)) if (r & _U64) != 0
+                             else self._cdiv(l, r, line, col))
             return Value(NamedType("float"), l / r)
         if op == "%":
             if byte_op:
                 return Value(NamedType("byte"), self._cmod(l, r, line, col) & 0xFF)
+            if uint_op:
+                return Value(NamedType("uint"), ((l & _U64) % (r & _U64)) if (r & _U64) != 0
+                             else self._cmod(l, r, line, col))
             return Value(NamedType("int"), self._cmod(l, r, line, col))
 
-        bit_t = "byte" if byte_op else "int"
-        bit_mask = 0xFF if byte_op else None
+        bit_t = "byte" if byte_op else ("uint" if uint_op else "int")
+        bit_mask = 0xFF if byte_op else (_U64 if uint_op else None)
 
         def _bit(v: int) -> Value:
             return Value(NamedType(bit_t), v & bit_mask if bit_mask is not None else v)
@@ -806,7 +830,14 @@ class Interpreter:
             if target.name == "int":
                 if self._is(src, "char"):
                     return Value(target, ord(src.raw))
-                return Value(target, int(src.raw))
+                v = int(src.raw)
+                if self._is(src, "uint") and v >= _I64_SIGN_BIT:
+                    v -= _U64_MODULUS   # reinterpret as signed int64
+                return Value(target, v)
+            if target.name == "uint":
+                if self._is(src, "char"):
+                    return Value(target, ord(src.raw) & _U64_MASK)
+                return Value(target, int(src.raw) & _U64_MASK)
             if target.name == "byte":
                 if self._is(src, "char"):
                     return Value(target, ord(src.raw) & 0xFF)

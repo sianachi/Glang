@@ -140,6 +140,10 @@ def is_byte(t: TypeNode) -> bool:
     return isinstance(t, NamedType) and t.name == "byte"
 
 
+def is_uint(t: TypeNode) -> bool:
+    return isinstance(t, NamedType) and t.name == "uint"
+
+
 def is_bool(t: TypeNode) -> bool:
     return isinstance(t, NamedType) and t.name == "bool"
 
@@ -204,6 +208,8 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
     r_int = is_integer(right)
     l_byte = is_byte(left)
     r_byte = is_byte(right)
+    l_uint = is_uint(left)
+    r_uint = is_uint(right)
     l_float = isinstance(left, NamedType) and left.name == "float"
     r_float = isinstance(right, NamedType) and right.name == "float"
     l_str = is_string(left)
@@ -216,6 +222,8 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
             return NamedType("int")
         if l_byte and r_byte:
             return NamedType("byte")
+        if l_uint and r_uint:
+            return NamedType("uint")
         if l_float and r_float:
             return NamedType("float")
         if op == "+" and l_str and r_str:
@@ -235,10 +243,13 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
             return NamedType("int")
         if l_byte and r_byte:
             return NamedType("byte")
+        if l_uint and r_uint:
+            return NamedType("uint")
         raise TypeError("operator '%' requires int operands", 0, 0)
 
     if op in ("<", ">", "<=", ">="):
-        if (l_int and r_int) or (l_byte and r_byte) or (l_float and r_float):
+        if ((l_int and r_int) or (l_byte and r_byte)
+                or (l_uint and r_uint) or (l_float and r_float)):
             return NamedType("bool")
         ls, rs = type_str(left), type_str(right)
         raise TypeError(
@@ -296,6 +307,8 @@ def binary_result_type(op: str, left: TypeNode, right: TypeNode) -> TypeNode:
             return NamedType("int")
         if l_byte and r_byte:
             return NamedType("byte")
+        if l_uint and r_uint:
+            return NamedType("uint")
         raise TypeError(f"operator '{op}' requires int operands", 0, 0)
 
     if op == "??":

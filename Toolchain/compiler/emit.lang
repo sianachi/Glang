@@ -41,6 +41,7 @@ string mangleName(string s) {
 
 string cTypeOf(string t) {
     if (t == "int")    { return "int64_t"; }
+    if (t == "uint")   { return "uint64_t"; }
     if (t == "float")  { return "double"; }
     if (t == "bool")   { return "int"; }
     if (t == "char")   { return "char"; }
@@ -1368,7 +1369,7 @@ class CEmit {
             if (args.length() == 0) { return pfx + "string(\"\")"; }
             string a0 = this.emitExpr(args.get(0));
             string t = this.infer(args.get(0));
-            if (t == "string" || t == "float" || t == "bool" || t == "char" || t == "int") {
+            if (t == "string" || t == "float" || t == "bool" || t == "char" || t == "int" || t == "uint") {
                 return pfx + t + "(" + a0 + ")";
             }
             // byte / enum / unknown → print as int
@@ -1755,6 +1756,9 @@ class CEmit {
         f.appendLine("int64_t glang_net_would_block(void);");
         f.appendLine("int64_t glang_net_poll(int64_t* fds, int64_t* events, int64_t* revents, int64_t count, int64_t timeout_ms);");
         f.appendLine("void glang_print_int(int64_t v);");
+        f.appendLine("void glang_print_uint(uint64_t v);");
+        f.appendLine("void glang_printerr_uint(uint64_t v);");
+        f.appendLine("char* glang_tostring_uint(uint64_t v);");
         f.appendLine("void glang_print_float(double v);");
         f.appendLine("void glang_print_bool(int v);");
         f.appendLine("void glang_print_char(char v);");

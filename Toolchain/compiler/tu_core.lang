@@ -55,6 +55,13 @@ bool is_byte(TypeNode* t) {
     }
 }
 
+bool is_uint(TypeNode* t) {
+    match (*t) {
+        TypeNode.NamedType(n) => { return n == "uint"; }
+        _ => { return false; }
+    }
+}
+
 bool is_bool(TypeNode* t) {
     match (*t) {
         TypeNode.NamedType(n) => { return n == "bool"; }
@@ -243,6 +250,8 @@ TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
     bool r_int = is_integer(right);
     bool l_byte = is_byte(left);
     bool r_byte = is_byte(right);
+    bool l_uint = is_uint(left);
+    bool r_uint = is_uint(right);
     bool l_float = is_float(left);
     bool r_float = is_float(right);
     bool l_str = is_string(left);
@@ -253,6 +262,7 @@ TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
     if (op == "+" || op == "-" || op == "*" || op == "/") {
         if (l_int && r_int) { return new TypeNode.NamedType("int"); }
         if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        if (l_uint && r_uint) { return new TypeNode.NamedType("uint"); }
         if (l_float && r_float) { return new TypeNode.NamedType("float"); }
         if (op == "+" && l_str && r_str) { return new TypeNode.NamedType("string"); }
         string ls = type_str(left);
@@ -266,11 +276,12 @@ TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
     if (op == "%") {
         if (l_int && r_int) { return new TypeNode.NamedType("int"); }
         if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        if (l_uint && r_uint) { return new TypeNode.NamedType("uint"); }
         throw new Exception("operator '%' requires int operands");
     }
 
     if (op == "<" || op == ">" || op == "<=" || op == ">=") {
-        if ((l_int && r_int) || (l_byte && r_byte) || (l_float && r_float)) {
+        if ((l_int && r_int) || (l_byte && r_byte) || (l_uint && r_uint) || (l_float && r_float)) {
             return new TypeNode.NamedType("bool");
         }
         string ls = type_str(left);
@@ -339,6 +350,7 @@ TypeNode* binary_result_type(string op, TypeNode* left, TypeNode* right) {
     if (op == "&" || op == "|" || op == "^" || op == "<<" || op == ">>") {
         if (l_int && r_int) { return new TypeNode.NamedType("int"); }
         if (l_byte && r_byte) { return new TypeNode.NamedType("byte"); }
+        if (l_uint && r_uint) { return new TypeNode.NamedType("uint"); }
         throw new Exception("operator '" + op + "' requires int operands");
     }
 

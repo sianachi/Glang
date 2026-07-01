@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from parser.ast_nodes import EnumDecl, UnionDecl
 
 
-PRIMITIVES = {"int", "float", "bool", "char", "byte", "string", "void"}
+PRIMITIVES = {"int", "uint", "float", "bool", "char", "byte", "string", "void"}
 
 
 @dataclass

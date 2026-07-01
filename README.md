@@ -225,6 +225,7 @@ Integer literals may use `_` as a visual separator: `1_000_000`.
 | Type     | Representation   | Notes                                      |
 |----------|------------------|--------------------------------------------|
 | `int`    | 64-bit signed    | Integer division when both operands are int|
+| `uint`   | 64-bit unsigned  | Wraps modulo 2⁶⁴; logical shifts; prints unsigned |
 | `float`  | 64-bit IEEE 754  |                                            |
 | `bool`   | 1 byte           | Not an alias of int                        |
 | `char`   | 1 byte           | ASCII only; *text*, not arithmetic         |
@@ -245,6 +246,14 @@ substrate for binary data — buffers, octets, and `byte[]` blocks.
   `(byte)` cast.
 - `byte` does not mix with `int` variables in one expression without a cast,
   matching the no-implicit-conversion rule for `int`/`float`.
+
+**`uint`** is a distinct unsigned 64-bit integer. Like `byte` it wraps on
+overflow (modulo 2⁶⁴, matching the native `uint64_t`), its `>>` is a logical
+shift, and it prints/`toString`s as an unsigned value. A non-negative integer
+literal may be used where a `uint` is expected (`uint x = 5;`); mixing with an
+`int` *variable*, or converting either way, needs an explicit cast — `(int)`
+reinterprets the bit pattern (so `(int)(uint)-1` round-trips). Useful for
+hashing, checksums, and bit manipulation.
 
 ### 3.2 Pointer types
 
@@ -1389,7 +1398,8 @@ declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 **exception handling** (`throw`/`try`/`catch`/`finally`, section 6.6), **generic
 bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
 inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
-**method dispatch through interface pointers**, **terminal-control built-ins**
+the **`uint`** unsigned 64-bit type, **method dispatch through interface
+pointers**, **terminal-control built-ins**
 and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal

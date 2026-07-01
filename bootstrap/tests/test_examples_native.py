@@ -27,6 +27,7 @@ NATIVE_EXAMPLES = [
     "format_demo",
     "hashmap_demo",
     "default_args",
+    "uint_demo",
 ]
 
 

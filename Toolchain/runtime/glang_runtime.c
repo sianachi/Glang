@@ -708,6 +708,7 @@ char* glang_shell(const char* cmd) {
 /* ── Print ────────────────────────────────────────────────────────────── */
 
 void glang_print_int(int64_t v)       { printf("%" PRId64 "\n", v); }
+void glang_print_uint(uint64_t v)     { printf("%" PRIu64 "\n", v); }
 void glang_print_float(double v)      {
     /* Single source of truth for float formatting: glang_floattostr. */
     char* s = glang_floattostr(v);
@@ -719,6 +720,7 @@ void glang_print_char(char v)         { printf("%c\n", v); }
 void glang_print_string(const char* v){ printf("%s\n", v ? v : "null"); }
 
 void glang_printerr_int(int64_t v)       { fprintf(stderr, "%" PRId64 "\n", v); }
+void glang_printerr_uint(uint64_t v)     { fprintf(stderr, "%" PRIu64 "\n", v); }
 void glang_printerr_float(double v)      { char* s = glang_floattostr(v); fprintf(stderr, "%s\n", s); free(s); }
 void glang_printerr_bool(int v)          { fprintf(stderr, "%s\n", v ? "true" : "false"); }
 void glang_printerr_char(char v)         { fprintf(stderr, "%c\n", v); }
@@ -727,6 +729,9 @@ void glang_printerr_string(const char* v){ fprintf(stderr, "%s\n", v ? v : "null
 /* ── toString ─────────────────────────────────────────────────────────── */
 
 char* glang_tostring_int(int64_t v)    { return glang_inttostr(v); }
+char* glang_tostring_uint(uint64_t v)  {
+    char buf[32]; snprintf(buf, sizeof(buf), "%" PRIu64, v); return strdup(buf);
+}
 char* glang_tostring_float(double v)   { return glang_floattostr(v); }
 char* glang_tostring_bool(int v)       { return glang_booltostr(v); }
 char* glang_tostring_char(char v)      { return glang_chartostr(v); }

@@ -1,0 +1,44 @@
+// uint_demo.lang — unsigned 64-bit integers (uint).
+//
+// `uint` is a distinct 64-bit unsigned type: arithmetic wraps modulo 2**64
+// (like the native uint64_t), shifts are logical, and it prints unsigned.
+// Non-negative integer literals coerce to uint; conversions to/from int use an
+// explicit cast. Ideal for hashing, checksums, and bit twiddling.
+//
+//   python3 main.py run examples/uint_demo.lang
+
+// A xorshift64 step: pure unsigned shifts and xor, relying on wraparound.
+uint xorshift(uint x) {
+    x = x ^ (x << 13);
+    x = x ^ (x >> 7);
+    x = x ^ (x << 17);
+    return x;
+}
+
+int main() {
+    // Wraparound arithmetic.
+    uint max = 18446744073709551615;   // 2**64 - 1
+    print(max);
+    print(max + 1);                    // 0 (wraps)
+    print(0 - 1);                      // this is int; contrast below
+
+    uint zero = 0;
+    print(zero - 1);                   // 18446744073709551615 (unsigned underflow)
+
+    // Logical right shift keeps the value non-negative.
+    uint high = 9223372036854775808;   // 2**63
+    print(high >> 1);                  // 4611686018427387904
+
+    // Deterministic pseudo-random sequence.
+    uint state = 88172645463325252;
+    for (int i = 0; i < 5; i = i + 1) {
+        state = xorshift(state);
+        print(state % 1000);
+    }
+
+    // Round-trip through a signed int (reinterprets the bit pattern).
+    int asSigned = (int) max;          // -1
+    print(asSigned);
+    print((uint) asSigned);            // back to 2**64 - 1
+    return 0;
+}
