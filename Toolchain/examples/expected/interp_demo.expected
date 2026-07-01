@@ -1,0 +1,7 @@
+Ada scored 95/100 (95%)
+pass = true
+literal {braces} stay literal
+point p = (3, 4)
+row 1:	1
+row 2:	4
+row 3:	9

@@ -182,6 +182,10 @@ class ExprParser:
             self._s.advance()
             return LiteralExpr(kind="string", value=tok.value, line=tok.line, col=tok.col)
 
+        if tok.type == TokenType.INTERP_STRING:
+            self._s.advance()
+            return self._desugar_interp(tok.value, tok.line, tok.col)
+
         if tok.type == TokenType.IDENT:
             self._s.advance()
             name = tok.value
@@ -375,3 +379,83 @@ class ExprParser:
 
     def _infix_binding_power(self, tok) -> Optional[Tuple[int, int]]:
         return _INFIX_BP.get(tok.type)
+
+    # ------------------------------------------------------------------
+    # Interpolated strings: $"lit {expr} lit" -> "lit" + toString(expr) + "lit"
+    # ------------------------------------------------------------------
+
+    def _desugar_interp(self, raw: str, line: int, col: int) -> Expr:
+        from lexer.lexer import Lexer
+        segments = self._split_interp(raw, line, col)
+        parts: List[Expr] = []
+        for kind, text in segments:
+            if kind == "lit":
+                parts.append(LiteralExpr(kind="string", value=text, line=line, col=col))
+            else:
+                hole_tokens = Lexer(text).tokenize()
+                ep = ExprParser(TokenStream(hole_tokens), self._tp)
+                if self._stmt_parser is not None:
+                    ep.set_stmt_parser(self._stmt_parser)
+                hole = ep.parse_expr()
+                # toString makes any operand a string (it is identity on strings).
+                parts.append(CallExpr(name="toString", args=[hole], line=line, col=col))
+        if not parts:
+            return LiteralExpr(kind="string", value="", line=line, col=col)
+        result = parts[0]
+        for p in parts[1:]:
+            result = BinaryExpr(left=result, op="+", right=p, line=line, col=col)
+        return result
+
+    def _split_interp(self, raw: str, line: int, col: int):
+        segments = []
+        buf = []
+        i, n = 0, len(raw)
+        while i < n:
+            c = raw[i]
+            if c == "{":
+                if i + 1 < n and raw[i + 1] == "{":
+                    buf.append("{"); i += 2; continue
+                if buf:
+                    segments.append(("lit", "".join(buf))); buf = []
+                j = i + 1
+                hole = []
+                while j < n and raw[j] != "}":
+                    hole.append(raw[j]); j += 1
+                if j >= n:
+                    raise ParseError("unterminated '{' in interpolated string", line, col)
+                src = "".join(hole).strip()
+                if not src:
+                    raise ParseError("empty '{}' in interpolated string", line, col)
+                segments.append(("hole", src))
+                i = j + 1
+            elif c == "}":
+                if i + 1 < n and raw[i + 1] == "}":
+                    buf.append("}"); i += 2; continue
+                buf.append("}"); i += 1
+            elif c == "\\":
+                ch, consumed = self._decode_interp_escape(raw, i, line, col)
+                buf.append(ch); i += consumed
+            else:
+                buf.append(c); i += 1
+        if buf:
+            segments.append(("lit", "".join(buf)))
+        return segments
+
+    @staticmethod
+    def _decode_interp_escape(raw: str, i: int, line: int, col: int):
+        if i + 1 >= len(raw):
+            raise ParseError("dangling '\\' in interpolated string", line, col)
+        e = raw[i + 1]
+        simple = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\",
+                  '"': '"', "'": "'", "0": "\0"}
+        if e in simple:
+            return simple[e], 2
+        if e == "x":
+            if i + 4 > len(raw):
+                raise ParseError("incomplete '\\x' escape", line, col)
+            hx = raw[i + 2:i + 4]
+            try:
+                return chr(int(hx, 16)), 4
+            except ValueError:
+                raise ParseError(f"invalid hex escape '\\x{hx}'", line, col)
+        raise ParseError(f"unknown escape '\\{e}' in interpolated string", line, col)

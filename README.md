@@ -199,9 +199,18 @@ elsewhere, so they are not in the reserved list above.
 | Bool    | `true` `false`                        |
 | Char    | `'a'` `'\n'` `'\t'` `'\\'` `'\xFF'`  |
 | String  | `"hello"` `"line\n"` `"say \"hi\""` |
+| Interpolated string | `$"Ln {row}, Col {col}"` |
 | Null    | `null`                                |
 
 Integer literals may use `_` as a visual separator: `1_000_000`.
+
+**Interpolated strings.** `$"...{expr}..."` splices the value of each `{expr}`
+hole into the surrounding text. Each hole may be any expression; it is converted
+with `toString` (so the expression must be a primitive value) and concatenated
+with the literal parts. Write `{{` and `}}` for literal braces. Interpolation is
+desugared in the parser into ordinary string concatenation
+(`"Ln " + toString(row) + ", Col " + toString(col)`), so there is no runtime
+machinery and a hole behaves exactly like the expression it contains.
 
 ### 2.5 Escape sequences (char and string)
 
@@ -1398,8 +1407,8 @@ declarations** (section 14.3), **`using` resource blocks** (section 8.6), and
 **exception handling** (`throw`/`try`/`catch`/`finally`, section 6.6), **generic
 bounds** (`<T extends Named>`) with **inferred generic calls** and `var` local
 inference, the **ternary operator** (`cond ? a : b`), **default parameters**,
-the **`uint`** unsigned 64-bit type, **method dispatch through interface
-pointers**, **terminal-control built-ins**
+**string interpolation** (`$"...{expr}..."`), the **`uint`** unsigned 64-bit
+type, **method dispatch through interface pointers**, **terminal-control built-ins**
 and a **`shell`** built-in
 (section 7.5), and a **terminal-UI toolkit** (`std/ansi`/`term`/`input`/`tui`)
 with example apps under `real-world-applications/` (a network monitor, a modal

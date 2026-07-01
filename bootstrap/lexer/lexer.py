@@ -291,6 +291,34 @@ class Lexer:
                 parts.append(self._advance())
         return Token(TokenType.STRING_LIT, "".join(parts), line, col)
 
+    def _lex_interp_string(self, line: int, col: int) -> Token:
+        """Lex an interpolated string `$"...{expr}..."`.
+
+        The verbatim inner text (backslash escapes and braces preserved) is
+        captured; the parser splits it into literal parts and `{expr}` holes and
+        desugars the whole thing into string concatenation. Escaped quotes do not
+        end the string; a raw newline does end the literal (use \\n)."""
+        self._advance()  # $
+        self._advance()  # opening "
+        parts: List[str] = []
+        while True:
+            if self._pos >= len(self._src):
+                raise LexError("unterminated interpolated string", line, col)
+            ch = self._peek()
+            if ch == '"':
+                self._advance()
+                break
+            if ch == "\n":
+                raise LexError("newline inside interpolated string", self._line, self._col)
+            if ch == "\\":
+                # Preserve the escape verbatim; the parser decodes it.
+                parts.append(self._advance())
+                if self._pos < len(self._src):
+                    parts.append(self._advance())
+            else:
+                parts.append(self._advance())
+        return Token(TokenType.INTERP_STRING, "".join(parts), line, col)
+
     # ------------------------------------------------------------------
     # Char literals
     # ------------------------------------------------------------------
@@ -458,6 +486,8 @@ class Lexer:
                 tokens.append(self._lex_ident_or_keyword(line, col))
             elif ch.isdigit():
                 tokens.append(self._lex_number(line, col))
+            elif ch == "$" and self._pos + 1 < len(self._src) and self._src[self._pos + 1] == '"':
+                tokens.append(self._lex_interp_string(line, col))
             elif ch == '"':
                 tokens.append(self._lex_string(line, col))
             elif ch == "'":

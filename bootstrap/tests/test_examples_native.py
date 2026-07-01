@@ -28,6 +28,7 @@ NATIVE_EXAMPLES = [
     "hashmap_demo",
     "default_args",
     "uint_demo",
+    "interp_demo",
 ]
 
 

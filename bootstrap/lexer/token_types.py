@@ -7,6 +7,7 @@ class TokenType(Enum):
     FLOAT_LIT  = auto()  # 3.14, 1.0e-5
     CHAR_LIT   = auto()  # 'a', '\n', '\x41'
     STRING_LIT = auto()  # "hello\tworld"
+    INTERP_STRING = auto()  # $"Ln {row}"  (raw template; desugared by the parser)
 
     # --- Identifier ---
     IDENT = auto()  # foo, myVar, _count

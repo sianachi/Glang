@@ -140,281 +140,288 @@ typedef struct TypeParser TypeParser;
 #define TypeParser__CID ((int64_t)19)
 typedef struct Bp Bp;
 #define Bp__CID ((int64_t)20)
+typedef struct InterpSeg InterpSeg;
+#define InterpSeg__CID ((int64_t)21)
 typedef struct ExprParser ExprParser;
-#define ExprParser__CID ((int64_t)21)
+#define ExprParser__CID ((int64_t)22)
 typedef struct StmtParser StmtParser;
-#define StmtParser__CID ((int64_t)22)
+#define StmtParser__CID ((int64_t)23)
 typedef struct TypeParams TypeParams;
-#define TypeParams__CID ((int64_t)23)
+#define TypeParams__CID ((int64_t)24)
 typedef struct DeclParser DeclParser;
-#define DeclParser__CID ((int64_t)24)
+#define DeclParser__CID ((int64_t)25)
 typedef struct Parser Parser;
-#define Parser__CID ((int64_t)25)
+#define Parser__CID ((int64_t)26)
 typedef struct AnalyzeError AnalyzeError;
-#define AnalyzeError__CID ((int64_t)26)
+#define AnalyzeError__CID ((int64_t)27)
 typedef struct FunctionInfo FunctionInfo;
-#define FunctionInfo__CID ((int64_t)27)
+#define FunctionInfo__CID ((int64_t)28)
 typedef struct ClassInfo ClassInfo;
-#define ClassInfo__CID ((int64_t)28)
+#define ClassInfo__CID ((int64_t)29)
 typedef struct InterfaceInfo InterfaceInfo;
-#define InterfaceInfo__CID ((int64_t)29)
+#define InterfaceInfo__CID ((int64_t)30)
 typedef struct EnumInfo EnumInfo;
-#define EnumInfo__CID ((int64_t)30)
+#define EnumInfo__CID ((int64_t)31)
 typedef struct UnionVariantInfo UnionVariantInfo;
-#define UnionVariantInfo__CID ((int64_t)31)
+#define UnionVariantInfo__CID ((int64_t)32)
 typedef struct UnionInfo UnionInfo;
-#define UnionInfo__CID ((int64_t)32)
+#define UnionInfo__CID ((int64_t)33)
 typedef struct SymEntry SymEntry;
-#define SymEntry__CID ((int64_t)33)
+#define SymEntry__CID ((int64_t)34)
 typedef struct SymbolTable SymbolTable;
-#define SymbolTable__CID ((int64_t)34)
+#define SymbolTable__CID ((int64_t)35)
 typedef struct GlobalEnv GlobalEnv;
-#define GlobalEnv__CID ((int64_t)35)
+#define GlobalEnv__CID ((int64_t)36)
 typedef struct UsingContext UsingContext;
-#define UsingContext__CID ((int64_t)36)
+#define UsingContext__CID ((int64_t)37)
 typedef struct FlatDecl FlatDecl;
-#define FlatDecl__CID ((int64_t)37)
+#define FlatDecl__CID ((int64_t)38)
 typedef struct NamespaceResolver NamespaceResolver;
-#define NamespaceResolver__CID ((int64_t)38)
+#define NamespaceResolver__CID ((int64_t)39)
 typedef struct WorkItem WorkItem;
-#define WorkItem__CID ((int64_t)39)
+#define WorkItem__CID ((int64_t)40)
 typedef struct InstanceArgs InstanceArgs;
-#define InstanceArgs__CID ((int64_t)40)
+#define InstanceArgs__CID ((int64_t)41)
 typedef struct ArgsOpt ArgsOpt;
-#define ArgsOpt__CID ((int64_t)41)
+#define ArgsOpt__CID ((int64_t)42)
 typedef struct Monomorphizer Monomorphizer;
-#define Monomorphizer__CID ((int64_t)42)
+#define Monomorphizer__CID ((int64_t)43)
 typedef struct ClosureContext ClosureContext;
-#define ClosureContext__CID ((int64_t)43)
+#define ClosureContext__CID ((int64_t)44)
 typedef struct Pass2Checker Pass2Checker;
-#define Pass2Checker__CID ((int64_t)44)
+#define Pass2Checker__CID ((int64_t)45)
 typedef struct LoadError LoadError;
-#define LoadError__CID ((int64_t)45)
+#define LoadError__CID ((int64_t)46)
 typedef struct Loader Loader;
-#define Loader__CID ((int64_t)46)
+#define Loader__CID ((int64_t)47)
 typedef struct CEmit CEmit;
-#define CEmit__CID ((int64_t)47)
+#define CEmit__CID ((int64_t)48)
 typedef struct List_string List_string;
-#define List_string__CID ((int64_t)48)
+#define List_string__CID ((int64_t)49)
 typedef struct Map_string_TokenType Map_string_TokenType;
-#define Map_string_TokenType__CID ((int64_t)49)
+#define Map_string_TokenType__CID ((int64_t)50)
 typedef struct List_Token List_Token;
-#define List_Token__CID ((int64_t)50)
+#define List_Token__CID ((int64_t)51)
 typedef struct List_TypeNode List_TypeNode;
-#define List_TypeNode__CID ((int64_t)51)
+#define List_TypeNode__CID ((int64_t)52)
 typedef struct List_Expr List_Expr;
-#define List_Expr__CID ((int64_t)52)
+#define List_Expr__CID ((int64_t)53)
 typedef struct List_Param List_Param;
-#define List_Param__CID ((int64_t)53)
+#define List_Param__CID ((int64_t)54)
 typedef struct List_Stmt List_Stmt;
-#define List_Stmt__CID ((int64_t)54)
+#define List_Stmt__CID ((int64_t)55)
 typedef struct List_CatchClause List_CatchClause;
-#define List_CatchClause__CID ((int64_t)55)
+#define List_CatchClause__CID ((int64_t)56)
 typedef struct List_MatchArm List_MatchArm;
-#define List_MatchArm__CID ((int64_t)56)
+#define List_MatchArm__CID ((int64_t)57)
 typedef struct List_FieldDecl List_FieldDecl;
-#define List_FieldDecl__CID ((int64_t)57)
+#define List_FieldDecl__CID ((int64_t)58)
 typedef struct Map_string_TypeNode Map_string_TypeNode;
-#define Map_string_TypeNode__CID ((int64_t)58)
+#define Map_string_TypeNode__CID ((int64_t)59)
 typedef struct List_StaticFieldDecl List_StaticFieldDecl;
-#define List_StaticFieldDecl__CID ((int64_t)59)
+#define List_StaticFieldDecl__CID ((int64_t)60)
 typedef struct List_MethodDecl List_MethodDecl;
-#define List_MethodDecl__CID ((int64_t)60)
+#define List_MethodDecl__CID ((int64_t)61)
 typedef struct List_EnumVariant List_EnumVariant;
-#define List_EnumVariant__CID ((int64_t)61)
+#define List_EnumVariant__CID ((int64_t)62)
 typedef struct List_Decl List_Decl;
-#define List_Decl__CID ((int64_t)62)
+#define List_Decl__CID ((int64_t)63)
 typedef struct List_UnionVariant List_UnionVariant;
-#define List_UnionVariant__CID ((int64_t)63)
+#define List_UnionVariant__CID ((int64_t)64)
+typedef struct List_InterpSeg List_InterpSeg;
+#define List_InterpSeg__CID ((int64_t)65)
 typedef struct Map_string_FieldDecl Map_string_FieldDecl;
-#define Map_string_FieldDecl__CID ((int64_t)64)
+#define Map_string_FieldDecl__CID ((int64_t)66)
 typedef struct Map_string_StaticFieldDecl Map_string_StaticFieldDecl;
-#define Map_string_StaticFieldDecl__CID ((int64_t)65)
+#define Map_string_StaticFieldDecl__CID ((int64_t)67)
 typedef struct Map_string_MethodDecl Map_string_MethodDecl;
-#define Map_string_MethodDecl__CID ((int64_t)66)
+#define Map_string_MethodDecl__CID ((int64_t)68)
 typedef struct Map_string_int Map_string_int;
-#define Map_string_int__CID ((int64_t)67)
+#define Map_string_int__CID ((int64_t)69)
 typedef struct Map_string_UnionVariantInfo Map_string_UnionVariantInfo;
-#define Map_string_UnionVariantInfo__CID ((int64_t)68)
+#define Map_string_UnionVariantInfo__CID ((int64_t)70)
 typedef struct Map_string_SymEntry Map_string_SymEntry;
-#define Map_string_SymEntry__CID ((int64_t)69)
+#define Map_string_SymEntry__CID ((int64_t)71)
 typedef struct Map_string_FunctionInfo Map_string_FunctionInfo;
-#define Map_string_FunctionInfo__CID ((int64_t)70)
+#define Map_string_FunctionInfo__CID ((int64_t)72)
 typedef struct Map_string_ClassInfo Map_string_ClassInfo;
-#define Map_string_ClassInfo__CID ((int64_t)71)
+#define Map_string_ClassInfo__CID ((int64_t)73)
 typedef struct Map_string_InterfaceInfo Map_string_InterfaceInfo;
-#define Map_string_InterfaceInfo__CID ((int64_t)72)
+#define Map_string_InterfaceInfo__CID ((int64_t)74)
 typedef struct Map_string_EnumInfo Map_string_EnumInfo;
-#define Map_string_EnumInfo__CID ((int64_t)73)
+#define Map_string_EnumInfo__CID ((int64_t)75)
 typedef struct Map_string_UnionInfo Map_string_UnionInfo;
-#define Map_string_UnionInfo__CID ((int64_t)74)
+#define Map_string_UnionInfo__CID ((int64_t)76)
 typedef struct Map_string_Map_string_MethodDecl Map_string_Map_string_MethodDecl;
-#define Map_string_Map_string_MethodDecl__CID ((int64_t)75)
+#define Map_string_Map_string_MethodDecl__CID ((int64_t)77)
 typedef struct Map_string_string Map_string_string;
-#define Map_string_string__CID ((int64_t)76)
+#define Map_string_string__CID ((int64_t)78)
 typedef struct Map_string_bool Map_string_bool;
-#define Map_string_bool__CID ((int64_t)77)
+#define Map_string_bool__CID ((int64_t)79)
 typedef struct List_List_string List_List_string;
-#define List_List_string__CID ((int64_t)78)
+#define List_List_string__CID ((int64_t)80)
 typedef struct List_FlatDecl List_FlatDecl;
-#define List_FlatDecl__CID ((int64_t)79)
+#define List_FlatDecl__CID ((int64_t)81)
 typedef struct Map_string_Decl Map_string_Decl;
-#define Map_string_Decl__CID ((int64_t)80)
+#define Map_string_Decl__CID ((int64_t)82)
 typedef struct Map_string_List_string Map_string_List_string;
-#define Map_string_List_string__CID ((int64_t)81)
+#define Map_string_List_string__CID ((int64_t)83)
 typedef struct Map_string_InstanceArgs Map_string_InstanceArgs;
-#define Map_string_InstanceArgs__CID ((int64_t)82)
+#define Map_string_InstanceArgs__CID ((int64_t)84)
 typedef struct List_Map_string_TypeNode List_Map_string_TypeNode;
-#define List_Map_string_TypeNode__CID ((int64_t)83)
+#define List_Map_string_TypeNode__CID ((int64_t)85)
 typedef struct List_WorkItem List_WorkItem;
-#define List_WorkItem__CID ((int64_t)84)
+#define List_WorkItem__CID ((int64_t)86)
 typedef struct Map_string_List_Decl Map_string_List_Decl;
-#define Map_string_List_Decl__CID ((int64_t)85)
+#define Map_string_List_Decl__CID ((int64_t)87)
 typedef struct List_ClosureContext List_ClosureContext;
-#define List_ClosureContext__CID ((int64_t)86)
+#define List_ClosureContext__CID ((int64_t)88)
 typedef struct List_Map_string_string List_Map_string_string;
-#define List_Map_string_string__CID ((int64_t)87)
+#define List_Map_string_string__CID ((int64_t)89)
 typedef struct Span_string Span_string;
-#define Span_string__CID ((int64_t)88)
+#define Span_string__CID ((int64_t)90)
 typedef struct Span_Token Span_Token;
-#define Span_Token__CID ((int64_t)89)
+#define Span_Token__CID ((int64_t)91)
 typedef struct Span_TypeNode Span_TypeNode;
-#define Span_TypeNode__CID ((int64_t)90)
+#define Span_TypeNode__CID ((int64_t)92)
 typedef struct Span_Expr Span_Expr;
-#define Span_Expr__CID ((int64_t)91)
+#define Span_Expr__CID ((int64_t)93)
 typedef struct Span_Param Span_Param;
-#define Span_Param__CID ((int64_t)92)
+#define Span_Param__CID ((int64_t)94)
 typedef struct Span_Stmt Span_Stmt;
-#define Span_Stmt__CID ((int64_t)93)
+#define Span_Stmt__CID ((int64_t)95)
 typedef struct Span_CatchClause Span_CatchClause;
-#define Span_CatchClause__CID ((int64_t)94)
+#define Span_CatchClause__CID ((int64_t)96)
 typedef struct Span_MatchArm Span_MatchArm;
-#define Span_MatchArm__CID ((int64_t)95)
+#define Span_MatchArm__CID ((int64_t)97)
 typedef struct Span_FieldDecl Span_FieldDecl;
-#define Span_FieldDecl__CID ((int64_t)96)
+#define Span_FieldDecl__CID ((int64_t)98)
 typedef struct Span_StaticFieldDecl Span_StaticFieldDecl;
-#define Span_StaticFieldDecl__CID ((int64_t)97)
+#define Span_StaticFieldDecl__CID ((int64_t)99)
 typedef struct Span_MethodDecl Span_MethodDecl;
-#define Span_MethodDecl__CID ((int64_t)98)
+#define Span_MethodDecl__CID ((int64_t)100)
 typedef struct Span_EnumVariant Span_EnumVariant;
-#define Span_EnumVariant__CID ((int64_t)99)
+#define Span_EnumVariant__CID ((int64_t)101)
 typedef struct Span_Decl Span_Decl;
-#define Span_Decl__CID ((int64_t)100)
+#define Span_Decl__CID ((int64_t)102)
 typedef struct Span_UnionVariant Span_UnionVariant;
-#define Span_UnionVariant__CID ((int64_t)101)
+#define Span_UnionVariant__CID ((int64_t)103)
+typedef struct Span_InterpSeg Span_InterpSeg;
+#define Span_InterpSeg__CID ((int64_t)104)
 typedef struct Span_List_string Span_List_string;
-#define Span_List_string__CID ((int64_t)102)
+#define Span_List_string__CID ((int64_t)105)
 typedef struct Span_FlatDecl Span_FlatDecl;
-#define Span_FlatDecl__CID ((int64_t)103)
+#define Span_FlatDecl__CID ((int64_t)106)
 typedef struct Span_Map_string_TypeNode Span_Map_string_TypeNode;
-#define Span_Map_string_TypeNode__CID ((int64_t)104)
+#define Span_Map_string_TypeNode__CID ((int64_t)107)
 typedef struct Span_WorkItem Span_WorkItem;
-#define Span_WorkItem__CID ((int64_t)105)
+#define Span_WorkItem__CID ((int64_t)108)
 typedef struct Span_ClosureContext Span_ClosureContext;
-#define Span_ClosureContext__CID ((int64_t)106)
+#define Span_ClosureContext__CID ((int64_t)109)
 typedef struct Span_Map_string_string Span_Map_string_string;
-#define Span_Map_string_string__CID ((int64_t)107)
+#define Span_Map_string_string__CID ((int64_t)110)
 typedef int64_t TokenType;
 #define TokenType__INT_LIT ((int64_t)0)
 #define TokenType__FLOAT_LIT ((int64_t)1)
 #define TokenType__CHAR_LIT ((int64_t)2)
 #define TokenType__STRING_LIT ((int64_t)3)
-#define TokenType__IDENT ((int64_t)4)
-#define TokenType__KW_INT ((int64_t)5)
-#define TokenType__KW_FLOAT ((int64_t)6)
-#define TokenType__KW_BOOL ((int64_t)7)
-#define TokenType__KW_CHAR ((int64_t)8)
-#define TokenType__KW_BYTE ((int64_t)9)
-#define TokenType__KW_STRING ((int64_t)10)
-#define TokenType__KW_VOID ((int64_t)11)
-#define TokenType__KW_VAR ((int64_t)12)
-#define TokenType__KW_TRUE ((int64_t)13)
-#define TokenType__KW_FALSE ((int64_t)14)
-#define TokenType__KW_NULL ((int64_t)15)
-#define TokenType__KW_CLASS ((int64_t)16)
-#define TokenType__KW_INTERFACE ((int64_t)17)
-#define TokenType__KW_EXTENDS ((int64_t)18)
-#define TokenType__KW_IMPLEMENTS ((int64_t)19)
-#define TokenType__KW_THIS ((int64_t)20)
-#define TokenType__KW_SUPER ((int64_t)21)
-#define TokenType__KW_NEW ((int64_t)22)
-#define TokenType__KW_DELETE ((int64_t)23)
-#define TokenType__KW_STATIC ((int64_t)24)
-#define TokenType__KW_ALLOC ((int64_t)25)
-#define TokenType__KW_FREE ((int64_t)26)
-#define TokenType__KW_IF ((int64_t)27)
-#define TokenType__KW_ELSE ((int64_t)28)
-#define TokenType__KW_WHILE ((int64_t)29)
-#define TokenType__KW_FOR ((int64_t)30)
-#define TokenType__KW_DO ((int64_t)31)
-#define TokenType__KW_FOREACH ((int64_t)32)
-#define TokenType__KW_IN ((int64_t)33)
-#define TokenType__KW_BREAK ((int64_t)34)
-#define TokenType__KW_CONTINUE ((int64_t)35)
-#define TokenType__KW_RETURN ((int64_t)36)
-#define TokenType__KW_IMPORT ((int64_t)37)
-#define TokenType__KW_FN ((int64_t)38)
-#define TokenType__KW_ENUM ((int64_t)39)
-#define TokenType__KW_NAMESPACE ((int64_t)40)
-#define TokenType__KW_USING ((int64_t)41)
-#define TokenType__KW_CONST ((int64_t)42)
-#define TokenType__KW_PRIVATE ((int64_t)43)
-#define TokenType__KW_PROTECTED ((int64_t)44)
-#define TokenType__KW_PUBLIC ((int64_t)45)
-#define TokenType__KW_MODIFIER ((int64_t)46)
-#define TokenType__KW_MANAGED ((int64_t)47)
-#define TokenType__KW_TRY ((int64_t)48)
-#define TokenType__KW_CATCH ((int64_t)49)
-#define TokenType__KW_THROW ((int64_t)50)
-#define TokenType__PLUS ((int64_t)51)
-#define TokenType__MINUS ((int64_t)52)
-#define TokenType__STAR ((int64_t)53)
-#define TokenType__SLASH ((int64_t)54)
-#define TokenType__PERCENT ((int64_t)55)
-#define TokenType__AT ((int64_t)56)
-#define TokenType__AMP ((int64_t)57)
-#define TokenType__PIPE ((int64_t)58)
-#define TokenType__CARET ((int64_t)59)
-#define TokenType__TILDE ((int64_t)60)
-#define TokenType__LSHIFT ((int64_t)61)
-#define TokenType__RSHIFT ((int64_t)62)
-#define TokenType__AND ((int64_t)63)
-#define TokenType__OR ((int64_t)64)
-#define TokenType__BANG ((int64_t)65)
-#define TokenType__EQ ((int64_t)66)
-#define TokenType__NEQ ((int64_t)67)
-#define TokenType__LT ((int64_t)68)
-#define TokenType__LTE ((int64_t)69)
-#define TokenType__GT ((int64_t)70)
-#define TokenType__GTE ((int64_t)71)
-#define TokenType__ASSIGN ((int64_t)72)
-#define TokenType__PLUS_ASSIGN ((int64_t)73)
-#define TokenType__MINUS_ASSIGN ((int64_t)74)
-#define TokenType__STAR_ASSIGN ((int64_t)75)
-#define TokenType__SLASH_ASSIGN ((int64_t)76)
-#define TokenType__PERCENT_ASSIGN ((int64_t)77)
-#define TokenType__AMP_ASSIGN ((int64_t)78)
-#define TokenType__PIPE_ASSIGN ((int64_t)79)
-#define TokenType__CARET_ASSIGN ((int64_t)80)
-#define TokenType__LSHIFT_ASSIGN ((int64_t)81)
-#define TokenType__RSHIFT_ASSIGN ((int64_t)82)
-#define TokenType__PLUS_PLUS ((int64_t)83)
-#define TokenType__MINUS_MINUS ((int64_t)84)
-#define TokenType__QUESTION ((int64_t)85)
-#define TokenType__QUESTION_QUESTION ((int64_t)86)
-#define TokenType__LBRACE ((int64_t)87)
-#define TokenType__RBRACE ((int64_t)88)
-#define TokenType__LPAREN ((int64_t)89)
-#define TokenType__RPAREN ((int64_t)90)
-#define TokenType__LBRACKET ((int64_t)91)
-#define TokenType__RBRACKET ((int64_t)92)
-#define TokenType__SEMICOLON ((int64_t)93)
-#define TokenType__COMMA ((int64_t)94)
-#define TokenType__DOT ((int64_t)95)
-#define TokenType__ARROW ((int64_t)96)
-#define TokenType__COLON ((int64_t)97)
-#define TokenType__COLONCOLON ((int64_t)98)
-#define TokenType__EOF ((int64_t)99)
+#define TokenType__INTERP_STRING ((int64_t)4)
+#define TokenType__IDENT ((int64_t)5)
+#define TokenType__KW_INT ((int64_t)6)
+#define TokenType__KW_FLOAT ((int64_t)7)
+#define TokenType__KW_BOOL ((int64_t)8)
+#define TokenType__KW_CHAR ((int64_t)9)
+#define TokenType__KW_BYTE ((int64_t)10)
+#define TokenType__KW_STRING ((int64_t)11)
+#define TokenType__KW_VOID ((int64_t)12)
+#define TokenType__KW_VAR ((int64_t)13)
+#define TokenType__KW_TRUE ((int64_t)14)
+#define TokenType__KW_FALSE ((int64_t)15)
+#define TokenType__KW_NULL ((int64_t)16)
+#define TokenType__KW_CLASS ((int64_t)17)
+#define TokenType__KW_INTERFACE ((int64_t)18)
+#define TokenType__KW_EXTENDS ((int64_t)19)
+#define TokenType__KW_IMPLEMENTS ((int64_t)20)
+#define TokenType__KW_THIS ((int64_t)21)
+#define TokenType__KW_SUPER ((int64_t)22)
+#define TokenType__KW_NEW ((int64_t)23)
+#define TokenType__KW_DELETE ((int64_t)24)
+#define TokenType__KW_STATIC ((int64_t)25)
+#define TokenType__KW_ALLOC ((int64_t)26)
+#define TokenType__KW_FREE ((int64_t)27)
+#define TokenType__KW_IF ((int64_t)28)
+#define TokenType__KW_ELSE ((int64_t)29)
+#define TokenType__KW_WHILE ((int64_t)30)
+#define TokenType__KW_FOR ((int64_t)31)
+#define TokenType__KW_DO ((int64_t)32)
+#define TokenType__KW_FOREACH ((int64_t)33)
+#define TokenType__KW_IN ((int64_t)34)
+#define TokenType__KW_BREAK ((int64_t)35)
+#define TokenType__KW_CONTINUE ((int64_t)36)
+#define TokenType__KW_RETURN ((int64_t)37)
+#define TokenType__KW_IMPORT ((int64_t)38)
+#define TokenType__KW_FN ((int64_t)39)
+#define TokenType__KW_ENUM ((int64_t)40)
+#define TokenType__KW_NAMESPACE ((int64_t)41)
+#define TokenType__KW_USING ((int64_t)42)
+#define TokenType__KW_CONST ((int64_t)43)
+#define TokenType__KW_PRIVATE ((int64_t)44)
+#define TokenType__KW_PROTECTED ((int64_t)45)
+#define TokenType__KW_PUBLIC ((int64_t)46)
+#define TokenType__KW_MODIFIER ((int64_t)47)
+#define TokenType__KW_MANAGED ((int64_t)48)
+#define TokenType__KW_TRY ((int64_t)49)
+#define TokenType__KW_CATCH ((int64_t)50)
+#define TokenType__KW_THROW ((int64_t)51)
+#define TokenType__PLUS ((int64_t)52)
+#define TokenType__MINUS ((int64_t)53)
+#define TokenType__STAR ((int64_t)54)
+#define TokenType__SLASH ((int64_t)55)
+#define TokenType__PERCENT ((int64_t)56)
+#define TokenType__AT ((int64_t)57)
+#define TokenType__AMP ((int64_t)58)
+#define TokenType__PIPE ((int64_t)59)
+#define TokenType__CARET ((int64_t)60)
+#define TokenType__TILDE ((int64_t)61)
+#define TokenType__LSHIFT ((int64_t)62)
+#define TokenType__RSHIFT ((int64_t)63)
+#define TokenType__AND ((int64_t)64)
+#define TokenType__OR ((int64_t)65)
+#define TokenType__BANG ((int64_t)66)
+#define TokenType__EQ ((int64_t)67)
+#define TokenType__NEQ ((int64_t)68)
+#define TokenType__LT ((int64_t)69)
+#define TokenType__LTE ((int64_t)70)
+#define TokenType__GT ((int64_t)71)
+#define TokenType__GTE ((int64_t)72)
+#define TokenType__ASSIGN ((int64_t)73)
+#define TokenType__PLUS_ASSIGN ((int64_t)74)
+#define TokenType__MINUS_ASSIGN ((int64_t)75)
+#define TokenType__STAR_ASSIGN ((int64_t)76)
+#define TokenType__SLASH_ASSIGN ((int64_t)77)
+#define TokenType__PERCENT_ASSIGN ((int64_t)78)
+#define TokenType__AMP_ASSIGN ((int64_t)79)
+#define TokenType__PIPE_ASSIGN ((int64_t)80)
+#define TokenType__CARET_ASSIGN ((int64_t)81)
+#define TokenType__LSHIFT_ASSIGN ((int64_t)82)
+#define TokenType__RSHIFT_ASSIGN ((int64_t)83)
+#define TokenType__PLUS_PLUS ((int64_t)84)
+#define TokenType__MINUS_MINUS ((int64_t)85)
+#define TokenType__QUESTION ((int64_t)86)
+#define TokenType__QUESTION_QUESTION ((int64_t)87)
+#define TokenType__LBRACE ((int64_t)88)
+#define TokenType__RBRACE ((int64_t)89)
+#define TokenType__LPAREN ((int64_t)90)
+#define TokenType__RPAREN ((int64_t)91)
+#define TokenType__LBRACKET ((int64_t)92)
+#define TokenType__RBRACKET ((int64_t)93)
+#define TokenType__SEMICOLON ((int64_t)94)
+#define TokenType__COMMA ((int64_t)95)
+#define TokenType__DOT ((int64_t)96)
+#define TokenType__ARROW ((int64_t)97)
+#define TokenType__COLON ((int64_t)98)
+#define TokenType__COLONCOLON ((int64_t)99)
+#define TokenType__EOF ((int64_t)100)
 
 struct Exception {
     int64_t __cid;
@@ -1340,6 +1347,12 @@ struct Bp {
     int64_t right;
 };
 
+struct InterpSeg {
+    int64_t __cid;
+    int isHole;
+    char* text;
+};
+
 struct ExprParser {
     int64_t __cid;
     TokenStream* s;
@@ -1688,6 +1701,13 @@ struct List_UnionVariant {
     int64_t size;
 };
 
+struct List_InterpSeg {
+    int64_t __cid;
+    InterpSeg** data;
+    int64_t cap;
+    int64_t size;
+};
+
 struct Map_string_FieldDecl {
     int64_t __cid;
     char** keys;
@@ -1972,6 +1992,13 @@ struct Span_UnionVariant {
     int64_t len;
 };
 
+struct Span_InterpSeg {
+    int64_t __cid;
+    InterpSeg** data;
+    int64_t off;
+    int64_t len;
+};
+
 struct Span_List_string {
     int64_t __cid;
     List_string** data;
@@ -2074,6 +2101,7 @@ Token* GLexer__lexIdent(GLexer* self, int64_t line, int64_t col, Map_string_Toke
 Token* GLexer__lexNumber(GLexer* self, int64_t line, int64_t col);
 char GLexer__readEscape(GLexer* self);
 Token* GLexer__lexString(GLexer* self, int64_t line, int64_t col);
+Token* GLexer__lexInterpString(GLexer* self, int64_t line, int64_t col);
 Token* GLexer__lexChar(GLexer* self, int64_t line, int64_t col);
 Token* GLexer__lexOp(GLexer* self, int64_t line, int64_t col);
 List_Token* GLexer__tokenize(GLexer* self);
@@ -2162,6 +2190,10 @@ Bp* Bp_new(int64_t l, int64_t r);
 void Bp__init(Bp* self, int64_t l, int64_t r);
 void Bp_delete(Bp* self);
 Bp* infixBp(TokenType t);
+InterpSeg* InterpSeg_new(int isHole, char* text);
+void InterpSeg__init(InterpSeg* self, int isHole, char* text);
+void InterpSeg_delete(InterpSeg* self);
+int64_t interpHexDigit(char c);
 ExprParser* ExprParser_new(TokenStream* stream, TypeParser* typeParser);
 void ExprParser__init(ExprParser* self, TokenStream* stream, TypeParser* typeParser);
 void ExprParser_delete(ExprParser* self);
@@ -2177,6 +2209,9 @@ Expr* ExprParser__parseClosure(ExprParser* self);
 Param* ExprParser__parseClosureParam(ExprParser* self);
 Expr* ExprParser__parseNew(ExprParser* self);
 Expr* ExprParser__parsePostfix(ExprParser* self, Expr* left, int64_t rightBp);
+Expr* ExprParser__desugarInterp(ExprParser* self, char* raw);
+List_InterpSeg* ExprParser__splitInterp(ExprParser* self, char* raw);
+int64_t ExprParser__decodeInterpEscape(ExprParser* self, char* raw, int64_t i, StringBuilder* buf);
 int isAssignOp(TokenType t);
 int isStmtTypeKw(TokenType t);
 StmtParser* StmtParser_new(TokenStream* stream, TypeParser* typeParser, ExprParser* exprParser);
@@ -2850,6 +2885,20 @@ void List_UnionVariant__removeAt(List_UnionVariant* self, int64_t index);
 void List_UnionVariant__clear(List_UnionVariant* self);
 int64_t List_UnionVariant__indexOf(List_UnionVariant* self, UnionVariant* item);
 Span_UnionVariant* List_UnionVariant__span(List_UnionVariant* self);
+List_InterpSeg* List_InterpSeg_new(void);
+void List_InterpSeg__init(List_InterpSeg* self);
+void List_InterpSeg_delete(List_InterpSeg* self);
+int64_t List_InterpSeg__length(List_InterpSeg* self);
+int List_InterpSeg__isEmpty(List_InterpSeg* self);
+void List_InterpSeg___grow(List_InterpSeg* self);
+void List_InterpSeg__add(List_InterpSeg* self, InterpSeg* item);
+InterpSeg* List_InterpSeg__get(List_InterpSeg* self, int64_t index);
+void List_InterpSeg__set(List_InterpSeg* self, int64_t index, InterpSeg* item);
+int List_InterpSeg__contains(List_InterpSeg* self, InterpSeg* item);
+void List_InterpSeg__removeAt(List_InterpSeg* self, int64_t index);
+void List_InterpSeg__clear(List_InterpSeg* self);
+int64_t List_InterpSeg__indexOf(List_InterpSeg* self, InterpSeg* item);
+Span_InterpSeg* List_InterpSeg__span(List_InterpSeg* self);
 Map_string_FieldDecl* Map_string_FieldDecl_new(void);
 void Map_string_FieldDecl__init(Map_string_FieldDecl* self);
 void Map_string_FieldDecl_delete(Map_string_FieldDecl* self);
@@ -3262,6 +3311,14 @@ int Span_UnionVariant__isEmpty(Span_UnionVariant* self);
 UnionVariant* Span_UnionVariant__get(Span_UnionVariant* self, int64_t i);
 void Span_UnionVariant__set(Span_UnionVariant* self, int64_t i, UnionVariant* v);
 Span_UnionVariant* Span_UnionVariant__slice(Span_UnionVariant* self, int64_t start, int64_t end);
+Span_InterpSeg* Span_InterpSeg_new(InterpSeg** data, int64_t off, int64_t len);
+void Span_InterpSeg__init(Span_InterpSeg* self, InterpSeg** data, int64_t off, int64_t len);
+void Span_InterpSeg_delete(Span_InterpSeg* self);
+int64_t Span_InterpSeg__length(Span_InterpSeg* self);
+int Span_InterpSeg__isEmpty(Span_InterpSeg* self);
+InterpSeg* Span_InterpSeg__get(Span_InterpSeg* self, int64_t i);
+void Span_InterpSeg__set(Span_InterpSeg* self, int64_t i, InterpSeg* v);
+Span_InterpSeg* Span_InterpSeg__slice(Span_InterpSeg* self, int64_t start, int64_t end);
 Span_List_string* Span_List_string_new(List_string** data, int64_t off, int64_t len);
 void Span_List_string__init(Span_List_string* self, List_string** data, int64_t off, int64_t len);
 void Span_List_string_delete(Span_List_string* self);
@@ -3645,6 +3702,9 @@ char* tokenName(TokenType t) {
     }
     if ((t == TokenType__STRING_LIT)) {
         return "STRING_LIT";
+    }
+    if ((t == TokenType__INTERP_STRING)) {
+        return "INTERP_STRING";
     }
     if ((t == TokenType__IDENT)) {
         return "IDENT";
@@ -4293,6 +4353,34 @@ Token* GLexer__lexString(GLexer* self, int64_t line, int64_t col) {
     return Token_new(TokenType__STRING_LIT, StringBuilder__build(parts), line, col);
 }
 
+Token* GLexer__lexInterpString(GLexer* self, int64_t line, int64_t col) {
+    GLexer__advance(self);
+    GLexer__advance(self);
+    StringBuilder* parts = StringBuilder_new();
+    while (1) {
+        if (GLexer__atEnd(self)) {
+            GLANG_THROW(LexError_new("unterminated interpolated string", line, col), "LexError");
+        }
+        char c = GLexer__peek(self, 0);
+        if ((c == '"')) {
+            GLexer__advance(self);
+            break;
+        }
+        if ((c == '\n')) {
+            GLANG_THROW(LexError_new("newline inside interpolated string", self->line, self->col), "LexError");
+        }
+        if ((c == '\\')) {
+            StringBuilder__appendChar(parts, GLexer__advance(self));
+            if ((!GLexer__atEnd(self))) {
+                StringBuilder__appendChar(parts, GLexer__advance(self));
+            }
+        } else {
+            StringBuilder__appendChar(parts, GLexer__advance(self));
+        }
+    }
+    return Token_new(TokenType__INTERP_STRING, StringBuilder__build(parts), line, col);
+}
+
 Token* GLexer__lexChar(GLexer* self, int64_t line, int64_t col) {
     GLexer__advance(self);
     if (GLexer__atEnd(self)) {
@@ -4485,13 +4573,17 @@ List_Token* GLexer__tokenize(GLexer* self) {
             if (chars__isDigit(c)) {
                 List_Token__add(tokens, GLexer__lexNumber(self, line, col));
             } else {
-                if ((c == '"')) {
-                    List_Token__add(tokens, GLexer__lexString(self, line, col));
+                if (((c == '$') && (GLexer__peek(self, 1) == '"'))) {
+                    List_Token__add(tokens, GLexer__lexInterpString(self, line, col));
                 } else {
-                    if ((c == '\'')) {
-                        List_Token__add(tokens, GLexer__lexChar(self, line, col));
+                    if ((c == '"')) {
+                        List_Token__add(tokens, GLexer__lexString(self, line, col));
                     } else {
-                        List_Token__add(tokens, GLexer__lexOp(self, line, col));
+                        if ((c == '\'')) {
+                            List_Token__add(tokens, GLexer__lexChar(self, line, col));
+                        } else {
+                            List_Token__add(tokens, GLexer__lexOp(self, line, col));
+                        }
                     }
                 }
             }
@@ -5803,6 +5895,37 @@ Bp* infixBp(TokenType t) {
     return NULL;
 }
 
+void InterpSeg__init(InterpSeg* self, int isHole, char* text) {
+    self->isHole = isHole;
+    self->text = text;
+}
+
+InterpSeg* InterpSeg_new(int isHole, char* text) {
+    InterpSeg* self = (InterpSeg*)calloc(1, sizeof(InterpSeg));
+    self->__cid = InterpSeg__CID;
+    InterpSeg__init(self, isHole, text);
+    return self;
+}
+
+void InterpSeg_delete(InterpSeg* self) {
+    if (self == NULL) return;
+    free(self);
+}
+
+int64_t interpHexDigit(char c) {
+    int64_t v = ((int64_t)(c));
+    if (((v >= 48) && (v <= 57))) {
+        return (v - 48);
+    }
+    if (((v >= 97) && (v <= 102))) {
+        return ((v - 97) + 10);
+    }
+    if (((v >= 65) && (v <= 70))) {
+        return ((v - 65) + 10);
+    }
+    GLANG_THROW(ParseError_new("invalid hex digit in interpolated string", 0, 0), "ParseError");
+}
+
 void ExprParser__init(ExprParser* self, TokenStream* stream, TypeParser* typeParser) {
     self->s = stream;
     self->tp = typeParser;
@@ -5935,6 +6058,10 @@ Expr* ExprParser__parsePrefix(ExprParser* self) {
     if ((t == TokenType__STRING_LIT)) {
         TokenStream__advance(self->s);
         return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__LiteralExpr_new("string", tok->value); __up; });
+    }
+    if ((t == TokenType__INTERP_STRING)) {
+        TokenStream__advance(self->s);
+        return ExprParser__desugarInterp(self, tok->value);
     }
     if ((t == TokenType__IDENT)) {
         TokenStream__advance(self->s);
@@ -6151,6 +6278,135 @@ Expr* ExprParser__parsePostfix(ExprParser* self, Expr* left, int64_t rightBp) {
     char* op = tok->value;
     Expr* right = ExprParser__parseExpr(self, rightBp);
     return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__BinaryExpr_new(left, op, right); __up; });
+}
+
+Expr* ExprParser__desugarInterp(ExprParser* self, char* raw) {
+    List_InterpSeg* segs = ExprParser__splitInterp(self, raw);
+    List_Expr* parts = List_Expr_new();
+    for (int64_t i = 0; (i < List_InterpSeg__length(segs)); (++i)) {
+        InterpSeg* sg = List_InterpSeg__get(segs, i);
+        if (sg->isHole) {
+            GLexer* hl = GLexer_new(sg->text);
+            TokenStream* hs = TokenStream_new(GLexer__tokenize(hl));
+            TypeParser* htp = TypeParser_new(hs);
+            ExprParser* he = ExprParser_new(hs, htp);
+            Expr* hole = ExprParser__parseExpr(he, 0);
+            List_Expr* a = List_Expr_new();
+            List_Expr__add(a, hole);
+            List_Expr__add(parts, ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__CallExpr_new("toString", a, List_TypeNode_new()); __up; }));
+        } else {
+            List_Expr__add(parts, ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__LiteralExpr_new("string", sg->text); __up; }));
+        }
+    }
+    if ((List_Expr__length(parts) == 0)) {
+        return ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__LiteralExpr_new("string", ""); __up; });
+    }
+    Expr* result = List_Expr__get(parts, 0);
+    for (int64_t i = 1; (i < List_Expr__length(parts)); (++i)) {
+        result = ({ Expr* __up = (Expr*)malloc(sizeof(Expr)); *__up = Expr__BinaryExpr_new(result, "+", List_Expr__get(parts, i)); __up; });
+    }
+    return result;
+}
+
+List_InterpSeg* ExprParser__splitInterp(ExprParser* self, char* raw) {
+    List_InterpSeg* segs = List_InterpSeg_new();
+    StringBuilder* buf = StringBuilder_new();
+    int64_t i = 0;
+    int64_t n = (int64_t)strlen(raw);
+    while ((i < n)) {
+        char c = raw[i];
+        if ((c == '{')) {
+            if ((((i + 1) < n) && (raw[(i + 1)] == '{'))) {
+                StringBuilder__appendChar(buf, '{');
+                i = (i + 2);
+            } else {
+                if ((StringBuilder__length(buf) > 0)) {
+                    List_InterpSeg__add(segs, InterpSeg_new(0, StringBuilder__build(buf)));
+                    buf = StringBuilder_new();
+                }
+                int64_t j = (i + 1);
+                StringBuilder* hole = StringBuilder_new();
+                while (((j < n) && (raw[j] != '}'))) {
+                    StringBuilder__appendChar(hole, raw[j]);
+                    j = (j + 1);
+                }
+                if ((j >= n)) {
+                    GLANG_THROW(ParseError_new("unterminated '{' in interpolated string", 0, 0), "ParseError");
+                }
+                char* src = strings__trim(StringBuilder__build(hole));
+                if (((int64_t)strlen(src) == 0)) {
+                    GLANG_THROW(ParseError_new("empty '{}' in interpolated string", 0, 0), "ParseError");
+                }
+                List_InterpSeg__add(segs, InterpSeg_new(1, src));
+                i = (j + 1);
+            }
+        } else {
+            if ((c == '}')) {
+                if ((((i + 1) < n) && (raw[(i + 1)] == '}'))) {
+                    StringBuilder__appendChar(buf, '}');
+                    i = (i + 2);
+                } else {
+                    StringBuilder__appendChar(buf, '}');
+                    i = (i + 1);
+                }
+            } else {
+                if ((c == '\\')) {
+                    i = ExprParser__decodeInterpEscape(self, raw, i, buf);
+                } else {
+                    StringBuilder__appendChar(buf, c);
+                    i = (i + 1);
+                }
+            }
+        }
+    }
+    if ((StringBuilder__length(buf) > 0)) {
+        List_InterpSeg__add(segs, InterpSeg_new(0, StringBuilder__build(buf)));
+    }
+    return segs;
+}
+
+int64_t ExprParser__decodeInterpEscape(ExprParser* self, char* raw, int64_t i, StringBuilder* buf) {
+    if (((i + 1) >= (int64_t)strlen(raw))) {
+        GLANG_THROW(ParseError_new("dangling '\\' in interpolated string", 0, 0), "ParseError");
+    }
+    char e = raw[(i + 1)];
+    if ((e == 'n')) {
+        StringBuilder__appendChar(buf, '\n');
+        return (i + 2);
+    }
+    if ((e == 't')) {
+        StringBuilder__appendChar(buf, '\t');
+        return (i + 2);
+    }
+    if ((e == 'r')) {
+        StringBuilder__appendChar(buf, '\r');
+        return (i + 2);
+    }
+    if ((e == '\\')) {
+        StringBuilder__appendChar(buf, '\\');
+        return (i + 2);
+    }
+    if ((e == '"')) {
+        StringBuilder__appendChar(buf, '"');
+        return (i + 2);
+    }
+    if ((e == '\'')) {
+        StringBuilder__appendChar(buf, '\'');
+        return (i + 2);
+    }
+    if ((e == '0')) {
+        StringBuilder__appendChar(buf, ((char)(0)));
+        return (i + 2);
+    }
+    if ((e == 'x')) {
+        if (((i + 4) > (int64_t)strlen(raw))) {
+            GLANG_THROW(ParseError_new("incomplete '\\x' escape", 0, 0), "ParseError");
+        }
+        int64_t v = ((interpHexDigit(raw[(i + 2)]) * 16) + interpHexDigit(raw[(i + 3)]));
+        StringBuilder__appendChar(buf, ((char)(v)));
+        return (i + 4);
+    }
+    GLANG_THROW(ParseError_new("unknown escape in interpolated string", 0, 0), "ParseError");
 }
 
 int isAssignOp(TokenType t) {
@@ -20770,6 +21026,92 @@ Span_UnionVariant* List_UnionVariant__span(List_UnionVariant* self) {
     return Span_UnionVariant_new(self->data, 0, self->size);
 }
 
+void List_InterpSeg__init(List_InterpSeg* self) {
+    self->cap = 4;
+    self->size = 0;
+    self->data = (InterpSeg**)glang_alloc_n((size_t)(4), sizeof(InterpSeg*));
+}
+
+List_InterpSeg* List_InterpSeg_new(void) {
+    List_InterpSeg* self = (List_InterpSeg*)calloc(1, sizeof(List_InterpSeg));
+    self->__cid = List_InterpSeg__CID;
+    List_InterpSeg__init(self);
+    return self;
+}
+
+void List_InterpSeg_delete(List_InterpSeg* self) {
+    if (self == NULL) return;
+    free(self);
+}
+
+int64_t List_InterpSeg__length(List_InterpSeg* self) {
+    return self->size;
+}
+
+int List_InterpSeg__isEmpty(List_InterpSeg* self) {
+    return (self->size == 0);
+}
+
+void List_InterpSeg___grow(List_InterpSeg* self) {
+    int64_t newcap = (self->cap * 2);
+    InterpSeg** bigger = (InterpSeg**)glang_alloc_n((size_t)(newcap), sizeof(InterpSeg*));
+    for (int64_t i = 0; (i < self->size); (++i)) {
+        bigger[i] = self->data[i];
+    }
+    glang_free(self->data);
+    self->data = bigger;
+    self->cap = newcap;
+}
+
+void List_InterpSeg__add(List_InterpSeg* self, InterpSeg* item) {
+    if ((self->size == self->cap)) {
+        List_InterpSeg___grow(self);
+    }
+    self->data[self->size] = item;
+    self->size = (self->size + 1);
+}
+
+InterpSeg* List_InterpSeg__get(List_InterpSeg* self, int64_t index) {
+    return self->data[index];
+}
+
+void List_InterpSeg__set(List_InterpSeg* self, int64_t index, InterpSeg* item) {
+    self->data[index] = item;
+}
+
+int List_InterpSeg__contains(List_InterpSeg* self, InterpSeg* item) {
+    for (int64_t i = 0; (i < self->size); (++i)) {
+        if ((self->data[i] == item)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void List_InterpSeg__removeAt(List_InterpSeg* self, int64_t index) {
+    for (int64_t i = index; (i < (self->size - 1)); (++i)) {
+        self->data[i] = self->data[(i + 1)];
+    }
+    self->size = (self->size - 1);
+}
+
+void List_InterpSeg__clear(List_InterpSeg* self) {
+    self->size = 0;
+}
+
+int64_t List_InterpSeg__indexOf(List_InterpSeg* self, InterpSeg* item) {
+    for (int64_t i = 0; (i < self->size); (++i)) {
+        if ((self->data[i] == item)) {
+            return i;
+        }
+    }
+    return (-1);
+}
+
+Span_InterpSeg* List_InterpSeg__span(List_InterpSeg* self) {
+    return Span_InterpSeg_new(self->data, 0, self->size);
+}
+
 void Map_string_FieldDecl__init(Map_string_FieldDecl* self) {
     self->cap = 4;
     self->size = 0;
@@ -23598,6 +23940,53 @@ Span_UnionVariant* Span_UnionVariant__slice(Span_UnionVariant* self, int64_t sta
         UnionVariant* junk = self->data[(0 - 1)];
     }
     return Span_UnionVariant_new(self->data, (self->off + start), (end - start));
+}
+
+void Span_InterpSeg__init(Span_InterpSeg* self, InterpSeg** data, int64_t off, int64_t len) {
+    self->data = data;
+    self->off = off;
+    self->len = len;
+}
+
+Span_InterpSeg* Span_InterpSeg_new(InterpSeg** data, int64_t off, int64_t len) {
+    Span_InterpSeg* self = (Span_InterpSeg*)calloc(1, sizeof(Span_InterpSeg));
+    self->__cid = Span_InterpSeg__CID;
+    Span_InterpSeg__init(self, data, off, len);
+    return self;
+}
+
+void Span_InterpSeg_delete(Span_InterpSeg* self) {
+    if (self == NULL) return;
+    free(self);
+}
+
+int64_t Span_InterpSeg__length(Span_InterpSeg* self) {
+    return self->len;
+}
+
+int Span_InterpSeg__isEmpty(Span_InterpSeg* self) {
+    return (self->len == 0);
+}
+
+InterpSeg* Span_InterpSeg__get(Span_InterpSeg* self, int64_t i) {
+    if (((i < 0) || (i >= self->len))) {
+        return self->data[(0 - 1)];
+    }
+    return self->data[(self->off + i)];
+}
+
+void Span_InterpSeg__set(Span_InterpSeg* self, int64_t i, InterpSeg* v) {
+    if (((i < 0) || (i >= self->len))) {
+        self->data[(0 - 1)] = v;
+    }
+    self->data[(self->off + i)] = v;
+}
+
+Span_InterpSeg* Span_InterpSeg__slice(Span_InterpSeg* self, int64_t start, int64_t end) {
+    if ((((start < 0) || (end < start)) || (end > self->len))) {
+        InterpSeg* junk = self->data[(0 - 1)];
+    }
+    return Span_InterpSeg_new(self->data, (self->off + start), (end - start));
 }
 
 void Span_List_string__init(Span_List_string* self, List_string** data, int64_t off, int64_t len) {

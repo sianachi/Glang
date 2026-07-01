@@ -1,0 +1,36 @@
+// interp_demo.lang — string interpolation.
+//
+// `$"...{expr}..."` interpolates: each `{expr}` hole is any expression, converted
+// with toString and concatenated with the surrounding literal text. Use `{{` and
+// `}}` for literal braces. It desugars entirely in the parser, so a hole is just
+// an ordinary expression.
+//
+//   python3 main.py run examples/interp_demo.lang
+
+import "std/string.lang";
+
+class Point {
+    int x;
+    int y;
+    Point(int x, int y) { this.x = x; this.y = y; }
+    string show() { return $"({this.x}, {this.y})"; }
+}
+
+int main() {
+    string name = "Ada";
+    int score = 95;
+    int outof = 100;
+
+    print($"{name} scored {score}/{outof} ({score * 100 / outof}%)");
+    print($"pass = {score >= 60}");
+    print($"literal {{braces}} stay literal");
+
+    Point* p = new Point(3, 4);
+    print($"point p = {p->show()}");
+
+    // Interpolation nests naturally with other expressions and escapes.
+    for (int i = 1; i <= 3; i = i + 1) {
+        print($"row {i}:\t{i * i}");
+    }
+    return 0;
+}

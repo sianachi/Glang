@@ -321,6 +321,31 @@ class GLexer {
         return new Token(TokenType.STRING_LIT, parts.build(), line, col);
     }
 
+    // $"...{expr}..." — capture the verbatim inner text (escapes and braces
+    // preserved); the parser splits and desugars it into concatenation.
+    Token* lexInterpString(int line, int col) {
+        this.advance();   // $
+        this.advance();   // opening "
+        StringBuilder parts = StringBuilder();
+        while (true) {
+            if (this.atEnd()) {
+                throw new LexError("unterminated interpolated string", line, col);
+            }
+            char c = this.peek(0);
+            if (c == '"') { this.advance(); break; }
+            if (c == '\n') {
+                throw new LexError("newline inside interpolated string", this.line, this.col);
+            }
+            if (c == '\\') {
+                parts.appendChar(this.advance());          // backslash, verbatim
+                if (!(this.atEnd())) { parts.appendChar(this.advance()); }
+            } else {
+                parts.appendChar(this.advance());
+            }
+        }
+        return new Token(TokenType.INTERP_STRING, parts.build(), line, col);
+    }
+
     // ------------------------------------------------------------------
     // Char literals
     // ------------------------------------------------------------------
@@ -461,6 +486,8 @@ class GLexer {
                 tokens.add(this.lexIdent(line, col, kw));
             } else if (chars::isDigit(c)) {
                 tokens.add(this.lexNumber(line, col));
+            } else if (c == '$' && this.peek(1) == '"') {
+                tokens.add(this.lexInterpString(line, col));
             } else if (c == '"') {
                 tokens.add(this.lexString(line, col));
             } else if (c == '\'') {

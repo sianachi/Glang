@@ -11,6 +11,7 @@ import "token.lang";
 import "token_stream.lang";
 import "ast.lang";
 import "type_parser.lang";
+import "glexer.lang";
 
 // Infix binding powers (left, right); null means "not an infix operator".
 // Assignment operators are intentionally absent — handled by the statement
@@ -47,6 +48,21 @@ Bp* infixBp(TokenType t) {
     if (t == TokenType.LBRACKET) { return new Bp(141, 0); }
     if (t == TokenType.LPAREN)   { return new Bp(141, 0); }
     return null;
+}
+
+// One segment of an interpolated string: a literal chunk or a `{expr}` hole.
+class InterpSeg {
+    bool isHole;
+    string text;
+    InterpSeg(bool isHole, string text) { this.isHole = isHole; this.text = text; }
+}
+
+int interpHexDigit(char c) {
+    int v = (int)c;
+    if (v >= 48 && v <= 57)  { return v - 48; }        // 0-9
+    if (v >= 97 && v <= 102) { return v - 97 + 10; }   // a-f
+    if (v >= 65 && v <= 70)  { return v - 65 + 10; }   // A-F
+    throw new ParseError("invalid hex digit in interpolated string", 0, 0);
 }
 
 class ExprParser {
@@ -152,6 +168,7 @@ class ExprParser {
         if (t == TokenType.FLOAT_LIT)  { this.s->advance(); return new Expr.LiteralExpr("float", tok->value); }
         if (t == TokenType.CHAR_LIT)   { this.s->advance(); return new Expr.LiteralExpr("char", tok->value); }
         if (t == TokenType.STRING_LIT) { this.s->advance(); return new Expr.LiteralExpr("string", tok->value); }
+        if (t == TokenType.INTERP_STRING) { this.s->advance(); return this.desugarInterp(tok->value); }
 
         if (t == TokenType.IDENT) {
             this.s->advance();
@@ -346,5 +363,85 @@ class ExprParser {
         string op = tok->value;
         Expr* right = this.parseExpr(rightBp);
         return new Expr.BinaryExpr(left, op, right);
+    }
+
+    // ── Interpolated strings ────────────────────────────────────────────
+    // $"lit {expr} lit"  ->  "lit" + toString(expr) + "lit"
+    Expr* desugarInterp(string raw) {
+        List<InterpSeg*> segs = this.splitInterp(raw);
+        List<Expr*> parts = List<Expr*>();
+        for (int i = 0; i < segs.length(); ++i) {
+            InterpSeg* sg = segs.get(i);
+            if (sg->isHole) {
+                GLexer hl = GLexer(sg->text);
+                TokenStream* hs = new TokenStream(hl.tokenize());
+                TypeParser* htp = new TypeParser(hs);
+                ExprParser he = ExprParser(hs, htp);
+                Expr* hole = he.parseExpr(0);
+                List<Expr*> a = List<Expr*>();
+                a.add(hole);
+                parts.add(new Expr.CallExpr("toString", a, List<TypeNode*>()));
+            } else {
+                parts.add(new Expr.LiteralExpr("string", sg->text));
+            }
+        }
+        if (parts.length() == 0) { return new Expr.LiteralExpr("string", ""); }
+        Expr* result = parts.get(0);
+        for (int i = 1; i < parts.length(); ++i) {
+            result = new Expr.BinaryExpr(result, "+", parts.get(i));
+        }
+        return result;
+    }
+
+    List<InterpSeg*> splitInterp(string raw) {
+        List<InterpSeg*> segs = List<InterpSeg*>();
+        StringBuilder buf = StringBuilder();
+        int i = 0;
+        int n = len(raw);
+        while (i < n) {
+            char c = raw[i];
+            if (c == '{') {
+                if (i + 1 < n && raw[i + 1] == '{') { buf.appendChar('{'); i = i + 2; }
+                else {
+                    if (buf.length() > 0) { segs.add(new InterpSeg(false, buf.build())); buf = StringBuilder(); }
+                    int j = i + 1;
+                    StringBuilder hole = StringBuilder();
+                    while (j < n && raw[j] != '}') { hole.appendChar(raw[j]); j = j + 1; }
+                    if (j >= n) { throw new ParseError("unterminated '{' in interpolated string", 0, 0); }
+                    string src = strings::trim(hole.build());
+                    if (len(src) == 0) { throw new ParseError("empty '{}' in interpolated string", 0, 0); }
+                    segs.add(new InterpSeg(true, src));
+                    i = j + 1;
+                }
+            } else if (c == '}') {
+                if (i + 1 < n && raw[i + 1] == '}') { buf.appendChar('}'); i = i + 2; }
+                else { buf.appendChar('}'); i = i + 1; }
+            } else if (c == '\\') {
+                i = this.decodeInterpEscape(raw, i, buf);
+            } else {
+                buf.appendChar(c); i = i + 1;
+            }
+        }
+        if (buf.length() > 0) { segs.add(new InterpSeg(false, buf.build())); }
+        return segs;
+    }
+
+    int decodeInterpEscape(string raw, int i, StringBuilder buf) {
+        if (i + 1 >= len(raw)) { throw new ParseError("dangling '\\' in interpolated string", 0, 0); }
+        char e = raw[i + 1];
+        if (e == 'n')  { buf.appendChar('\n'); return i + 2; }
+        if (e == 't')  { buf.appendChar('\t'); return i + 2; }
+        if (e == 'r')  { buf.appendChar('\r'); return i + 2; }
+        if (e == '\\') { buf.appendChar('\\'); return i + 2; }
+        if (e == '"')  { buf.appendChar('"'); return i + 2; }
+        if (e == '\'') { buf.appendChar('\''); return i + 2; }
+        if (e == '0')  { buf.appendChar((char)0); return i + 2; }
+        if (e == 'x') {
+            if (i + 4 > len(raw)) { throw new ParseError("incomplete '\\x' escape", 0, 0); }
+            int v = interpHexDigit(raw[i + 2]) * 16 + interpHexDigit(raw[i + 3]);
+            buf.appendChar((char)v);
+            return i + 4;
+        }
+        throw new ParseError("unknown escape in interpolated string", 0, 0);
     }
 }

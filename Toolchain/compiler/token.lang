@@ -15,6 +15,7 @@ enum TokenType {
     FLOAT_LIT,
     CHAR_LIT,
     STRING_LIT,
+    INTERP_STRING,
 
     // --- Identifier ---
     IDENT,
@@ -218,6 +219,7 @@ string tokenName(TokenType t) {
     if (t == TokenType.FLOAT_LIT)  { return "FLOAT_LIT"; }
     if (t == TokenType.CHAR_LIT)   { return "CHAR_LIT"; }
     if (t == TokenType.STRING_LIT) { return "STRING_LIT"; }
+    if (t == TokenType.INTERP_STRING) { return "INTERP_STRING"; }
     if (t == TokenType.IDENT)      { return "IDENT"; }
 
     if (t == TokenType.KW_INT)        { return "KW_INT"; }
