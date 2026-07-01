@@ -1,0 +1,168 @@
+// calc.lang — an integer arithmetic calculator.
+//
+// Reads an expression from the command line (or stdin when given no argument),
+// evaluates it, and prints the result. It is a compact recursive-descent
+// calculator: a tokenizer produces a `List<Tok*>` (tokens modelled as a tagged
+// union), a Parser walks them with the usual precedence grammar, and errors
+// (bad characters, unbalanced parentheses, division by zero) are reported by
+// throwing exceptions caught in main.
+//
+//   expr   := term  (('+' | '-') term)*
+//   term   := factor (('*' | '/' | '%') factor)*
+//   factor := '-' factor | '(' expr ')' | NUMBER
+//
+// From the repository root:
+//   python3 bootstrap/main.py run real-world-applications/calc.lang "2 + 3 * (4 - 1)"
+//   echo "10 % 3" | python3 bootstrap/main.py run real-world-applications/calc.lang
+// or compiled (from Toolchain/):
+//   ./glangc ../real-world-applications/calc.lang /tmp/calc.c
+//   gcc -O2 /tmp/calc.c runtime/glang_runtime.c -o /tmp/calc && /tmp/calc "6 * 7"
+
+import "std/list.lang";
+import "std/string.lang";
+import "std/char.lang";
+
+// A token. Operators carry no payload; numbers carry their value.
+union Tok {
+    Num { int value; }
+    Plus { }
+    Minus { }
+    Star { }
+    Slash { }
+    Percent { }
+    LParen { }
+    RParen { }
+    End { }
+}
+
+// ── Tokenizer ───────────────────────────────────────────────────────────────
+
+List<Tok*> tokenize(string src) {
+    List<Tok*> out = List<Tok*>();
+    int n = len(src);
+    int i = 0;
+    while (i < n) {
+        char c = src[i];
+        if (c == ' ' || c == '\t') { i = i + 1; continue; }
+        if (chars::isDigit(c)) {
+            int v = 0;
+            while (i < n && chars::isDigit(src[i])) {
+                v = v * 10 + ((int)(src[i]) - (int)('0'));
+                i = i + 1;
+            }
+            out.add(new Tok.Num(v));
+            continue;
+        }
+        if (c == '+') { out.add(new Tok.Plus()); i = i + 1; continue; }
+        if (c == '-') { out.add(new Tok.Minus()); i = i + 1; continue; }
+        if (c == '*') { out.add(new Tok.Star()); i = i + 1; continue; }
+        if (c == '/') { out.add(new Tok.Slash()); i = i + 1; continue; }
+        if (c == '%') { out.add(new Tok.Percent()); i = i + 1; continue; }
+        if (c == '(') { out.add(new Tok.LParen()); i = i + 1; continue; }
+        if (c == ')') { out.add(new Tok.RParen()); i = i + 1; continue; }
+        throw new Exception("unexpected character '" + toString(c) + "'");
+    }
+    out.add(new Tok.End());
+    return out;
+}
+
+// ── Parser / evaluator ──────────────────────────────────────────────────────
+
+class Parser {
+    List<Tok*> toks;
+    int pos;
+
+    Parser(List<Tok*> toks) {
+        this.toks = toks;
+        this.pos = 0;
+    }
+
+    Tok* peek() { return this.toks.get(this.pos); }
+    void advance() { this.pos = this.pos + 1; }
+
+    int parse() {
+        int v = this.expr();
+        // After a full expression only the End token may remain.
+        match (*(this.peek())) {
+            Tok.End() => { }
+            _ => { throw new Exception("trailing tokens after expression"); }
+        }
+        return v;
+    }
+
+    int expr() {
+        int acc = this.term();
+        bool more = true;
+        while (more) {
+            match (*(this.peek())) {
+                Tok.Plus()  => { this.advance(); acc = acc + this.term(); }
+                Tok.Minus() => { this.advance(); acc = acc - this.term(); }
+                _ => { more = false; }
+            }
+        }
+        return acc;
+    }
+
+    int term() {
+        int acc = this.factor();
+        bool more = true;
+        while (more) {
+            match (*(this.peek())) {
+                Tok.Star()    => { this.advance(); acc = acc * this.factor(); }
+                Tok.Slash()   => { this.advance(); acc = this.divide(acc, this.factor()); }
+                Tok.Percent() => { this.advance(); acc = this.modulo(acc, this.factor()); }
+                _ => { more = false; }
+            }
+        }
+        return acc;
+    }
+
+    int factor() {
+        match (*(this.peek())) {
+            Tok.Minus() => { this.advance(); return -(this.factor()); }
+            Tok.LParen() => {
+                this.advance();
+                int v = this.expr();
+                match (*(this.peek())) {
+                    Tok.RParen() => { this.advance(); }
+                    _ => { throw new Exception("expected ')'"); }
+                }
+                return v;
+            }
+            Tok.Num(value) => { this.advance(); return value; }
+            _ => { throw new Exception("expected a number, '-' or '('"); }
+        }
+    }
+
+    int divide(int a, int b) {
+        if (b == 0) { throw new Exception("division by zero"); }
+        return a / b;
+    }
+
+    int modulo(int a, int b) {
+        if (b == 0) { throw new Exception("division by zero"); }
+        return a % b;
+    }
+}
+
+int main() {
+    string src = "";
+    if (getArgCount() > 0) { src = getArg(0); }
+    else { src = readStdin(); }
+
+    src = strings::trim(src);
+    if (len(src) == 0) {
+        print("usage: calc <expression>");
+        return 1;
+    }
+
+    try {
+        Parser* p = new Parser(tokenize(src));
+        int result = p->parse();
+        print(toString(result));
+    } catch (Exception* e) {
+        print("error: " + e->message);
+        return 1;
+    }
+    return 0;
+}
