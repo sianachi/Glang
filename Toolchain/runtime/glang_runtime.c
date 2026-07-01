@@ -6,6 +6,8 @@
 #include <signal.h>
 #include <dirent.h>
 #include <poll.h>
+#include <termios.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -579,6 +581,102 @@ int64_t glang_readbyte(void) {
 void glang_writestdout(const char* v) {
     if (v) { fputs(v, stdout); }
     fflush(stdout);
+}
+
+/* ── Terminal control (raw mode, size, timed input) ─────────────────────────
+   Primitives for building TUIs. Raw mode disables canonical line-editing and
+   echo so a program sees each keystroke immediately; the original settings are
+   saved and restored on termRawOff and — defensively — via atexit(), so a plain
+   exit() or a return from main() never leaves the user's shell in raw mode.
+   SIGWINCH (resize) and SIGINT are caught into flags the program polls, rather
+   than acted on directly, so the app loop stays in control of when to redraw or
+   quit. In raw mode Ctrl-C arrives as the byte 0x03 (ISIG is off); the SIGINT
+   flag then only reflects an external `kill -INT`. */
+
+static struct termios          glang_term_saved;
+static int                     glang_term_raw_active = 0;
+static volatile sig_atomic_t   glang_term_winch = 0;
+static volatile sig_atomic_t   glang_term_intr  = 0;
+
+static void glang_term_restore(void) {
+    if (glang_term_raw_active) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &glang_term_saved);
+        glang_term_raw_active = 0;
+    }
+}
+static void glang_term_on_winch(int sig) { (void)sig; glang_term_winch = 1; }
+static void glang_term_on_intr(int sig)  { (void)sig; glang_term_intr  = 1; }
+
+/* Enter raw mode. Returns 0 on success, -1 if stdin is not a terminal or a
+   termios call fails. The first successful call saves the original settings,
+   registers the atexit restore, and installs the SIGWINCH/SIGINT handlers. */
+int64_t glang_term_raw_on(void) {
+    struct termios raw;
+    if (!isatty(STDIN_FILENO)) return -1;
+    if (tcgetattr(STDIN_FILENO, &raw) != 0) return -1;
+    if (!glang_term_raw_active) {
+        glang_term_saved = raw;
+        atexit(glang_term_restore);
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = glang_term_on_winch;
+        sigaction(SIGWINCH, &sa, NULL);
+        sa.sa_handler = glang_term_on_intr;
+        sigaction(SIGINT, &sa, NULL);
+    }
+    raw.c_lflag &= ~(tcflag_t)(ECHO | ICANON | ISIG | IEXTEN);
+    raw.c_iflag &= ~(tcflag_t)(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
+    raw.c_oflag &= ~(tcflag_t)(OPOST);
+    raw.c_cflag |=  (tcflag_t)(CS8);
+    raw.c_cc[VMIN]  = 0;   /* read returns immediately; we gate on poll() */
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) != 0) return -1;
+    glang_term_raw_active = 1;
+    return 0;
+}
+
+/* Leave raw mode (restore saved settings). Returns 0. Safe if never entered. */
+int64_t glang_term_raw_off(void) {
+    glang_term_restore();
+    return 0;
+}
+
+/* Terminal width (columns) / height (rows), or -1 if not a sized terminal. */
+int64_t glang_term_width(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || ws.ws_col == 0) return -1;
+    return (int64_t)ws.ws_col;
+}
+int64_t glang_term_height(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || ws.ws_row == 0) return -1;
+    return (int64_t)ws.ws_row;
+}
+
+/* Read one byte from stdin, waiting at most `ms` milliseconds (ms < 0 blocks).
+   Returns the byte (0..255), -1 at EOF, or -2 on timeout or EINTR so the caller
+   can re-check the resize/interrupt flags between polls. */
+int64_t glang_read_byte_timeout(int64_t ms) {
+    struct pollfd pfd;
+    pfd.fd = STDIN_FILENO;
+    pfd.events = POLLIN;
+    int r = poll(&pfd, 1, (ms < 0) ? -1 : (int)ms);
+    if (r <= 0) return -2;                 /* timeout, EINTR, or poll error */
+    unsigned char b;
+    ssize_t n = read(STDIN_FILENO, &b, 1);
+    if (n <= 0) return -1;                 /* EOF */
+    return (int64_t)b;
+}
+
+/* Return-and-clear the SIGWINCH / SIGINT flags (1 if the signal arrived since
+   the last call, else 0). GLang-typed as bool. */
+int64_t glang_term_resized(void) {
+    if (glang_term_winch) { glang_term_winch = 0; return 1; }
+    return 0;
+}
+int64_t glang_term_interrupted(void) {
+    if (glang_term_intr) { glang_term_intr = 0; return 1; }
+    return 0;
 }
 
 /* ── Print ────────────────────────────────────────────────────────────── */

@@ -1062,6 +1062,8 @@ class CEmit {
             Expr.CastExpr(ty, x) => { return showType(ty); }
             Expr.CallExpr(nm, args, ta) => {
                 if (nm == "len" || nm == "parseInt" || nm == "indexOf" || nm == "getArgCount" || nm == "readByte") { return "int"; }
+                if (nm == "termRawOn" || nm == "termRawOff" || nm == "termWidth"
+                    || nm == "termHeight" || nm == "readByteTimeout") { return "int"; }
                 if (nm == "nowNanos" || nm == "wallMillis") { return "int"; }
                 if (nm == "netListen" || nm == "netLocalPort" || nm == "netAccept"
                     || nm == "netConnect" || nm == "netRecv" || nm == "netSend") { return "int"; }
@@ -1072,6 +1074,7 @@ class CEmit {
                 if (nm == "toString" || nm == "substr" || nm == "intToStr" || nm == "readFile" || nm == "readStdin" || nm == "getArg" || nm == "listDir") { return "string"; }
                 if (nm == "parseFloat") { return "float"; }
                 if (nm == "fileExists" || nm == "startsWith" || nm == "endsWith" || nm == "contains" || nm == "netWouldBlock") { return "bool"; }
+                if (nm == "termResized" || nm == "termInterrupted") { return "bool"; }
                 if (this.env->functions.has(nm)) {
                     FunctionInfo* fi = this.env->functions.getOr(nm, null);
                     if (fi != null) { return showType(fi->return_type); }
@@ -1192,6 +1195,13 @@ class CEmit {
         if (name == "readStdin")  { return "glang_readstdin()"; }
         if (name == "readByte")   { return "glang_readbyte()"; }
         if (name == "writeStdout") { return "glang_writestdout(" + this.emitArgs(args) + ")"; }
+        if (name == "termRawOn")   { return "glang_term_raw_on()"; }
+        if (name == "termRawOff")  { return "glang_term_raw_off()"; }
+        if (name == "termWidth")   { return "glang_term_width()"; }
+        if (name == "termHeight")  { return "glang_term_height()"; }
+        if (name == "readByteTimeout") { return "glang_read_byte_timeout(" + this.emitArgs(args) + ")"; }
+        if (name == "termResized")     { return "glang_term_resized()"; }
+        if (name == "termInterrupted") { return "glang_term_interrupted()"; }
         if (name == "nowNanos")   { return "glang_now_nanos()"; }
         if (name == "wallMillis") { return "glang_wall_millis()"; }
         if (name == "sleepMs")    { return "glang_sleep_ms(" + this.emitArgs(args) + ")"; }
@@ -1502,6 +1512,13 @@ class CEmit {
         f.appendLine("char*   glang_readstdin(void);");
         f.appendLine("int64_t glang_readbyte(void);");
         f.appendLine("void    glang_writestdout(const char* v);");
+        f.appendLine("int64_t glang_term_raw_on(void);");
+        f.appendLine("int64_t glang_term_raw_off(void);");
+        f.appendLine("int64_t glang_term_width(void);");
+        f.appendLine("int64_t glang_term_height(void);");
+        f.appendLine("int64_t glang_read_byte_timeout(int64_t ms);");
+        f.appendLine("int64_t glang_term_resized(void);");
+        f.appendLine("int64_t glang_term_interrupted(void);");
         f.appendLine("void* glang_managed_alloc(size_t size);");
         f.appendLine("void  glang_managed_sweep(void);");
         f.appendLine("void* glang_alloc(size_t size);");

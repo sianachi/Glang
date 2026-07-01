@@ -254,6 +254,13 @@ class Interpreter:
         self._net_would_block = False                       # last call hit a would-block
         self._net_errno = 0                                 # last call's errno-ish code
 
+        # term* builtins: raw-mode lifecycle + signal flags (mirror the C runtime).
+        self._term_saved = None                             # saved termios (raw mode off)
+        self._term_raw_active = False
+        self._term_winch = False                            # SIGWINCH since last poll
+        self._term_intr = False                             # SIGINT since last poll
+        self._term_handlers_installed = False
+
     # -- public entry ----------------------------------------------------
 
     def run(self, program: Program) -> int:
@@ -847,6 +854,13 @@ class Interpreter:
             "readStdin",
             "readByte",
             "writeStdout",
+            "termRawOn",
+            "termRawOff",
+            "termWidth",
+            "termHeight",
+            "readByteTimeout",
+            "termResized",
+            "termInterrupted",
             "nowNanos",
             "wallMillis",
             "sleepMs",
@@ -866,6 +880,110 @@ class Interpreter:
             "netWouldBlock",
             "netPoll",
         }
+
+    # -- terminal control (parity with glang_runtime.c term* builtins) ------
+
+    def _install_term_handlers(self) -> None:
+        if self._term_handlers_installed:
+            return
+        import signal as _signal
+        import atexit as _atexit
+
+        def _on_winch(signum, frame):  # noqa: ARG001
+            self._term_winch = True
+
+        def _on_intr(signum, frame):  # noqa: ARG001
+            self._term_intr = True
+
+        try:
+            _signal.signal(_signal.SIGWINCH, _on_winch)
+            _signal.signal(_signal.SIGINT, _on_intr)
+        except (ValueError, OSError):
+            # Not the main thread, or platform without SIGWINCH — flags simply
+            # never fire, which is acceptable degraded behaviour.
+            pass
+        _atexit.register(self._term_raw_off)
+        self._term_handlers_installed = True
+
+    def _term_raw_on(self) -> int:
+        import sys as _sys
+        import os as _os
+        try:
+            fd = _sys.stdin.fileno()
+        except (ValueError, OSError):
+            return -1
+        if not _os.isatty(fd):
+            return -1
+        import termios
+        import tty
+        try:
+            saved = termios.tcgetattr(fd)
+        except termios.error:
+            return -1
+        if not self._term_raw_active:
+            self._term_saved = saved
+            self._install_term_handlers()
+        try:
+            tty.setraw(fd)
+        except termios.error:
+            return -1
+        self._term_raw_active = True
+        return 0
+
+    def _term_raw_off(self) -> int:
+        if self._term_raw_active and self._term_saved is not None:
+            import sys as _sys
+            import termios
+            try:
+                termios.tcsetattr(
+                    _sys.stdin.fileno(), termios.TCSAFLUSH, self._term_saved
+                )
+            except (termios.error, ValueError, OSError):
+                pass
+            self._term_raw_active = False
+        return 0
+
+    def _term_size(self, index: int) -> int:
+        # index 0 -> rows (height), 1 -> cols (width)
+        import sys as _sys
+        try:
+            import fcntl
+            import termios
+            import struct
+
+            packed = fcntl.ioctl(
+                _sys.stdout.fileno(),
+                termios.TIOCGWINSZ,
+                struct.pack("HHHH", 0, 0, 0, 0),
+            )
+            rows, cols, _xp, _yp = struct.unpack("HHHH", packed)
+        except (ImportError, OSError, ValueError):
+            return -1
+        val = rows if index == 0 else cols
+        return val if val > 0 else -1
+
+    def _read_byte_timeout(self, ms: int) -> int:
+        import sys as _sys
+        import os as _os
+        import select as _select
+        try:
+            fd = _sys.stdin.fileno()
+        except (ValueError, OSError):
+            return -1
+        timeout = None if ms < 0 else ms / 1000.0
+        try:
+            ready, _w, _e = _select.select([fd], [], [], timeout)
+        except (OSError, ValueError):
+            return -2
+        if not ready:
+            return -2
+        try:
+            b = _os.read(fd, 1)
+        except OSError:
+            return -1
+        if not b:
+            return -1
+        return b[0]
 
     def _eval_builtin_call(self, expr: CallExpr) -> Value:
         if expr.name == "print":
@@ -1057,6 +1175,26 @@ class Interpreter:
                 _sys.stdout.write(s)
                 _sys.stdout.flush()
             return Value(NamedType("void"), None)
+
+        if expr.name == "termRawOn":
+            return Value(NamedType("int"), self._term_raw_on())
+        if expr.name == "termRawOff":
+            return Value(NamedType("int"), self._term_raw_off())
+        if expr.name == "termWidth":
+            return Value(NamedType("int"), self._term_size(1))
+        if expr.name == "termHeight":
+            return Value(NamedType("int"), self._term_size(0))
+        if expr.name == "readByteTimeout":
+            ms = int(self._eval(expr.args[0]).raw)
+            return Value(NamedType("int"), self._read_byte_timeout(ms))
+        if expr.name == "termResized":
+            v = self._term_winch
+            self._term_winch = False
+            return Value(NamedType("bool"), v)
+        if expr.name == "termInterrupted":
+            v = self._term_intr
+            self._term_intr = False
+            return Value(NamedType("bool"), v)
 
         if expr.name == "nowNanos":
             import time as _time

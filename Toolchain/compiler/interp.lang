@@ -1203,6 +1203,13 @@ class Interp {
         if (name == "readStdin")  { return mkStr(readStdin()); }
         if (name == "readByte")   { return mkInt(readByte()); }
         if (name == "writeStdout") { writeStdout(rawStr(this.eval(args.get(0)))); return mkVoid(); }
+        if (name == "termRawOn")   { return mkInt(termRawOn()); }
+        if (name == "termRawOff")  { return mkInt(termRawOff()); }
+        if (name == "termWidth")   { return mkInt(termWidth()); }
+        if (name == "termHeight")  { return mkInt(termHeight()); }
+        if (name == "readByteTimeout") { return mkInt(readByteTimeout(rawInt(this.eval(args.get(0))))); }
+        if (name == "termResized")     { return mkBool(termResized()); }
+        if (name == "termInterrupted") { return mkBool(termInterrupted()); }
         if (name == "nowNanos")   { return mkInt(nowNanos()); }
         if (name == "wallMillis") { return mkInt(wallMillis()); }
         if (name == "sleepMs")    { sleepMs(rawInt(this.eval(args.get(0)))); return mkVoid(); }

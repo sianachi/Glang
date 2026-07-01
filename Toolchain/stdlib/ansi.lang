@@ -1,0 +1,66 @@
+// std/ansi.lang — ANSI/VT100 escape sequences for terminal UIs.
+//
+// Pure string builders: every function returns the escape string to write with
+// the `writeStdout` builtin. Nothing here touches the terminal directly, so it
+// is trivially testable. Coordinates are 1-based (row 1, col 1 is the top-left),
+// matching the VT100 CUP convention. Colours use the 256-colour palette
+// (`\x1b[38;5;Nm` / `\x1b[48;5;Nm`); the named constants below index into it.
+//
+// The escape prefix is CSI = ESC '[' (0x1b 0x5b). ESC is 0x1b, which is a safe
+// byte in a compiled (NUL-terminated) string.
+
+import "std/string.lang";
+
+namespace ansi {
+
+    // Control introducer: ESC [
+    string csi() { return "\x1b["; }
+
+    // ── Screen & cursor ─────────────────────────────────────────────────
+    string clearScreen() { return "\x1b[2J"; }   // erase entire screen
+    string clearLine()   { return "\x1b[2K"; }   // erase current line
+    string cursorHome()  { return "\x1b[H"; }    // move to row 1, col 1
+    string hideCursor()  { return "\x1b[?25l"; }
+    string showCursor()  { return "\x1b[?25h"; }
+
+    // Move the cursor to (row, col), 1-based.
+    string moveTo(int row, int col) {
+        return "\x1b[" + strings::intToStr(row) + ";" + strings::intToStr(col) + "H";
+    }
+
+    // Alternate screen buffer: enter on startup, leave on exit to restore the
+    // user's scrollback exactly as it was.
+    string enterAlt() { return "\x1b[?1049h"; }
+    string leaveAlt() { return "\x1b[?1049l"; }
+
+    // ── Styling ─────────────────────────────────────────────────────────
+    string reset()     { return "\x1b[0m"; }
+    string bold()      { return "\x1b[1m"; }
+    string dim()       { return "\x1b[2m"; }
+    string italic()    { return "\x1b[3m"; }
+    string underline() { return "\x1b[4m"; }
+    string reverse()   { return "\x1b[7m"; }
+
+    // 256-colour foreground / background. `c` is a palette index 0..255; the
+    // named constants below cover the 16 standard colours.
+    string fg(int c) { return "\x1b[38;5;" + strings::intToStr(c) + "m"; }
+    string bg(int c) { return "\x1b[48;5;" + strings::intToStr(c) + "m"; }
+
+    // Standard 16-colour palette indices.
+    int black()   { return 0; }
+    int red()     { return 1; }
+    int green()   { return 2; }
+    int yellow()  { return 3; }
+    int blue()    { return 4; }
+    int magenta() { return 5; }
+    int cyan()    { return 6; }
+    int white()   { return 7; }
+    int brightBlack()   { return 8; }
+    int brightRed()     { return 9; }
+    int brightGreen()   { return 10; }
+    int brightYellow()  { return 11; }
+    int brightBlue()    { return 12; }
+    int brightMagenta() { return 13; }
+    int brightCyan()    { return 14; }
+    int brightWhite()   { return 15; }
+}

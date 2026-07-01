@@ -372,6 +372,28 @@ TypeNode* check_builtin_call(string name, List<TypeNode*> arg_types, GlobalEnv* 
         ps.add(T("string"));
         return check_callable_args(name, arg_types, ps, T("void"), env);
     }
+    if (name == "termRawOn") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "termRawOff") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "termWidth") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "termHeight") {
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "readByteTimeout") {
+        ps.add(T("int"));
+        return check_callable_args(name, arg_types, ps, T("int"), env);
+    }
+    if (name == "termResized") {
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
+    if (name == "termInterrupted") {
+        return check_callable_args(name, arg_types, ps, T("bool"), env);
+    }
     if (name == "nowNanos") {
         return check_callable_args(name, arg_types, ps, T("int"), env);
     }
